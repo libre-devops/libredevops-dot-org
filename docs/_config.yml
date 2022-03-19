@@ -6,7 +6,7 @@
 # --- Required options --- #
 
 # Name of website
-title: Craig Thacker
+title: Libre DevOps
 
 # Your name to show in the footer
 author: Craig Thacker
@@ -14,12 +14,9 @@ author: Craig Thacker
 # --- List of links in the navigation bar --- #
 
 navbar-links:
-  About Me: "https://craigthacker.dev"
-  Resources:
-    - Azure DevOps: "https://dev.azure.com/craigthackerx/craigthackerx-azdo"
-    - Blog: "https://craigthacker.dev/blog"
-    - Memes: "https://craigthacker.dev/memes"
-
+  About Me: "https://libredevops.org"
+#  Resources:
+#    - test: www.example.com
 # --- Logo --- #
 
 # Image to show in the navigation bar - works best with a square image
@@ -39,13 +36,10 @@ round-avatar: true
 # Select the social network links that you want to show in the footer.
 # Uncomment the links you want to show and add your information to each one.
 social-network-links:
-  email: "craig@craigthacker.dev"
-  github: "craigthackerx"
-  linkedin: "craig-thacker"
-  stackoverflow: "16140100/craig-thacker"
-  terraform-registry: "craigthackerx"
-  docker-hub: "craigthackerx"
-  keybase: "craigthacker"
+  github: "libre-devops"
+  terraform-registry: "libre-devops"
+  docker-hub: "libre-devops"
+  keybase: "https://keybase.io/team/libredevops"
 #  email: "someone@example.com"
 #  facebook: deanattali
 #  github: daattali
@@ -81,7 +75,7 @@ share-links-active:
 
 # How to display the link to your website in the footer
 # Remove this if you don't want a link in the footer
-url-pretty: "craigthacker.dev"
+url-pretty: "libredevops.org"
 
 # Excerpt word length - Truncate the excerpt of each post on the feed page to the specified number of words
 excerpt_length: 50
