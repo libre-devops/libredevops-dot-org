@@ -9,7 +9,7 @@
 title: Libre DevOps
 
 # Your name to show in the footer
-author: Craig Thacker
+author: Libre DevOps
 
 # --- List of links in the navigation bar --- #
 
@@ -38,9 +38,9 @@ round-avatar: true
 social-network-links:
   email: "libredevops@craigthacker.dev"
   github: "libre-devops"
-  terraform-registry: "libre-devops"
-  docker-hub: "libre-devops"
-  keybase: "https://keybase.io/team/libredevops"
+  terraform-registry: "libredevops-su"
+  docker-hub: "libredevops"
+  keybase: "/team/libredevops"
 #  email: "someone@example.com"
 #  facebook: deanattali
 #  github: daattali
