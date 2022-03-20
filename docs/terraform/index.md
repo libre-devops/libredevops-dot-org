@@ -7,5 +7,3 @@ permalink: /terraform
 ---
 
 # Terraform
-
-- [Azure](https://libredevops.org/terraform/azure)
