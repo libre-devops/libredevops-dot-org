@@ -12,12 +12,13 @@ search_tokenizer_separator: /[\s/]+/
 heading_anchors: true
 
 footer_content: >-
-  terraform-compliance made with <span style=\"color: #e25555;\">&hearts;</span>.
-  Distributed by an <a href=\"https://tldrlegal.com/license/mit-license\">MIT license</a>.
+  <a href=\"https://tldrlegal.com/license/mit-license\">Terraform Registry</a>
+  <a href=\"https://hub.docker.com/u/libredevops">Docker Hub</a>
+  <a href=\"https://keybase.io/team/libredevops">Keybase</a>
 
 
 aux_links:
-  "GitHub Org Page":
+  "GitHub Page":
     - "github.com/libre-devops"
 #  "Edit this Page":
 #    - "{{site.github.repository_url}}/tree/master/docs/{{page.path}}"
