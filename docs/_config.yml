@@ -48,12 +48,11 @@ footer_content: >-
         <span class="sr-only">GitHub</span>
      </a>
   </li>
-  
 
 
 aux_links:
-  "Edit this Page":
-    - "{{site.github.repository_url}}/tree/master/docs/{{page.path}}"
+  "View on GitHub":
+    - "https://github.com/libre-devops/libredevops-dot-org"
 
 #theme: just-the-docs
 remote_theme: "just-the-docs/just-the-docs"
