@@ -31,7 +31,7 @@ footer_content: >-
    </a>
   </li>
   <li class="list-inline-item">
-      <a href="https://keybase.io/teams/libredevops" title="Keybase">
+      <a href="https://keybase.io/team/libredevops" title="Keybase">
         <span class="fa-stack fa-lg" aria-hidden="true">
           <i class="fas fa-circle fa-stack-2x"></i>
           <i class="fab fa-keybase fa-stack-1x fa-inverse"></i>
@@ -39,13 +39,21 @@ footer_content: >-
         <span class="sr-only">Keybase</span>
      </a>
     </li>
+  li class="list-inline-item">
+      <a href="https://github.com/libre-devops" title="GitHub">
+        <span class="fa-stack fa-lg" aria-hidden="true">
+          <i class="fas fa-circle fa-stack-2x"></i>
+          <i class="fab fa-github fa-stack-1x fa-inverse"></i>
+        </span>
+        <span class="sr-only">GitHub</span>
+     </a>
+  </li>
+  
 
 
 aux_links:
-  "GitHub Page":
-    - "github.com/libre-devops"
-#  "Edit this Page":
-#    - "{{site.github.repository_url}}/tree/master/docs/{{page.path}}"
+  "Edit this Page":
+    - "{{site.github.repository_url}}/tree/master/docs/{{page.path}}"
 
 #theme: just-the-docs
 remote_theme: "just-the-docs/just-the-docs"
