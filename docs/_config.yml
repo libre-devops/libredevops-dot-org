@@ -21,7 +21,7 @@ footer_content: >-
         <span class="sr-only">Docker Hub</span>
      </a>
     </li>
-  <br><li class="list-inline-item">
+  <li class="list-inline-item">
     <a href="https://registry.terraform.io/namespaces/freelibredevops" title="Terraform Registry">
       <span class="fa-stack fa-lg" aria-hidden="true">
         <i class="fas fa-circle fa-stack-2x"></i>
@@ -36,7 +36,7 @@ footer_content: >-
           <i class="fas fa-circle fa-stack-2x"></i>
           <i class="fab fa-keybase fa-stack-1x fa-inverse"></i>
         </span>
-        <span class="sr-only">Docker Hub</span>
+        <span class="sr-only">Keybase</span>
      </a>
     </li>
 
