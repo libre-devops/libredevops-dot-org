@@ -1,6 +1,7 @@
 ---
 layout: default
 title: Output
+parent: Azure
 nav_order: 101
 has_children: false
 permalink: /terraform/azure/output
