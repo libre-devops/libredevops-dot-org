@@ -12,9 +12,33 @@ search_tokenizer_separator: /[\s/]+/
 heading_anchors: true
 
 footer_content: >-
-  <a href=\"https://tldrlegal.com/license/mit-license\">Terraform Registry</a>
-  <a href=\"https://hub.docker.com/u/libredevops">Docker Hub</a>
-  <a href=\"https://keybase.io/team/libredevops">Keybase</a>
+  <li class="list-inline-item">
+      <a href="https://hub.docker.com/u/libredevops" title="Docker Hub">
+        <span class="fa-stack fa-lg" aria-hidden="true">
+          <i class="fas fa-circle fa-stack-2x"></i>
+          <i class="fab fa-docker fa-stack-1x fa-inverse"></i>
+        </span>
+        <span class="sr-only">Docker Hub</span>
+     </a>
+    </li>
+  <br><li class="list-inline-item">
+    <a href="https://registry.terraform.io/namespaces/freelibredevops" title="Terraform Registry">
+      <span class="fa-stack fa-lg" aria-hidden="true">
+        <i class="fas fa-circle fa-stack-2x"></i>
+        <i class="fas fa-code fa-stack-1x fa-inverse"></i>
+      </span>
+      <span class="sr-only">Terraform Registry</span>
+   </a>
+  </li>
+  <li class="list-inline-item">
+      <a href="https://keybase.io/teams/libredevops" title="Keybase">
+        <span class="fa-stack fa-lg" aria-hidden="true">
+          <i class="fas fa-circle fa-stack-2x"></i>
+          <i class="fab fa-keybase fa-stack-1x fa-inverse"></i>
+        </span>
+        <span class="sr-only">Docker Hub</span>
+     </a>
+    </li>
 
 
 aux_links:
