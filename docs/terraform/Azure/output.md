@@ -2,8 +2,8 @@
 layout: default
 title: Output
 parent: Azure
+grand_parent: Terraform
 nav_order: 101
-has_children: false
 permalink: /terraform/azure/output
 ---
 
