@@ -10,6 +10,7 @@ logo: /assets/img/favicon.ico
 search_enabled: true
 search_tokenizer_separator: /[\s/]+/
 heading_anchors: true
+permalink: pretty
 
 footer_content: >-
   <li class="list-inline-item">
@@ -53,6 +54,9 @@ footer_content: >-
 aux_links:
   "View on GitHub":
     - "https://github.com/libre-devops/libredevops-dot-org"
+
+back_to_top: true
+back_to_top_text: "Back to top"
 
 #theme: just-the-docs
 remote_theme: "just-the-docs/just-the-docs"
