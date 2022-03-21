@@ -1,6 +1,6 @@
 ---
 layout: default
-title: Bash
+title: PowerShell
 nav_order: 200
 parent: Scripts
 has_children: true

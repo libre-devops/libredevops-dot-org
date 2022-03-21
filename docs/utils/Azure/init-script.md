@@ -2,7 +2,7 @@
 layout: default
 title: Init Script Example
 parent: Azure
-grand_parent: utils
+grand_parent: Utils
 nav_order: 301
 permalink: /utils/azure/init-script
 ---
