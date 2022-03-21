@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Output
-parent: Azure
+parent: PowerShell
 grand_parent: Scripts
 nav_order: 203
 permalink: /scripts/powershell/functions

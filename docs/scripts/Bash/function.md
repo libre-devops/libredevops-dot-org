@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Output
-parent: Azure
+parent: Bash
 grand_parent: Scripts
 nav_order: 201
 permalink: /scripts/bash/functions
