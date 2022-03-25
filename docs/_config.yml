@@ -6,7 +6,7 @@ baseurl: "/"
 url: "https://libredevops.org"
 github_username:  freelibredevops
 
-logo: /assets/img/favicon.ico
+logo: /assets/img/libredevops.png
 search_enabled: true
 search_tokenizer_separator: /[\s/]+/
 heading_anchors: true
