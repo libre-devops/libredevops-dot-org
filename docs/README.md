@@ -7,4 +7,4 @@
 
 ## Free & Open Source
 
-Everything you find in this advice is free and open source, including [the site itself]https://github.com/libre-devops/libredevops-dot-org), under the MIT license
+Everything you find in this advice is free and open source, including [the site itself](https://github.com/libre-devops/libredevops-dot-org), under the MIT license
