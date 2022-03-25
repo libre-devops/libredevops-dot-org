@@ -19,8 +19,8 @@ Set-StrictMode -Version Latest
 ########### Edit the below variables to use script ############
 
 $SubscriptionId = "libredevops-sub"
-$ShorthandName = "exm"
-$ShorthandEnv = "crg4"
+$ShorthandName = "lbdo"
+$ShorthandEnv = "dev"
 $ShorthandLocation = "uks"
 
 ########## Do not edit anything below unless you know what you are doing ############
