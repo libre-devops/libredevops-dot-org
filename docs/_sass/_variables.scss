@@ -13,8 +13,8 @@ $theme-white: lighten($black, 99%);
 $theme-black: lighten($black, 15%);
 
 // theme link
-$theme-link: $blue;
-$theme-link-hover: lighten($blue, 10%);
+$theme-link: $green;
+$theme-link-hover: lighten($green, 10%);
 $theme-link-visited: lighten($purple, 10%);
 
 // theme code
@@ -31,4 +31,4 @@ $theme-mask-black: transparentize($theme-black, 0.9);
 $theme-menu-width-sm: 85%;
 $theme-menu-width: 300px;
 $theme-menu-background: darken($theme-black, 10%);
-$theme-menu-active-background: darken($theme-blue, 15%);
+$theme-menu-active-background: darken($theme-green, 15%);
