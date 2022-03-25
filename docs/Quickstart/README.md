@@ -1,7 +1,7 @@
 ---
-sort: 1
+sort: 2
 ---
 
-# Documentation
+# Quickstart
 
 {% include list.liquid all=true %}

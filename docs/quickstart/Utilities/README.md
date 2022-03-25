@@ -1,3 +1,0 @@
-# Utilities
-
-source: `{{ page.path }}`
