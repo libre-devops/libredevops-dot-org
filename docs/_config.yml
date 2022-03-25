@@ -1,4 +1,4 @@
-repository: tomjoht/documentation-theme-jekyll
+repository: libre-devops/libre-devops-dot-org
 
 output: web
 # this property is useful for conditional filtering of content that is separate from the PDF.
@@ -9,20 +9,20 @@ topnav_title: Jekyll Documentation Theme
 site_title: Jekyll theme for documentation
 # this appears in the html browser tab for the site title (seen mostly by search engines, not users)
 
-company_name: Copyright 2021 Google LLC
+#company_name: Copyright 2021 Google LLC
 # this appears in the footer
 
-github_editme_path: tomjoht/documentation-theme-jekyll/blob/gh-pages/
+github_editme_path: libre-devops/libre-devops-dot-rg/blob/gh-pages/
 # if you're using Github, provide the basepath to the branch you've created for reviews, following the sample here. if not, leave this value blank.
 
 # gitlab_editme_path: tomjoht/documentation-theme-jekyll/blob/gh-pages/
 # if you're using GitLab, provide the basepath to the branch you've created for reviews, following the sample here. if not, leave this value blank.
 
-host: 127.0.0.1
-# the preview server used. Leave as is.
-
-port: 4000
-# the port where the preview is rendered. You can leave this as is unless you have other Jekyll builds using this same port that might cause conflicts. in that case, use another port such as 4006.
+#host: 127.0.0.1
+## the preview server used. Leave as is.
+#
+#port: 4000
+## the port where the preview is rendered. You can leave this as is unless you have other Jekyll builds using this same port that might cause conflicts. in that case, use another port such as 4006.
 
 exclude:
   - .idea/
@@ -32,7 +32,7 @@ exclude:
 
 feedback_subject_line: Jekyll documentation theme
 
-feedback_email: tomjoht@gmail.com
+feedback_email: libredevops@craigthacker.dev
 # used as a contact email for the Feedback link in the top navigation bar
 
 # feedback_disable: true
@@ -68,7 +68,7 @@ defaults:
       type: "pages"
     values:
       layout: "page"
-      comments: true
+      comments: false
       # if you don't want to use Commento.io and just hide comments, change true to false wherever you see the comments property
       search: true
       sidebar: home_sidebar
