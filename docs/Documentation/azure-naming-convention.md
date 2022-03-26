@@ -1,7 +1,7 @@
 ---
 sort: 1
 ---
-# Azure Naming Convention Policy files
+# Azure Naming Convention
 
 Hello :wave: and welcome to a example of an Azure naming convention which follows the [Recommended Microsoft abbreviations](https://github.com/MicrosoftDocs/cloud-adoption-framework/blob/main/docs/ready/azure-best-practices/resource-abbreviations.md), fully implemented in  terraform-compliance in the `az-terraform-compliance-policy` folder :smile:.
 
