@@ -7,7 +7,7 @@ Hello :wave: and welcome to a example of an Azure naming convention which follow
 
 This repo hosts the files needed to run a standard name and tagging policy check on your terraform code.
 
-In the future, the project would like to host Azure policy for the same thing, [as soon as they support regex](https://andrewma0tveychuk.com/how-to-enforce-naming-convention-for-azure-resources/#:~:text=Unfortunately%2C%20Azure%20policy%20currently%2doesn,specific%20list%20of%20match%20conditions.) :sweat_smile:
+In the future, the project would like to host Azure policy for the same thing, [as soon as they support regex](https://andrewmatveychuk.com/how-to-enforce-naming-convention-for-azure-resources/#:~:text=Unfortunately%2C%20Azure%20policy%20currently%20doesn,specific%20list%20of%20match%20conditions.) :sweat_smile:
 
 ## Why?
 You probably found this repo looking to implement something similar for your own company, so please feel free to use this version!  but why `terraform-compliance`?
