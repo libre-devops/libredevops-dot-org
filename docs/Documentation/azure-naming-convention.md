@@ -372,4 +372,4 @@ Below here is a table which sets out naming for all resources listed by Microsof
 | `Web Site (Static Web App)`                         | `Microsoft.Web/sites`                                                       | `wts-`       | `prefix`                        | `none`                     | `2-59`                 | `wts-ldo-uks-prd-01`       |
 | `Web Site (Web App)`                                | `Microsoft.Web/sites`                                                       | `app-`       | `prefix`                        | `none`                     | `2-59`                 | `app-ldo-uks-prd-01`       |
 
-source: `{{ page.path }}`
+Source: `{{ page.path }}`
