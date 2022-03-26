@@ -1,4 +1,4 @@
-# Chicken and the Egg - Azure PowerShell - PowerShell
+# "Chicken and the Egg" - Azure PowerShell - PowerShell
 
 - Purpose:
    - You want to use Terraform in Azure
