@@ -52,7 +52,7 @@ variable "loc" {
   default     = "ukw"
 }
 
-variable "Regions" {
+variable "regions" {
   type = map(string)
   default = {
     uks = "UK South"
@@ -63,7 +63,7 @@ variable "Regions" {
 }
 
 locals {
-  location = lookup(var.Regions, var.loc, "UK South")
+  location = lookup(var.regions, var.loc, "UK South")
 }
 ```
 
@@ -71,7 +71,6 @@ locals {
 ```shell
 Changes to Outputs:
   + location_output = "UK West"
-
 ```
 
 Source: `{{ page.path }}`
