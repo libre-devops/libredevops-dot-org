@@ -21,8 +21,8 @@ resource "azurerm_application_security_group" "without_pad" {
   tags                = local.tags
 }
 
-### Example output
 ```
+### Example Output
 
 ```shell
 Changes to Outputs:
