@@ -70,7 +70,7 @@ locals {
 ### Example Output
 ```shell
 Changes to Outputs:
-  + location_output = "UK South"
+  + location_output = "UK West"
 
 ```
 
