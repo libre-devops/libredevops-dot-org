@@ -41,4 +41,37 @@ Changes to Outputs:
     ]
 ```
 
+## Perform longhand conversion for inconsistent naming
+
+Convert longhand name `uksouth` to shorthand `uks` or perform any other match on a key value
+
+```hcl
+variable "loc" {
+  description = "The shorthand name of the Azure location, for example, for UK South, use uks.  For UK West, use ukw. Normally passed as TF_VAR in pipeline"
+  type        = string
+  default     = "ukw"
+}
+
+variable "Regions" {
+  type = map(string)
+  default = {
+    uks = "UK South"
+    ukw = "UK West"
+    eus = "East US"
+  }
+  description = "Converts shorthand name to longhand name via lookup on map list"
+}
+
+locals {
+  location = lookup(var.Regions, var.loc, "UK South")
+}
+```
+
+### Example Output
+```shell
+Changes to Outputs:
+  + location_output = "UK South"
+
+```
+
 Source: `{{ page.path }}`
