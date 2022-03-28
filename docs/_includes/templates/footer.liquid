@@ -7,7 +7,7 @@
                 {%- if prev -%}
                     <a href="{{ prev.url | relative_url }}" class="btn" title="{{ prev.title }}" accesskey="p"
                        rel="prev">
-                        <i class="fa fa-arrow-circle-left"></i> {{ __.previous | default: "Previous" }}
+                        <i class="fa fa-arrow-left"></i> {{ __.previous | default: "Previous" }}
                     </a>
                 {%- endif -%}
             </div>
@@ -15,7 +15,7 @@
                 {%- if next -%}
                     <a href="{{ next.url | relative_url }}" class="btn" title="{{ next.title }}" accesskey="n"
                        rel="next">
-                        {{ __.next | default: "Next" }} <i class="fa fa-arrow-circle-right"></i>
+                        {{ __.next | default: "Next" }} <i class="fa fa-arrow-right"></i>
                     </a>
                 {%- endif -%}
             </div>
