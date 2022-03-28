@@ -54,7 +54,7 @@ To contribute to the main copy:
 - Raise a pull-request with your resources.
 - If it fits the current pattern, it will be merged :bomb:
 
-## Resource Name Construction
+# Resource Name Construction
 
 As a general rule, all names should try to exclude special characters wherever possible and only use alphanumeric.
 
@@ -70,7 +70,7 @@ As a general rule, all names should try to exclude special characters wherever p
 |    `Full Construct`    |  `Example construct of the above descriptions, using psuedocode is - ${prefix}-${infix}-${outfix}-${suffix}, when numbering is applied, it is ${prefix}-${infix}-${outfix}-${suffix}-${numbering}.  In some cases, the names will not container dashes to seperate the construct, for example, storage accounts, this will be reflected in the naming convention and policy files, but as pseducode, will appear as ${prefix}${infix}${outfix}${suffix}${numbering}`  |                                                           `rg-ldo-uks-prd`, `kv-foo-eus-dev-01`, `sabarwuspoc01`                                                           |
 
 
-## Optional Naming (when needed)
+# Approved Optional Naming
 
 The table below contains information about additional naming considerations
 
@@ -81,7 +81,7 @@ The table below contains information about additional naming considerations
 |        `Environment Stages - Used for deciding what stages an environment can be in`        | `poc,mvp,dev,tst,stg,uat,ppd,prd` |   `appprduksprd01`   |
 | `Management Outfix - Used to describe a resource which belongs to the admins of the tenant` |               `mgt`               | `rg-crg-ukw-ppd-mgt` |
 
-## Azurerm Resource list
+# Azurerm Resource list
 
 Below here is a table which sets out naming for all resources listed by Microsoft’s guidance to date.  Pseudocode is used in this table where names are represented with `${}` describing a value which is not an explict string, so watch out for those. These can sometimes be things descriptors such as the optional outfix or to give flexibility in naming things more appropriately than strict numbering.  Another note is regarding resource limit,  we have attempted to migrate all data from [Microsoft's guide](https://github.com/MicrosoftDocs/azure-docs/blob/main/articles/azure-resource-manager/management/resource-name-rules.md) into a single table, but its worth checking out the Microsoft version too, there is a copy of it [here](https://github.com/libre-devops/azure-naming-convention/blob/main/ms-resource-limits.md). 
 
@@ -297,7 +297,7 @@ Below here is a table which sets out naming for all resources listed by Microsof
 |          `Media Service Streaming Endpoint`           |             `Microsoft.Media/mediaservices/streamingEndpoints`              |   `strep-`   |            `prefix`             |        `numbering`         |         `1-24`         |   `strep-${infix}-${outfix}-${suffix}-${numbering}`   |            `strep-ldo-uks-prd-01`             |
 |              `Migrate Assesment Project`              |                   `Microsoft.Migrate/assessmentProjects`                    |   `migap-`   |            `prefix`             |        `numbering`         |         `3-24`         |   `migap-${infix}-${outfix}-${suffix}-${numbering}`   |            `migap-ldo-uks-prd-01`             |
 |                 `Application Gateway`                 |                   `Microsoft.Network/applicationGateways`                   |    `agw-`    |            `prefix`             |        `numbering`         |         `1-80`         |    `agw-${infix}-${outfix}-${suffix}-${numbering}`    |             `agw-ldo-uks-prd-01`              |
-|             `Application Security Group`              |                `Microsoft.Network/applicationSecurityGroups`                |    `asg-`    |            `prefix`             |        `numbering`         |         `1-80`         |    `asg-${infix}-${outfix}-${suffix}-${numbering}`    |             `asg-ldo-uks-prd-01`              |
+|             `Application Security Group`              |                `Microsoft.Network/applicationSecurityGroups`                |    `asg-`    |            `prefix`             |        `numbering`         |         `1-80`         |    `asg-${infix}-${outfix}-${suffix}-${numbering}`    |           `asg-ldo-uks-prd-web-01`            |
 |                   `Azure Firewall`                    |                     `Microsoft.Network/azureFirewalls`                      |    `afw-`    |            `prefix`             |        `numbering`         |         `1-80`         |    `afw-${infix}-${outfix}-${suffix}-${numbering}`    |             `afw-ldo-uks-prd-01`              |
 |                       `Bastion`                       |                      `Microsoft.Network/bastionHosts`                       |    `bas-`    |            `prefix`             |        `numbering`         |         `1-80`         |    `bas-${infix}-${outfix}-${suffix}-${numbering}`    |             `bas-ldo-uks-prd-01`              |
 |                     `Connection`                      |                       `Microsoft.Network/connections`                       |   `conn-`    |            `prefix`             |        `numbering`         |         `1-80`         |    `con-${infix}-${outfix}-${suffix}-${numbering}`    |             `con-ldo-uks-prd-01`              |
@@ -349,7 +349,7 @@ Below here is a table which sets out naming for all resources listed by Microsof
 |     `Relay Hybrid Connection Authorization Rule`      |      `Microsoft.Relay/namespaces/HybridConnections/authorizationRules`      |   `rule-`    |            `prefix`             |        `numbering`         |         `1-50`         |   `rule-${infix}-${outfix}-${suffix}-${numbering}`    |             `rule-ldo-uks-prd-01`             |
 |                   `Relay WCF Relay`                   |                   `Microsoft.Relay/namespaces/WcfRelays`                    |   `wcfr-`    |            `prefix`             |        `numbering`         |        `1-260`         |   `wcfr-${infix}-${outfix}-${suffix}-${numbering}`    |             `wcfr-ldo-uks-prd-01`             |
 |         `Relay WCF Relay Authorization Rule`          |          `Microsoft.Relay/namespaces/WcfRelays/authorizationRules`          | `wcfrrule-`  |            `prefix`             |        `numbering`         |         `1-50`         | `wcfrrule-${infix}-${outfix}-${suffix}-${numbering}`  |           `wcfrrule-ldo-uks-prd-01`           |
-|                   `Resource Group`                    |                    `Microsoft.Resources/resourcegroups`                     |    `rg-`     |            `prefix`             |        `numbering`         |         `1-90`         |    `rg-${infix}-${outfix}-${suffix}-${numbering}`     |              `rg-ldo-uks-prd-01`              |
+|                   `Resource Group`                    |                    `Microsoft.Resources/resourcegroups`                     |    `rg-`     |            `prefix`             |        `numbering`         |         `1-90`         |           `rg-${infix}-${outfix}-${suffix}`           |             `rg-ldo-uks-prd-app`              |
 |                    `Template Spec`                    |                     `Microsoft.Resources/templateSpecs`                     |   `tspec-`   |            `prefix`             |        `numbering`         |         `1-90`         |   `tspec-${infix}-${outfix}-${suffix}-${numbering}`   |            `tspec-ldo-uks-prd-01`             |
 |                   `Search Service`                    |                      `Microsoft.Search/searchServices`                      |   `srch-`    |            `prefix`             |        `numbering`         |         `3-24`         |   `srch-${infix}-${outfix}-${suffix}-${numbering}`    |             `srch-ldo-uks-prd-01`             |
 |                     `Service Bus`                     |                      `Microsoft.ServiceBus/namespaces`                      |    `sb-`     |            `prefix`             |        `numbering`         |         `6-50`         |    `sb-${infix}-${outfix}-${suffix}-${numbering}`     |              `sb-ldo-uks-prd-01`              |
