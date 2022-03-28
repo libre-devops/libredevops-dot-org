@@ -2,7 +2,7 @@
 
 ## Apply number padding
 
-Convert `1` to `02`, `2` to `02` etc via `format("%02d", )`
+Convert `1` to `01`, `2` to `02` etc via `format("%02d", )`
 
 ```hcl
 resource "azurerm_application_security_group" "with_pad" {
