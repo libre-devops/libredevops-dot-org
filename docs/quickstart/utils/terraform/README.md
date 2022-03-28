@@ -1,4 +1,4 @@
-# Scripts
+# Terraform
 
 {% include list.liquid all=true %}
 
