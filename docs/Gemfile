@@ -4,7 +4,7 @@ gemspec
 
 group :jekyll_plugins do
 gem "github-pages",
-gem 'jekyll-remote-include', :github => 'netrics/jekyll-remote-include'
 end
 
 gem "jemoji"
+gem 'jekyll-remote-include'
