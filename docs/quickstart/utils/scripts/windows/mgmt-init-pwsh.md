@@ -7,6 +7,7 @@
    - You want to do things securely
    - This script is an example of how to get going!
    - It solves the "Chicken and the Egg" as this script will come first before Terraform can be started :wink:
+   - May also work on Linux.
 
 
 - Pre-Requisites:
