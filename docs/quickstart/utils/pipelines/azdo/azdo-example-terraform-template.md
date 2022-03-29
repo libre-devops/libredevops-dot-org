@@ -287,3 +287,86 @@ steps:
           ARM_TENANT_ID: ${{ parameters.AZURE_TARGET_TENANT_ID }}
 
 ```
+
+## Example Call of Template
+
+
+```yaml
+---
+name: $(Build.DefinitionName)-$(date:yyyyMMdd)$(rev:.r)
+
+trigger: none
+
+parameters:
+
+  - name: SHORTHAND_PROJECT_NAME
+    type: string
+    default: "ldo"
+    displayName: "Shorthand Project a.k.a ${infix}"
+
+  - name: SHORTHAND_ENVIRONMENT_NAME
+    type: string
+    default: "$(System.StageName)"
+    displayName: "Shorthand environment, e.g. dev, tst, prd, default is the stage of the pipeline"
+
+  - name: SHORTHAND_LOCATION_NAME
+    type: string
+    default: "euw"
+    displayName: "3 character location name, e.g., uks, ukw, euw"
+
+  - name: TERRAFORM_PATH
+    type: string
+    default: "$(Build.SourcesDirectory)/$(Build.Repository.Name)/terraform"
+    displayName: "What is the path to your terraform code?"
+
+  - name: TERRAFORM_VERSION
+    type: string
+    default: "1.1.7"
+    displayName: "Which version of Terraform should be installed?"
+
+  - name: TERRAFORM_DESTROY
+    default: false
+    displayName: "Check box to run plan and run a Destroy"
+    type: boolean
+
+variables:
+  - group: "svp-kv-lbdo-euw-tst-mgt-01"
+
+pool:
+  name: Azure Pipelines
+  vmImage: ubuntu-latest
+
+stages:
+  - stage: dev
+    displayName: "Dev Stage"
+    jobs:
+      - job: Terraform_Build
+        workspace:
+          clean: all
+        displayName: Terraform Build
+        steps:
+
+          - checkout: self
+          - checkout: github://libre-devops/azure-naming-convention
+
+          - template: /templates/terraform-cicd-template.yml
+            parameters:
+              SHORTHAND_PROJECT_NAME: ${{ parameters.SHORTHAND_PROJECT_NAME }}
+              SHORTHAND_ENVIRONMENT_NAME: ${{ parameters.SHORTHAND_ENVIRONMENT_NAME }}
+              SHORTHAND_LOCATION_NAME: ${{ parameters.SHORTHAND_LOCATION_NAME }}
+              TERRAFORM_PATH: ${{ parameters.TERRAFORM_PATH }}
+              TERRAFORM_VERSION: ${{ parameters.TERRAFORM_VERSION }}
+              TERRAFORM_DESTROY: ${{ parameters.TERRAFORM_DESTROY }}
+              TERRAFORM_STORAGE_RG_NAME: $(SpokeSaRgName)
+              TERRAFORM_STORAGE_ACCOUNT_NAME: $(SpokeSaName)
+              TERRAFORM_BLOB_CONTAINER_NAME: $(SpokeSaBlobContainerName)
+              TERRAFORM_STORAGE_KEY: $(SpokeSaPrimaryKey)
+              TERRAFORM_STATE_NAME: "${{ parameters.SHORTHAND_PROJECT_NAME }}-${{ parameters.SHORTHAND_LOCATION_NAME }}.terraform.tfstate"
+              TERRAFORM_WORKSPACE_NAME: $(System.StageName)
+              TERRAFORM_COMPLIANCE_PATH: "$(Build.SourcesDirectory)/azure-naming-convention/az-terraform-compliance-policy"
+              AZURE_TARGET_CLIENT_ID: $(SpokeSvpClientId)
+              AZURE_TARGET_CLIENT_SECRET: $(SpokeSvpClientSecret)
+              AZURE_TARGET_TENANT_ID: $(SpokeSvpTenantId)
+              AZURE_TARGET_SUBSCRIPTION_ID: $(SpokeSubID)
+
+```
