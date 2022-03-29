@@ -16,7 +16,7 @@ parameters:
   - name: TERRAFORM_DESTROY
     default: false
     type: boolean
-    displayName: "Do you wish to run terraform destroy?"]
+    displayName: "Do you wish to run terraform destroy?"
 
   - name: TERRAFORM_STORAGE_RG_NAME
     default: ""
@@ -120,7 +120,7 @@ steps:
         enabled: true
         env:
           TF_VAR_short: ${{ parameters.SHORTHAND_PROJECT_NAME }}
-          TF_VAR_env: ${{ parameters.SHORTHAND_ENVIRONMENT }}
+          TF_VAR_env: ${{ parameters.SHORTHAND_LOCATION_NAME }}
           TF_VAR_loc: ${{ parameters.SHORTHAND_LOCATION_NAME }}
 
           TF_VAR_TERRAFORM_STORAGE_RG_NAME: ${{ parameters.TERRAFORM_STORAGE_RG_NAME }}
@@ -197,7 +197,7 @@ steps:
         enabled: true
         env:
           TF_VAR_short: ${{ parameters.SHORTHAND_PROJECT_NAME }}
-          TF_VAR_env: ${{ parameters.SHORTHAND_ENVIRONMENT }}
+          TF_VAR_env: ${{ parameters.SHORTHAND_ENVIRONMENT_NAME }}
           TF_VAR_loc: ${{ parameters.SHORTHAND_LOCATION_NAME }}
 
           TF_VAR_TERRAFORM_STORAGE_RG_NAME: ${{ parameters.TERRAFORM_STORAGE_RG_NAME }}
@@ -235,7 +235,7 @@ steps:
         enabled: true
         env:
           TF_VAR_short: ${{ parameters.SHORTHAND_PROJECT_NAME }}
-          TF_VAR_env: ${{ parameters.SHORTHAND_ENVIRONMENT }}
+          TF_VAR_env: ${{ parameters.SHORTHAND_ENVIRONMENT_NAME }}
           TF_VAR_loc: ${{ parameters.SHORTHAND_LOCATION_NAME }}
 
           TF_VAR_TERRAFORM_STORAGE_RG_NAME: ${{ parameters.TERRAFORM_STORAGE_RG_NAME }}
@@ -273,7 +273,7 @@ steps:
         enabled: true
         env:
           TF_VAR_short: ${{ parameters.SHORTHAND_PROJECT_NAME }}
-          TF_VAR_env: ${{ parameters.SHORTHAND_ENVIRONMENT }}
+          TF_VAR_env: ${{ parameters.SHORTHAND_ENVIRONMENT_NAME }}
           TF_VAR_loc: ${{ parameters.SHORTHAND_LOCATION_NAME }}
 
           TF_VAR_TERRAFORM_STORAGE_RG_NAME: ${{ parameters.TERRAFORM_STORAGE_RG_NAME }}
@@ -285,7 +285,6 @@ steps:
           ARM_CLIENT_SECRET: ${{ parameters.AZURE_TARGET_CLIENT_SECRET }}
           ARM_SUBSCRIPTION_ID: ${{ parameters.AZURE_TARGET_SUBSCRIPTION_ID }}
           ARM_TENANT_ID: ${{ parameters.AZURE_TARGET_TENANT_ID }}
-
 ```
 
 ## Example Call of Template
@@ -368,5 +367,4 @@ stages:
               AZURE_TARGET_CLIENT_SECRET: $(SpokeSvpClientSecret)
               AZURE_TARGET_TENANT_ID: $(SpokeSvpTenantId)
               AZURE_TARGET_SUBSCRIPTION_ID: $(SpokeSubID)
-
 ```
