@@ -54,7 +54,7 @@ To contribute to the main copy:
 - Raise a pull-request with your resources.
 - If it fits the current pattern, it will be merged :bomb:
 
-# Resource Name Construction
+## Resource Name Construction
 
 As a general rule, all names should try to exclude special characters wherever possible and only use alphanumeric.
 
@@ -70,7 +70,7 @@ As a general rule, all names should try to exclude special characters wherever p
 |    `Full Construct`    |  `Example construct of the above descriptions, using psuedocode is - ${prefix}-${infix}-${outfix}-${suffix}, when numbering is applied, it is ${prefix}-${infix}-${outfix}-${suffix}-${numbering}.  In some cases, the names will not container dashes to seperate the construct, for example, storage accounts, this will be reflected in the naming convention and policy files, but as pseducode, will appear as ${prefix}${infix}${outfix}${suffix}${numbering}`  |                                                           `rg-ldo-uks-prd`, `kv-foo-eus-dev-01`, `sabarwuspoc01`                                                           |
 
 
-# Approved Optional Naming
+## Approved Optional Naming
 
 The table below contains information about additional naming considerations
 
@@ -81,7 +81,7 @@ The table below contains information about additional naming considerations
 |        `Environment Stages - Used for deciding what stages an environment can be in`        | `poc,mvp,dev,tst,stg,uat,ppd,prd` |   `appprduksprd01`   |
 | `Management Outfix - Used to describe a resource which belongs to the admins of the tenant` |               `mgt`               | `rg-crg-ukw-ppd-mgt` |
 
-# Azurerm Resource list
+## Azurerm Resource list
 
 Below here is a table which sets out naming for all resources listed by Microsoft’s guidance to date.  Pseudocode is used in this table where names are represented with `${}` describing a value which is not an explict string, so watch out for those. These can sometimes be things descriptors such as the optional outfix or to give flexibility in naming things more appropriately than strict numbering.  Another note is regarding resource limit,  we have attempted to migrate all data from [Microsoft's guide](https://github.com/MicrosoftDocs/azure-docs/blob/main/articles/azure-resource-manager/management/resource-name-rules.md) into a single table, but its worth checking out the Microsoft version too, there is a copy of it [here](https://github.com/libre-devops/azure-naming-convention/blob/main/ms-resource-limits.md). 
 
