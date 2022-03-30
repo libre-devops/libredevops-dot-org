@@ -305,7 +305,7 @@ parameters:
 
   - name: SHORTHAND_ENVIRONMENT_NAME
     default: tst
-    displayName: "Check box to run plan and run a Destroy"
+    displayName: "What is the shorthand name for this environment?"
     type: string
     values:
       - dev
