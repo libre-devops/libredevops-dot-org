@@ -1,5 +1,7 @@
 # Terraform Template for Azure DevOps
 
+{% raw  %}
+
 ```yaml
 parameters:
 
@@ -368,3 +370,6 @@ stages:
               AZURE_TARGET_TENANT_ID: $(SpokeSvpTenantId)
               AZURE_TARGET_SUBSCRIPTION_ID: $(SpokeSubID)
 ```
+{% endraw %}
+
+Source: `{{ page.path }}`

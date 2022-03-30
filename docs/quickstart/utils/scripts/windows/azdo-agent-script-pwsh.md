@@ -4,6 +4,7 @@ Inspiration taken from [Microsoft](https://docs.microsoft.com/en-us/azure/devops
 
 [Check out repo in how to use these](https://github.com/libre-devops/azdo-agent-containers)
 
+{% raw  %}
 ```powershell
 if (-not (Test-Path Env:AZP_URL)) {
   Write-Error "error: missing AZP_URL environment variable"
@@ -75,3 +76,7 @@ finally
     --token "$(Get-Content ${Env:AZP_TOKEN_FILE})"
 }
 ```
+
+{% endraw  %}
+
+Source: `{{ page.path }}`

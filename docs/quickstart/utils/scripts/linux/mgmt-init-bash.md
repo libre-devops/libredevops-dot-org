@@ -1,5 +1,6 @@
 # "Chicken and the Egg" Script - Azure CLI - Bash
 
+{% raw  %}
 - Purpose:
    - You want to use Terraform in Azure
    - You have read the official documentation
@@ -517,5 +518,6 @@ fi
 
 clean_on_exit
 ```
+{% endraw  %}
 
 Source: `{{ page.path }}`

@@ -29,6 +29,7 @@
     - Does some basic smoke testing on naming length, case sensitivity etc
     - **This is just an example, you should read this in entirety before running it :smile:**
 
+{% raw  %}
 ```powershell
 #!/usr/bin/env pwsh
 
@@ -553,5 +554,5 @@ Add-AzKeyVaultManagedStorageAccount `
 Write-Host "Storage Account is now being managed by keyvault" -ForegroundColor Black -BackgroundColor Green
 
 ```
-
+{% endraw  %}
 Source: `{{ page.path }}`

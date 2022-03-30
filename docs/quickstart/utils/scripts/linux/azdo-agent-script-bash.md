@@ -4,6 +4,7 @@ Inspiration taken from [Microsoft](https://docs.microsoft.com/en-us/azure/devops
 
 [Check out repo in how to use these](https://github.com/libre-devops/azdo-agent-containers)
 
+{% raw  %}
 ```shell
 #!/usr/bin/env bash
 
@@ -123,5 +124,5 @@ trap 'cleanup; exit 143' TERM
 # Running it with the --once flag at the end will shut down the agent after the build is executed
 ./run.sh & wait $!
 ```
-
+{% endraw  %}
 Source: `{{ page.path }}`

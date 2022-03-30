@@ -1,5 +1,6 @@
 # Terraform Pipeline for GitHub Actions
 
+{% raw  %}
 ```yaml
 name: 'Terraform Build'
 
@@ -100,5 +101,5 @@ jobs:
           TF_VAR_short: ${{ env.SHORTHAND_PROJECT_NAME }}
           TF_VAR_env: ${{ env.SHORTHAND_ENVIRONMENT }}
           TF_VAR_loc: ${{ env.SHORTHAND_LOCATION }}
-
 ```
+{% endraw  %}
