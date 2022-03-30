@@ -105,8 +105,8 @@ steps:
                 
           terraform init `
           -backend-config="storage_account_name=${{ parameters.TERRAFORM_STORAGE_ACCOUNT_NAME }}" `
-          -backend-config="container_name=$(TerraformContainerName)" `
-          -backend-config="access_key=$(SetVariables.TerraformStorageKey)" `
+          -backend-config="container_name=${{ parameters.TERRAFORM_BLOB_CONTAINER_NAME }}" `
+          -backend-config="access_key=${{ parameters.TERRAFORM_STORAGE_KEY }}" `
           -backend-config="key=${{ parameters.TERRAFORM_STATE_NAME }}" ; `
           
           Write-Output "${{ parameters.TERRAFORM_WORKSPACE_NAME }}" > .terraform/environment ; `
@@ -122,7 +122,7 @@ steps:
         enabled: true
         env:
           TF_VAR_short: ${{ parameters.SHORTHAND_PROJECT_NAME }}
-          TF_VAR_env: ${{ parameters.SHORTHAND_LOCATION_NAME }}
+          TF_VAR_env: ${{ parameters.SHORTHAND_ENVIRONMENT_NAME }}
           TF_VAR_loc: ${{ parameters.SHORTHAND_LOCATION_NAME }}
 
           TF_VAR_TERRAFORM_STORAGE_RG_NAME: ${{ parameters.TERRAFORM_STORAGE_RG_NAME }}
@@ -155,8 +155,8 @@ steps:
          }
           elseif ($IsWindows) 
          {
-            Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
-            choco install tfsec -y
+           Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+           choco install tfsec -y
          }
          tfsec . --force-all-dirs
         displayName: 'TFSEC Check'
@@ -180,8 +180,8 @@ steps:
                 
           terraform init `
           -backend-config="storage_account_name=${{ parameters.TERRAFORM_STORAGE_ACCOUNT_NAME }}" `
-          -backend-config="container_name=$(TerraformContainerName)" `
-          -backend-config="access_key=$(SetVariables.TerraformStorageKey)" `
+          -backend-config="container_name=${{ parameters.TERRAFORM_BLOB_CONTAINER_NAME }}" `
+          -backend-config="access_key=${{ parameters.TERRAFORM_STORAGE_KEY }}" `
           -backend-config="key=${{ parameters.TERRAFORM_STATE_NAME }}" ; `
           
           Write-Output "${{ parameters.TERRAFORM_WORKSPACE_NAME }}" > .terraform/environment ; `
@@ -219,8 +219,8 @@ steps:
                 
           terraform init `
           -backend-config="storage_account_name=${{ parameters.TERRAFORM_STORAGE_ACCOUNT_NAME }}" `
-          -backend-config="container_name=$(TerraformContainerName)" `
-          -backend-config="access_key=$(SetVariables.TerraformStorageKey)" `
+          -backend-config="container_name=${{ parameters.TERRAFORM_BLOB_CONTAINER_NAME }}" `
+          -backend-config="access_key=${{ parameters.TERRAFORM_STORAGE_KEY }}" `
           -backend-config="key=${{ parameters.TERRAFORM_STATE_NAME }}" ; `
           
           Write-Output "${{ parameters.TERRAFORM_WORKSPACE_NAME }}" > .terraform/environment ; `
@@ -255,8 +255,8 @@ steps:
                 
           terraform init `
           -backend-config="storage_account_name=${{ parameters.TERRAFORM_STORAGE_ACCOUNT_NAME }}" `
-          -backend-config="container_name=$(TerraformContainerName)" `
-          -backend-config="access_key=$(SetVariables.TerraformStorageKey)" `
+          -backend-config="container_name=${{ parameters.TERRAFORM_BLOB_CONTAINER_NAME }}" `
+          -backend-config="access_key=${{ parameters.TERRAFORM_STORAGE_KEY }}" `
           -backend-config="key=${{ parameters.TERRAFORM_STATE_NAME }}" ; `
           
           Write-Output "${{ parameters.TERRAFORM_WORKSPACE_NAME }}" > .terraform/environment ; `
@@ -287,28 +287,39 @@ steps:
           ARM_CLIENT_SECRET: ${{ parameters.AZURE_TARGET_CLIENT_SECRET }}
           ARM_SUBSCRIPTION_ID: ${{ parameters.AZURE_TARGET_SUBSCRIPTION_ID }}
           ARM_TENANT_ID: ${{ parameters.AZURE_TARGET_TENANT_ID }}
+
 ```
+{% endraw %}
 
 ## Example Call of Template
 
-
+{% raw %}
 ```yaml
 ---
 name: $(Build.DefinitionName)-$(date:yyyyMMdd)$(rev:.r)
 
 trigger: none
 
+# parameters are typed with defaults so they are correctly populated, you will get a choice in the GUI to edit these, but you should keep all changes as code.
 parameters:
+
+  - name: SHORTHAND_ENVIRONMENT_NAME
+    default: tst
+    displayName: "Check box to run plan and run a Destroy"
+    type: string
+    values:
+      - dev
+      - poc
+      - mvp
+      - tst
+      - uat
+      - ppd
+      - prd
 
   - name: SHORTHAND_PROJECT_NAME
     type: string
-    default: "ldo"
-    displayName: "Shorthand Project a.k.a ${infix}"
-
-  - name: SHORTHAND_ENVIRONMENT_NAME
-    type: string
-    default: "$(System.StageName)"
-    displayName: "Shorthand environment, e.g. dev, tst, prd, default is the stage of the pipeline"
+    default: "lbdo"
+    displayName: "Shorthand Project e.g. lbdo for libredevops"
 
   - name: SHORTHAND_LOCATION_NAME
     type: string
@@ -317,7 +328,7 @@ parameters:
 
   - name: TERRAFORM_PATH
     type: string
-    default: "$(Build.SourcesDirectory)/$(Build.Repository.Name)/terraform"
+    default: "$(Build.SourcesDirectory)/azure-pipelines-module-development-build/terraform"
     displayName: "What is the path to your terraform code?"
 
   - name: TERRAFORM_VERSION
@@ -325,21 +336,41 @@ parameters:
     default: "1.1.7"
     displayName: "Which version of Terraform should be installed?"
 
+# This variable sets up a condition in the template, if set to true, it will run terraform plan -destroy instead of the normal plan
   - name: TERRAFORM_DESTROY
     default: false
     displayName: "Check box to run plan and run a Destroy"
     type: boolean
 
+# Declare variable group to pass variables to parameters, in this case, a libre-devops keyvault which is using a service principle for authentication
 variables:
   - group: "svp-kv-lbdo-euw-tst-mgt-01"
 
+# Sets what repos need cloned, for example, a library repo for modules and a poly-repo for target code
+resources:
+  repositories:
+
+  - repository: azure-naming-convention
+    type: github
+    endpoint: github_service_connection
+    name: libre-devops/azure-naming-convention
+    ref: main
+
+  - repository: azure-pipelines-module-development-build
+    type: github
+    endpoint: github_service_connection
+    name: libre-devops/azure-pipelines-module-development-build
+    ref: dev
+
+# You may wish to use a separate or self-hosted agent per job, by default, all jobs will inherit stage agent
 pool:
   name: Azure Pipelines
   vmImage: ubuntu-latest
 
+# Sets stage so that multiple stages can be used if needed, as it stands, only 1 stage is expected and is thus passed as a parameter
 stages:
-  - stage: dev
-    displayName: "Dev Stage"
+  - stage: "${{ parameters.SHORTHAND_ENVIRONMENT_NAME }}"
+    displayName: "${{ parameters.SHORTHAND_ENVIRONMENT_NAME }} Stage"
     jobs:
       - job: Terraform_Build
         workspace:
@@ -347,18 +378,20 @@ stages:
         displayName: Terraform Build
         steps:
 
+          # Declare the repos needed from the resources list
           - checkout: self
-          - checkout: github://libre-devops/azure-naming-convention
-
-          - template: /templates/terraform-cicd-template.yml
+          - checkout: azure-naming-convention
+          
+          # Remotely fetch pipeline template, in this case, I am using one in my development repo.
+          - template: /templates/terraform-cicd-template.yml@azure-pipelines-module-development-build
             parameters:
-              SHORTHAND_PROJECT_NAME: ${{ parameters.SHORTHAND_PROJECT_NAME }}
+              SHORTHAND_PROJECT_NAME: ${{ parameters.SHORTHAND_PROJECT_NAME }} # Parameters entered in YAML
               SHORTHAND_ENVIRONMENT_NAME: ${{ parameters.SHORTHAND_ENVIRONMENT_NAME }}
               SHORTHAND_LOCATION_NAME: ${{ parameters.SHORTHAND_LOCATION_NAME }}
               TERRAFORM_PATH: ${{ parameters.TERRAFORM_PATH }}
               TERRAFORM_VERSION: ${{ parameters.TERRAFORM_VERSION }}
               TERRAFORM_DESTROY: ${{ parameters.TERRAFORM_DESTROY }}
-              TERRAFORM_STORAGE_RG_NAME: $(SpokeSaRgName)
+              TERRAFORM_STORAGE_RG_NAME: $(SpokeSaRgName) # Key Vault variable
               TERRAFORM_STORAGE_ACCOUNT_NAME: $(SpokeSaName)
               TERRAFORM_BLOB_CONTAINER_NAME: $(SpokeSaBlobContainerName)
               TERRAFORM_STORAGE_KEY: $(SpokeSaPrimaryKey)
@@ -369,6 +402,7 @@ stages:
               AZURE_TARGET_CLIENT_SECRET: $(SpokeSvpClientSecret)
               AZURE_TARGET_TENANT_ID: $(SpokeSvpTenantId)
               AZURE_TARGET_SUBSCRIPTION_ID: $(SpokeSubID)
+
 ```
 {% endraw %}
 
