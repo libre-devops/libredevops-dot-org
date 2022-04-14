@@ -73,4 +73,28 @@ Changes to Outputs:
   + location_output = "UK West"
 ```
 
+## Perform conditional based on a match being found in a regex, if the condition is true, do something, if not, do nothing
+
+```hcl
+locals {
+
+  names = {
+    key0 = var.environment // prd
+    key1 = "${var.environment}-vm" // prd-vm
+    key2 = "prd-biscuit"
+  }
+
+}
+
+resource "azurerm_resource_group" "test_rg" {
+  for_each = {
+    for key, value in local.names : key => value
+    if length(regexall("${var.environment}-", value)) > 0 // Checks the values of the map called local.names, if the any value of that map contains the name "prd-" followed by anything else, then make a resource group for it, with that value of the map as the name of the resource group.  If no match is found, do nothing.
+  }
+  location = var.location
+  name     = each.value // makes 2 rgs, prd-vm and prd-biscuit
+}
+
+```
+
 Source: `{{ page.path }}`
