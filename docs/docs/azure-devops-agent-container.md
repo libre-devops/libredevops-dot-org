@@ -155,7 +155,6 @@ Alternatively, you can fork the repo and edit the pipelines to include your secr
     - Git - Latest from chocolatey (and will also install Bash)
     - 7-Zip
     - Scoop "extras" bucket
-</br>
 
 Some others notes:
 
