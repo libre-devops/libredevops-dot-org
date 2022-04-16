@@ -1,6 +1,6 @@
 # Terraform Cheat Sheet
 
-{% include toc.html html=content %}
+{% include list.liquid all=true %}
 
 ## Apply number padding
 
