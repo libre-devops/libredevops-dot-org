@@ -57,6 +57,8 @@ docker run -it ghcr.io/libre-devops/azdo-agent-winservercoreltsc2022:latest \
 -e AZP_WORK="${AZP_WORK}"
 ```
 
+Alteratnively, you can fork the repo and edit the pipelines to include your secrets as build args into the template!
+
 ## Info
 
   - On Linux:
