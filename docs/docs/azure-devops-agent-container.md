@@ -9,8 +9,9 @@ Looking to run some Azure DevOps Agents in containers?  Libre DevOps have develo
 - Build containers using Windows or Linux
 - All done via Azure DevOps
 - Builds weekly
+- Check the source files [here](https://github.com/libre-devops/azdo-agent-containers)
 
-_This is an example_
+_This is an example, please ensure you read and accept all license terms regarding software used in these example builds_
 
 ## High-level info
 
@@ -23,7 +24,7 @@ _This is an example_
    - [Ubuntu 22.04 Jammy](https://hub.docker.com/_/ubuntu)
   
  - Windows Image used in the repo:
-   - [Windows Server 2022 LTSC](https://hub.docker.com/_/microsoft-windows-server/) 
+   - [Windows Server 2019/2022 LTSC](https://hub.docker.com/_/microsoft-windows-server/) 
 
 # Quickstart
 
@@ -49,7 +50,7 @@ podman run -it ghcr.io/libre-devops/azdo-agent-ubuntu:latest \
 
 ## Windows
 ```powershell
-docker run -it ghcr.io/libre-devops/azdo-agent-rhel:latest \
+docker run -it ghcr.io/libre-devops/azdo-agent-winservercoreltsc2019:latest \
 -e AZP_URL="${AZP_URL}" \
 -e AZP_TOKEN="${AZP_TOKEN}" \
 -e AZP_POOL="${AZP_POOL}" \
