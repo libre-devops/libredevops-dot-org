@@ -1,5 +1,7 @@
 # Terraform Cheat Sheet
 
+{% include toc.html html=content %}
+
 ## Apply number padding
 
 Convert `1` to `01`, `2` to `02` etc via `format("%02d", )`
@@ -76,24 +78,46 @@ Changes to Outputs:
 ## Perform conditional based on a match being found in a regex, if the condition is true, do something, if not, do nothing
 
 ```hcl
+variable "environment" {
+  default     = "prd"
+  type        = string
+  description = "Used as an alternative to terraform.workspace"
+}
+
 locals {
 
   names = {
-    key0 = var.environment // prd
+    key0 = var.environment         // prd
     key1 = "${var.environment}-vm" // prd-vm
     key2 = "prd-biscuit"
+    key3 = "tst_pizza"
   }
-
 }
 
 resource "azurerm_resource_group" "test_rg" {
   for_each = {
-    for key, value in local.names : key => value
-    if length(regexall("${var.environment}-", value)) > 0 // Checks the values of the map called local.names, if the any value of that map contains the name "prd-" followed by anything else, then make a resource group for it, with that value of the map as the name of the resource group.  If no match is found, do nothing.
+  for key, value in local.names : key => value
+  if length(regexall("${var.environment}-", value)) > 0 // Checks the values of the map called local.names, if the any value of that map contains the name "prd-" followed by anything else, then make a resource group for it, with that value of the map as the name of the resource group.  If no match is found, do nothing.
   }
-  location = var.location
+  location = local.location
   name     = each.value // makes 2 rgs, prd-vm and prd-biscuit
 }
+```
+
+### Example Output
+```shell
+# azurerm_resource_group.test_rg["key1"] will be created
+  + resource "azurerm_resource_group" "test_rg" {
+      + id       = (known after apply)
+      + location = "uksouth"
+      + name     = "prd-vm"
+    }
+
+  # azurerm_resource_group.test_rg["key2"] will be created
+  + resource "azurerm_resource_group" "test_rg" {
+      + id       = (known after apply)
+      + location = "uksouth"
+      + name     = "prd-biscuit"
 
 ```
 
