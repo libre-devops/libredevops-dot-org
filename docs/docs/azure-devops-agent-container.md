@@ -11,7 +11,7 @@ Looking to run some Azure DevOps Agents in containers?  Libre DevOps have develo
 - Builds weekly
 - Check the source files [here](https://github.com/libre-devops/azdo-agent-containers)
 - Agent Name is auto-generated for pool to avoid conflicts, in format:
-   - Linux: `azdo-lnx-agent-${{ddmmyyy}-${random_chars}`
+   - Linux: `azdo-lnx-agent-${ddmmyyy}-${random_chars}`
    - Windows: `azdo-win-agent-${ddmmyyyy}-${RANDOM_NUMBERS}`
 
 _This is an example, please ensure you read and accept all license terms regarding software used in these example builds_
