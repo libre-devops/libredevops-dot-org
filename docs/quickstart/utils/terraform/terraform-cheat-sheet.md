@@ -295,7 +295,7 @@ locals {
   }
 }
 
-resource "azurerm_function_app" "function_service" {
+resource "azurerm_function_app" "fnc" {
 
   for_each = local.fnc_apps
 
