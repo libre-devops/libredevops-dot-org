@@ -95,6 +95,11 @@ parameters:
     type: string
     displayName: "What is the shorthand location name? E.g. uks for UK South etc"
 
+  - name: CHECKOV_SKIP_TESTS
+    default: ""
+    type: string
+    displayName: "What Checkov steps should be skipped, null by default, should be value like CKV_AZURE_50, CKV_AZURE_20 etc."
+
 steps:
 
   - task: ms-devlabs.custom-terraform-tasks.custom-terraform-installer-task.TerraformInstaller@0
@@ -170,14 +175,27 @@ steps:
         enabled: true
 
       - pwsh: |
-          pip3 install checkov ; `
+         pip3 install checkov ; `
 
-          terraform show -json pipeline.plan > pipeline.plan.json ; `
+         terraform show -json pipeline.plan > pipeline.plan.json ; `
 
-          checkov -f pipeline.plan.json
+         checkov -f pipeline.plan.json
         displayName: 'CheckOV Check'
         workingDirectory: "${{ parameters.TERRAFORM_PATH }}"
         continueOnError: false
+        condition: eq('${{ parameters.CHECKOV_SKIP_TESTS }}', ' ')
+        enabled: true
+
+      - pwsh: |
+         pip3 install checkov ; `
+
+         terraform show -json pipeline.plan > pipeline.plan.json ; `
+
+         checkov -f pipeline.plan.json --skip-check ${{ parameters.CHECKOV_SKIP_TESTS }}
+        displayName: 'CheckOV Check with Skipped Tests'
+        workingDirectory: "${{ parameters.TERRAFORM_PATH }}"
+        continueOnError: false
+        condition: not(eq('${{ parameters.CHECKOV_SKIP_TESTS }}', ' '))
         enabled: true
 
   - ${{ if and(eq(parameters.TERRAFORM_DESTROY, false), eq(parameters.TERRAFORM_PLAN_ONLY, false)) }}:
@@ -218,43 +236,56 @@ steps:
           ARM_TENANT_ID: ${{ parameters.AZURE_TARGET_TENANT_ID }}
 
       - pwsh: |
-          pip3 install terraform-compliance ; `
+         pip3 install terraform-compliance ; `
 
-          terraform-compliance -p pipeline.plan -f ${{ parameters.TERRAFORM_COMPLIANCE_PATH }}
+         terraform-compliance -p pipeline.plan -f ${{ parameters.TERRAFORM_COMPLIANCE_PATH }}
         displayName: 'Terraform-Compliance Check'
         workingDirectory: "${{ parameters.TERRAFORM_PATH }}"
         continueOnError: true
         enabled: true
 
       - pwsh: |
-          if ($IsLinux)
-          {
+         if ($IsLinux)
+         {
+          brew install tfsec
+         }
+         elseif ($IsMacOS)
+         {
            brew install tfsec
-          }
-          elseif ($IsMacOS)
-          {
-            brew install tfsec
-          }
-           elseif ($IsWindows)
-          {
-            Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
-            choco install tfsec -y
-          }
-          tfsec . --force-all-dirs
+         }
+          elseif ($IsWindows)
+         {
+           Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+           choco install tfsec -y
+         }
+         tfsec . --force-all-dirs
         displayName: 'TFSEC Check'
         workingDirectory: "${{ parameters.TERRAFORM_PATH }}"
         continueOnError: false
         enabled: true
 
       - pwsh: |
-          pip3 install checkov ; `
+         pip3 install checkov ; `
 
-          terraform show -json pipeline.plan > pipeline.plan.json ; `
+         terraform show -json pipeline.plan > pipeline.plan.json ; `
 
-          checkov -f pipeline.plan.json
+         checkov -f pipeline.plan.json
+        displayName: 'CheckOV Check with Skipped Tests'
+        workingDirectory: "${{ parameters.TERRAFORM_PATH }}"
+        continueOnError: false
+        condition: eq('${{ parameters.CHECKOV_SKIP_TESTS }}', ' ')
+        enabled: true
+
+      - pwsh: |
+         pip3 install checkov ; `
+
+         terraform show -json pipeline.plan > pipeline.plan.json ; `
+
+         checkov -f pipeline.plan.json --skip-check ${{ parameters.CHECKOV_SKIP_TESTS }}
         displayName: 'CheckOV Check'
         workingDirectory: "${{ parameters.TERRAFORM_PATH }}"
         continueOnError: false
+        condition: not(eq('${{ parameters.CHECKOV_SKIP_TESTS }}', ' '))
         enabled: true
 
       - pwsh: |
@@ -372,41 +403,41 @@ steps:
 
   - ${{ if and(eq(parameters.TERRAFORM_DESTROY, true), eq(parameters.TERRAFORM_PLAN_ONLY, true)) }}:
 
-      - pwsh: |
-          New-Item -Path . -Name .terraform -ItemType "Directory" -Force ; `
+        - pwsh: |
+            New-Item -Path . -Name .terraform -ItemType "Directory" -Force ; `
 
-          terraform init `
-          -backend-config="storage_account_name=${{ parameters.TERRAFORM_STORAGE_ACCOUNT_NAME }}" `
-          -backend-config="container_name=${{ parameters.TERRAFORM_BLOB_CONTAINER_NAME }}" `
-          -backend-config="access_key=${{ parameters.TERRAFORM_STORAGE_KEY }}" `
-          -backend-config="key=${{ parameters.TERRAFORM_STATE_NAME }}" ; `
+            terraform init `
+            -backend-config="storage_account_name=${{ parameters.TERRAFORM_STORAGE_ACCOUNT_NAME }}" `
+            -backend-config="container_name=${{ parameters.TERRAFORM_BLOB_CONTAINER_NAME }}" `
+            -backend-config="access_key=${{ parameters.TERRAFORM_STORAGE_KEY }}" `
+            -backend-config="key=${{ parameters.TERRAFORM_STATE_NAME }}" ; `
 
-          Write-Output "${{ parameters.TERRAFORM_WORKSPACE_NAME }}" > .terraform/environment ; `
+            Write-Output "${{ parameters.TERRAFORM_WORKSPACE_NAME }}" > .terraform/environment ; `
 
-          terraform workspace new "${{ parameters.TERRAFORM_WORKSPACE_NAME }}" ; `
-          terraform workspace select "${{ parameters.TERRAFORM_WORKSPACE_NAME }}" ; `
+            terraform workspace new "${{ parameters.TERRAFORM_WORKSPACE_NAME }}" ; `
+            terraform workspace select "${{ parameters.TERRAFORM_WORKSPACE_NAME }}" ; `
 
-          terraform validate ; `
+            terraform validate ; `
 
-          terraform plan -destroy -out pipeline.plan
-        displayName: 'Terraform Init, Validate & Plan Destroy'
-        workingDirectory: "${{ parameters.TERRAFORM_PATH }}"
-        continueOnError: false
-        enabled: true
-        env:
-          TF_VAR_short: ${{ parameters.SHORTHAND_PROJECT_NAME }}
-          TF_VAR_env: ${{ parameters.SHORTHAND_ENVIRONMENT_NAME }}
-          TF_VAR_loc: ${{ parameters.SHORTHAND_LOCATION_NAME }}
+            terraform plan -destroy -out pipeline.plan
+          displayName: 'Terraform Init, Validate & Plan Destroy'
+          workingDirectory: "${{ parameters.TERRAFORM_PATH }}"
+          continueOnError: false
+          enabled: true
+          env:
+            TF_VAR_short: ${{ parameters.SHORTHAND_PROJECT_NAME }}
+            TF_VAR_env: ${{ parameters.SHORTHAND_ENVIRONMENT_NAME }}
+            TF_VAR_loc: ${{ parameters.SHORTHAND_LOCATION_NAME }}
 
-          TF_VAR_TERRAFORM_STORAGE_RG_NAME: ${{ parameters.TERRAFORM_STORAGE_RG_NAME }}
-          TF_VAR_TERRAFORM_STORAGE_ACCOUNT_NAME: ${{ parameters.TERRAFORM_STORAGE_ACCOUNT_NAME }}
-          TF_VAR_TERRAFORM_BLOB_CONTAINER_NAME: ${{ parameters.TERRAFORM_BLOB_CONTAINER_NAME }}
-          TF_VAR_TERRAFORM_STORAGE_KEY: ${{ parameters.TERRAFORM_STORAGE_KEY }}
+            TF_VAR_TERRAFORM_STORAGE_RG_NAME: ${{ parameters.TERRAFORM_STORAGE_RG_NAME }}
+            TF_VAR_TERRAFORM_STORAGE_ACCOUNT_NAME: ${{ parameters.TERRAFORM_STORAGE_ACCOUNT_NAME }}
+            TF_VAR_TERRAFORM_BLOB_CONTAINER_NAME: ${{ parameters.TERRAFORM_BLOB_CONTAINER_NAME }}
+            TF_VAR_TERRAFORM_STORAGE_KEY: ${{ parameters.TERRAFORM_STORAGE_KEY }}
 
-          ARM_CLIENT_ID: ${{ parameters.AZURE_TARGET_CLIENT_ID }}
-          ARM_CLIENT_SECRET: ${{ parameters.AZURE_TARGET_CLIENT_SECRET }}
-          ARM_SUBSCRIPTION_ID: ${{ parameters.AZURE_TARGET_SUBSCRIPTION_ID }}
-          ARM_TENANT_ID: ${{ parameters.AZURE_TARGET_TENANT_ID }}
+            ARM_CLIENT_ID: ${{ parameters.AZURE_TARGET_CLIENT_ID }}
+            ARM_CLIENT_SECRET: ${{ parameters.AZURE_TARGET_CLIENT_SECRET }}
+            ARM_SUBSCRIPTION_ID: ${{ parameters.AZURE_TARGET_SUBSCRIPTION_ID }}
+            ARM_TENANT_ID: ${{ parameters.AZURE_TARGET_TENANT_ID }}
 ```
 {% endraw %}
 
@@ -423,7 +454,7 @@ trigger: none
 parameters:
 
   - name: SHORTHAND_ENVIRONMENT_NAME
-    default: tst
+    default: dev
     displayName: "What is the shorthand name for this environment?"
     type: string
     values:
@@ -437,7 +468,7 @@ parameters:
 
   - name: SHORTHAND_PROJECT_NAME
     type: string
-    default: "lbdo"
+    default: "ldo"
     displayName: "Shorthand Project e.g. lbdo for libredevops"
 
   - name: SHORTHAND_LOCATION_NAME
@@ -455,36 +486,46 @@ parameters:
     default: "1.1.7"
     displayName: "Which version of Terraform should be installed?"
 
-  # This variable sets up a condition in the template, if set to true, it will run terraform plan -destroy instead of the normal plan
+  - name: VARIABLE_GROUP_NAME
+    type: string
+    default: "svp-kv-ldo-euw-dev-mgt-01"
+    displayName: "Enter the variable group which contains your authentication information"
+
+# This variable sets up a condition in the template, if set to true, it will run terraform plan -destroy instead of the normal plan
   - name: TERRAFORM_DESTROY
     default: false
-    displayName: "Check box to run plan and run a Destroy"
+    displayName: "Check box to run a Destroy"
     type: boolean
-
+  
   - name: TERRAFORM_PLAN_ONLY
     default: true
     displayName: "Check box to run plan ONLY and never run apply"
     type: boolean
 
+  - name: CHECKOV_SKIP_TESTS
+    type: string
+    default: ' '
+    displayName: "CheckOV tests to skip if comment skips don't work.  All checks run if parameter is empty, empty by default"
+
 # Declare variable group to pass variables to parameters, in this case, a libre-devops keyvault which is using a service principle for authentication
 variables:
-  - group: "svp-kv-lbdo-euw-tst-mgt-01"
+  - group: ${{ parameters.VARIABLE_GROUP_NAME }}
 
 # Sets what repos need cloned, for example, a library repo for modules and a poly-repo for target code
 resources:
   repositories:
 
-    - repository: azure-naming-convention
-      type: github
-      endpoint: github_service_connection
-      name: libre-devops/azure-naming-convention
-      ref: main
+  - repository: azure-naming-convention
+    type: github
+    endpoint: github_service_connection
+    name: libre-devops/azure-naming-convention
+    ref: main
 
-    - repository: azure-pipelines-module-development-build
-      type: github
-      endpoint: github_service_connection
-      name: libre-devops/azure-pipelines-module-development-build
-      ref: dev
+  - repository: azure-pipelines-module-development-build
+    type: github
+    endpoint: github_service_connection
+    name: libre-devops/azure-pipelines-module-development-build
+    ref: dev
 
 # You may wish to use a separate or self-hosted agent per job, by default, all jobs will inherit stage agent
 pool:
@@ -525,8 +566,9 @@ stages:
               TERRAFORM_COMPLIANCE_PATH: "$(Build.SourcesDirectory)/azure-naming-convention/az-terraform-compliance-policy"
               AZURE_TARGET_CLIENT_ID: $(SpokeSvpClientId)
               AZURE_TARGET_CLIENT_SECRET: $(SpokeSvpClientSecret)
-              AZURE_TARGET_TENANT_ID: $(SpokeSvpTenantId)
+              AZURE_TARGET_TENANT_ID: $(SpokeTenantId)
               AZURE_TARGET_SUBSCRIPTION_ID: $(SpokeSubID)
+              CHECKOV_SKIP_TESTS: ${{ parameters.CHECKOV_SKIP_TESTS }}
 
 ```
 {% endraw %}
