@@ -2,7 +2,7 @@
 sort: 2
 ---
 
-# Lbdo Azure Modules Example - Quick Windows VM 
+# Azure Modules Example - Quick Windows VM 
 
 ```
 module "rg" {
