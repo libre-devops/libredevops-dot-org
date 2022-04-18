@@ -4,7 +4,7 @@ A copy of these templates is stored [here](https://github.com/libre-devops/terra
 
 {% raw  %}
 
-```yaml
+```
 parameters:
 
   - name: TERRAFORM_PATH
@@ -447,7 +447,7 @@ steps:
 ## Example Call of Template
 
 {% raw %}
-```yaml
+```
 ---
 name: $(Build.DefinitionName)-$(date:yyyyMMdd)$(rev:.r)
 
@@ -581,7 +581,7 @@ stages:
 Want to use the copy held here rather than copying it locally?  Try something like this
 
 {% raw %}
-```yaml
+```
 ---
 name: $(Build.DefinitionName)-$(date:yyyyMMdd)$(rev:.r)
 
