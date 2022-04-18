@@ -91,7 +91,7 @@ module "aks" {
 
   default_node_enable_auto_scaling  = false
   default_node_orchestrator_version = "1.22"
-  default_node_pool_name            = "lbdo-pool"
+  default_node_pool_name            = "lbdopool"
   default_node_vm_size              = "Standard_B2ms"
   default_node_os_disk_size_gb      = "127"
   default_node_subnet_id            = element(values(module.network.subnets_ids), 2) // places in sn3-vnet-ldo-euw-dev-01
