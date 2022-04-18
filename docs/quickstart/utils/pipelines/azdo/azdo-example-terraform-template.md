@@ -576,7 +576,7 @@ stages:
 ```
 {% endraw %}
 
-# Use the main copy
+## Use the main copy
 
 Want to use the copy held here rather than copying it locally?  Try something like this
 
