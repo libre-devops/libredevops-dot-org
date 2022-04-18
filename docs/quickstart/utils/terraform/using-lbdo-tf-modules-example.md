@@ -2,7 +2,7 @@
 sort: 2
 ---
 
-# Usinf Libre DevOps TF Modules Example
+# Using the Libre DevOps TF Modules Example - Quick Windows VM
 
 ```
 module "rg" {
