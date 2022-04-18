@@ -4,7 +4,7 @@ sort: 2
 
 # Azure Modules Example - Quick Windows VM 
 
-```
+```hcl
 module "rg" {
   source = "registry.terraform.io/libre-devops/rg/azurerm"
 
