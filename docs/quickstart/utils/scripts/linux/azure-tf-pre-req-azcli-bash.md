@@ -32,7 +32,7 @@
 {% endraw  %}
 
 {% raw  %}
-```bash
+```
 #!/usr/bin/env bash
 
 ########### Edit the below variables to use script ############
