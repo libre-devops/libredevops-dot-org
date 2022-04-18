@@ -2,7 +2,7 @@
 sort: 2
 ---
 
-# Using the Libre DevOps TF Modules Example - Quick Windows VM
+# Lbdo Azure Modules Example - Quick Windows VM 
 
 ```
 module "rg" {
