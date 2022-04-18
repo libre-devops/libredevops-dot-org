@@ -32,7 +32,7 @@
 {% endraw  %}
 
 {% raw  %}
-```powershell
+```
 #!/usr/bin/env pwsh
 
 [Diagnostics.CodeAnalysis.SuppressMessage("PSAvoidUsingInvokeExpression","")]
