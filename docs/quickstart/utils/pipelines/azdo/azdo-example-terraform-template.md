@@ -270,7 +270,7 @@ steps:
          terraform show -json pipeline.plan > pipeline.plan.json ; `
 
          checkov -f pipeline.plan.json
-        displayName: 'CheckOV Check with Skipped Tests'
+        displayName: 'CheckOV Check'
         workingDirectory: "${{ parameters.TERRAFORM_PATH }}"
         continueOnError: false
         condition: eq('${{ parameters.CHECKOV_SKIP_TESTS }}', ' ')
@@ -282,7 +282,7 @@ steps:
          terraform show -json pipeline.plan > pipeline.plan.json ; `
 
          checkov -f pipeline.plan.json --skip-check ${{ parameters.CHECKOV_SKIP_TESTS }}
-        displayName: 'CheckOV Check'
+        displayName: 'CheckOV Check with Skipped Tests'
         workingDirectory: "${{ parameters.TERRAFORM_PATH }}"
         continueOnError: false
         condition: not(eq('${{ parameters.CHECKOV_SKIP_TESTS }}', ' '))
@@ -438,6 +438,7 @@ steps:
             ARM_CLIENT_SECRET: ${{ parameters.AZURE_TARGET_CLIENT_SECRET }}
             ARM_SUBSCRIPTION_ID: ${{ parameters.AZURE_TARGET_SUBSCRIPTION_ID }}
             ARM_TENANT_ID: ${{ parameters.AZURE_TARGET_TENANT_ID }}
+
 ```
 {% endraw %}
 
