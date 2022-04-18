@@ -2,6 +2,9 @@
 sort: 2
 ---
 
+# Usinf Libre DevOps TF Modules Example
+
+```
 module "rg" {
   source = "registry.terraform.io/libre-devops/rg/azurerm"
 
@@ -69,3 +72,6 @@ module "win_vm" {
 
   tags = module.rg.rg_tags
 }
+```
+
+Source: `{{ page.path }}`
