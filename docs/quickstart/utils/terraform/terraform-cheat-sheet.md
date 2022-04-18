@@ -6,7 +6,7 @@
 
 Convert `1` to `01`, `2` to `02` etc via `format("%02d", )`
 
-```hcl
+```
 resource "azurerm_application_security_group" "with_pad" {
   count               = 4
   name                = "asg-${var.short}-${var.loc}-${terraform.workspace}-web-${format("%02d", count.index + 1)}"
@@ -26,7 +26,7 @@ resource "azurerm_application_security_group" "without_pad" {
 ```
 ### Example Output
 
-```shell
+```
 Changes to Outputs:
 
   + asg_with_pad_output    = [
@@ -47,7 +47,7 @@ Changes to Outputs:
 
 Convert longhand name `uksouth` to shorthand `uks` or perform any other match on a key value
 
-```hcl
+```
 variable "loc" {
   description = "The shorthand name of the Azure location, for example, for UK South, use uks.  For UK West, use ukw. Normally passed as TF_VAR in pipeline"
   type        = string
@@ -70,14 +70,14 @@ locals {
 ```
 
 ### Example Output
-```shell
+```
 Changes to Outputs:
   + location_output = "UK West"
 ```
 
 ## Perform conditional based on a match being found in a regex, if the condition is true, do something, if not, do nothing
 
-```hcl
+```
 variable "environment" {
   default     = "prd"
   type        = string
@@ -105,7 +105,7 @@ resource "azurerm_resource_group" "test_rg" {
 ```
 
 ### Example Output
-```shell
+```
 # azurerm_resource_group.test_rg["key1"] will be created
   + resource "azurerm_resource_group" "test_rg" {
       + id       = (known after apply)
@@ -125,7 +125,7 @@ resource "azurerm_resource_group" "test_rg" {
 
 ## Example - Full Code
 
-```hcl
+```
 variable "environment" {
   default     = "prd"
   type        = string
@@ -158,7 +158,7 @@ output "rg_name" {
 ```
 
 ### Example Output - Full Rg_name - list(map(object({})))
-```shell
+```
 # Outputs in list(map(object({})))
  rg_name         = [
       + {
@@ -184,7 +184,7 @@ output "rg_name" {
 
 ## Get specific key value from map(object({}))
 
-```hcl
+```
 output "rg_name" {
   value = {
     for key, value in element(azurerm_resource_group.test_rg[*], 0) : key => value.name
@@ -193,7 +193,7 @@ output "rg_name" {
 ```
 
 ### Example Output in map(object({}))
-```shell
+```
 rg_name  = {
       + key1 = "prd-vm"
       + key2 = "prd-biscuit
@@ -202,7 +202,7 @@ rg_name  = {
 
 ## Fetch the location key from the 2nd object in map(object({})), then get the value only to be used as an input
 
-```hcl
+```
 variable "environment" {
   default     = "prd"
   type        = string
@@ -274,13 +274,13 @@ output "asg_rg_name" {
 ```
 
 ### Example Output in map(object({}))
-```shell
+```
   + asg_location    = "uksouth"
   + asg_rg_name     = "prd-vm"
 ```
 
 ## Access an inner object within a map with multiple elements
-```hcl
+```
 locals {
   fnc_apps = {
     fnc_app1 = {
@@ -313,11 +313,37 @@ output "managed_identity_prinicpal_id" {
 
 ```
 ### Example Output in map(object({}))
-```shell
+```
   managed_identity_prinicpal_id  = {
       + fnc_app1 = "3ca56017-d384-4899-bbad-1066800809c0"
       + fnc_app2 = "0cca0226-011d-444d-8763-e210878ef4dc
 }
+```
+
+```
+// If running locally, running this block will fetch your outbound public IP of your home/office/ISP/VPN and add it.  It will add the hosted agent etc if running from Microsoft/GitLab
+data "http" "user_ip" {
+  url = "https://ipv4.icanhazip.com"
+}
+
+output "my_ip" {
+  value = data.http.user_ip.body
+}
+
+// You will want to chomp to get rid of the heredoc response
+output "chomp_my_ip" {
+  value = chomp(data.http.user_ip.body)
+}
+```
+
+### Example Output
+
+```
+  + my_ip           = <<-EOT
+        20.108.154.139
+    EOT
+  + my_ip_chomp     = "20.108.154.139"
+
 ```
 
 Source: `{{ page.path }}`

@@ -5,6 +5,7 @@ A copy of these templates is stored [here](https://github.com/libre-devops/terra
 {% raw  %}
 
 ```
+---
 parameters:
 
   - name: TERRAFORM_PATH
@@ -153,7 +154,7 @@ steps:
           terraform-compliance -p pipeline.plan -f ${{ parameters.TERRAFORM_COMPLIANCE_PATH }}
         displayName: 'Terraform-Compliance Check'
         workingDirectory: "${{ parameters.TERRAFORM_PATH }}"
-        continueOnError: true
+        continueOnError: false
         enabled: true
 
       - pwsh: |
@@ -185,7 +186,7 @@ steps:
         displayName: 'CheckOV Check'
         workingDirectory: "${{ parameters.TERRAFORM_PATH }}"
         continueOnError: false
-        condition: eq('${{ parameters.CHECKOV_SKIP_TESTS }}', ' ')
+        condition: and(succeeded(), eq('${{ parameters.CHECKOV_SKIP_TESTS }}', ' '))
         enabled: true
 
       - pwsh: |
@@ -197,7 +198,7 @@ steps:
         displayName: 'CheckOV Check with Skipped Tests'
         workingDirectory: "${{ parameters.TERRAFORM_PATH }}"
         continueOnError: false
-        condition: not(eq('${{ parameters.CHECKOV_SKIP_TESTS }}', ' '))
+        condition: and(succeeded(), not(eq('${{ parameters.CHECKOV_SKIP_TESTS }}', ' ')))
         enabled: true
 
   - ${{ if and(eq(parameters.TERRAFORM_DESTROY, false), eq(parameters.TERRAFORM_PLAN_ONLY, false)) }}:
@@ -275,7 +276,7 @@ steps:
         displayName: 'CheckOV Check'
         workingDirectory: "${{ parameters.TERRAFORM_PATH }}"
         continueOnError: false
-        condition: eq('${{ parameters.CHECKOV_SKIP_TESTS }}', ' ')
+        condition: and(succeeded(), eq('${{ parameters.CHECKOV_SKIP_TESTS }}', ' '))
         enabled: true
 
       - pwsh: |
@@ -287,7 +288,7 @@ steps:
         displayName: 'CheckOV Check with Skipped Tests'
         workingDirectory: "${{ parameters.TERRAFORM_PATH }}"
         continueOnError: false
-        condition: not(eq('${{ parameters.CHECKOV_SKIP_TESTS }}', ' '))
+        condition: and(succeeded(), not(eq('${{ parameters.CHECKOV_SKIP_TESTS }}', ' ')))
         enabled: true
 
       - pwsh: |
