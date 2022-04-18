@@ -1,14 +1,12 @@
----
-sort: 2
----
+
 
 # Azure Modules Example - Quick Windows VM 
 
-```hcl
+```
 module "rg" {
   source = "registry.terraform.io/libre-devops/rg/azurerm"
 
-  rg_name    = "rg-${var.short}-${var.loc}-${terraform.workspace}-build"
+  rg_name    = "rg-${var.short}-${var.loc}-${terraform.workspace}-build" // rg-ldo-euw-dev-build
   location   = local.location
   lock_level = "CanNotDelete"
   tags       = local.tags
@@ -41,14 +39,11 @@ module "nsg" {
   rg_name   = module.rg.rg_name
   location  = module.rg.rg_location
   nsg_name  = "nsg-build-${var.short}-${var.loc}-${terraform.workspace}-01"
-  subnet_id = element(values(module.network.subnets_ids), 0)
+  subnet_id = element(values(module.network.subnets_ids), 0) //sn1-vnet-ldo-euw-dev-01
 
   tags = module.rg.rg_tags
 }
 
-locals {
-  vm_amount = 1
-}
 
 module "win_vm" {
   source = "github.com/libre-devops/terraform-azurerm-windows-vm"
@@ -56,8 +51,8 @@ module "win_vm" {
   rg_name  = module.rg.rg_name
   location = module.rg.rg_location
 
-  vm_amount          = local.vm_amount
-  vm_hostname        = "vm${var.short}${var.loc}${terraform.workspace}"
+  vm_amount          = 2
+  vm_hostname        = "vm${var.short}${var.loc}${terraform.workspace}" //vmldoeuwdev01 & vmlboeuwdev02
   vm_size            = "Standard_B2ms"
   vm_os_simple       = "WindowsServer2019"
   vm_os_disk_size_gb = "127"
@@ -66,7 +61,7 @@ module "win_vm" {
   admin_password = data.azurerm_key_vault_secret.mgmt_local_admin_pwd.value
 
   subnet_id            = element(values(module.network.subnets_ids), 0)
-  availability_zone    = "alternate"
+  availability_zone    = "alternate" //When more than one VM is made, alternates the availability zone place, 1, 2, 3.
   storage_account_type = "Standard_LRS"
   identity_type        = "SystemAssigned"
 
