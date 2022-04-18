@@ -1,4 +1,4 @@
-# Terrafrom Pre-Requisite - Azure-Cli - Bash
+ # Terrafrom Pre-Requisite - Azure-Cli - Bash
 
 {% raw  %}
 - Purpose:
