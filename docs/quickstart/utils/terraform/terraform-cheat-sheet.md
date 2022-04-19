@@ -319,6 +319,7 @@ output "managed_identity_prinicpal_id" {
       + fnc_app2 = "0cca0226-011d-444d-8763-e210878ef4dc
 }
 ```
+## Fetch your Outbound IP from terraform
 
 ```
 // If running locally, running this block will fetch your outbound public IP of your home/office/ISP/VPN and add it.  It will add the hosted agent etc if running from Microsoft/GitLab
