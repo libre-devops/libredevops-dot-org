@@ -1,6 +1,6 @@
 # Azure Modules Example
 
-```
+```hcl
 module "rg" {
   source = "registry.terraform.io/libre-devops/rg/azurerm"
 
@@ -83,14 +83,14 @@ module "aks" {
   aks_name                = "aks-${var.short}-${var.loc}-${terraform.workspace}-01" // aks-ldo-euw-dev-01
   admin_username          = "LibreDevOpsAdmin"
   ssh_public_key          = data.azurerm_ssh_public_key.mgmt_ssh_key.public_key // Created with Libre DevOps PreRequisite Script
-  kubernetes_version      = "1.22"
+  kubernetes_version      = "1.22.6"
   dns_prefix              = "ldo"
   sku_tier                = "Free"
   private_cluster_enabled = true
   enable_rbac             = true
 
   default_node_enable_auto_scaling  = false
-  default_node_orchestrator_version = "1.22"
+  default_node_orchestrator_version = "1.22.6"
   default_node_pool_name            = "lbdopool"
   default_node_vm_size              = "Standard_B2ms"
   default_node_os_disk_size_gb      = "127"
@@ -102,6 +102,12 @@ module "aks" {
 
   identity_type = "UserAssigned" // Created with Libre DevOps PreRequisite Script
   identity_ids  = [data.azurerm_user_assigned_identity.mgmt_user_assigned_id.id]
+
+  network_plugin                 = "azure"
+  network_policy                 = "azure"
+  net_profile_service_cidr       = "10.0.5.0/24"
+  net_profile_dns_service_ip     = "10.0.5.10"
+  net_profile_docker_bridge_cidr = "172.17.0.1/16"
 }
 
 module "win_vm" {
@@ -129,15 +135,15 @@ module "win_vm" {
   tags = module.rg.rg_tags
 }
 
-module "run_command" {
+module "run_command_win" {
   source = "registry.terraform.io/libre-devops/run-vm-command/azurerm"
 
-  depends_on = [module.rg, module.win_vm]
+  depends_on = [module.win_vm] // fetches as a data reference so requires depends-on
   location   = module.rg.rg_location
   rg_name    = module.rg.rg_name
   vm_name    = element(module.win_vm.vm_name, 0)
   os_type    = "windows"
-   tags      = module.rg.rg_tags
+  tags       = module.rg.rg_tags
 
   command = "iex ((new-object net.webclient).DownloadString('https://chocolatey.org/install.ps1')) ; choco install -y git" // Runs this commands on winldoeuwdev01
 }
@@ -166,6 +172,23 @@ module "lnx_vm" {
   identity_type        = "SystemAssigned"
 
   tags = module.rg.rg_tags
+}
+
+module "run_command_lnx" {
+  source = "registry.terraform.io/libre-devops/run-vm-command/azurerm"
+
+  for_each = {
+    for key, value in module.lnx_vm.vm_name : key => value
+  }
+
+  depends_on = [module.lnx_vm] // fetches as a data reference so requires depends-on
+  location   = module.rg.rg_location
+  rg_name    = module.rg.rg_name
+  vm_name    = each.value
+  os_type    = "linux"
+  tags       = module.rg.rg_tags
+
+  command = "echo hello > /home/libre-devops.txt" // Runs this commands on all Linux VMs
 }
 
 // Allow Inbound Access from Bastion to the entire virtual network
