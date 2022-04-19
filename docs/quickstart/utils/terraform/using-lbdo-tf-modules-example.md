@@ -46,8 +46,7 @@ module "nsg" {
 #tfsec:ignore:azure-network-no-public-egress
 module "bastion" {
   source = "registry.terraform.io/libre-devops/bastion/azurerm"
-
-
+  
   vnet_rg_name = module.network.vnet_rg_name
   vnet_name    = module.network.vnet_name
 
