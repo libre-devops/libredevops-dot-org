@@ -4,10 +4,11 @@
 module "rg" {
   source = "registry.terraform.io/libre-devops/rg/azurerm"
 
-  rg_name    = "rg-${var.short}-${var.loc}-${terraform.workspace}-build" // rg-ldo-euw-dev-build
-  location   = local.location                                            // compares var.loc with the var.regions var to match a long-hand name, in this case, "euw", so "westeurope"
+  rg_name  = "rg-${var.short}-${var.loc}-${terraform.workspace}-build" // rg-ldo-euw-dev-build
+  location = local.location                                            // compares var.loc with the var.regions var to match a long-hand name, in this case, "euw", so "westeurope"
+  tags     = local.tags
+
   lock_level = "CanNotDelete"
-  tags       = local.tags
 }
 
 module "network" {
@@ -15,6 +16,7 @@ module "network" {
 
   rg_name  = module.rg.rg_name // rg-ldo-euw-dev-build
   location = module.rg.rg_location
+  tags     = local.tags
 
   vnet_name     = "vnet-${var.short}-${var.loc}-${terraform.workspace}-01" // vnet-ldo-euw-dev-01
   vnet_location = module.network.vnet_location
@@ -27,28 +29,27 @@ module "network" {
     subnet2 = ["Microsoft.Storage", "Microsoft.Sql"], // Adds extra subnet endpoints
     subnet3 = ["Microsoft.AzureActiveDirectory"]
   }
-
-  tags = local.tags
 }
 
 module "nsg" {
   source = "registry.terraform.io/libre-devops/nsg/azurerm"
 
-  rg_name   = module.rg.rg_name
-  location  = module.rg.rg_location
+  rg_name  = module.rg.rg_name
+  location = module.rg.rg_location
+  tags     = module.rg.rg_tags
+
   nsg_name  = "nsg-build-${var.short}-${var.loc}-${terraform.workspace}-01" // nsg-build-ldo-euw-dev-01
   subnet_id = element(values(module.network.subnets_ids), 0)                // Adds NSG to sn1-vnet-ldo-euw-dev-01
-
-  tags = module.rg.rg_tags
 }
 
 // Fix error which causes security errors to be flagged by TFSec, public egress is needed for Azure Bastion to function, its kind of the point :)
 #tfsec:ignore:azure-network-no-public-egress
 module "bastion" {
   source = "registry.terraform.io/libre-devops/bastion/azurerm"
-  
+
   vnet_rg_name = module.network.vnet_rg_name
   vnet_name    = module.network.vnet_name
+  tags         = module.rg.rg_tags
 
   bas_subnet_iprange = "10.0.4.0/28"
 
@@ -66,8 +67,27 @@ module "bastion" {
   bas_host_location      = module.rg.rg_location
   bas_host_rg_name       = module.rg.rg_name
   bas_host_ipconfig_name = "bas-${var.short}-${var.loc}-${terraform.workspace}-01-ipconfig" // bas-ldo-euw-dev-01-ipconfig
+}
 
-  tags = module.rg.rg_tags
+module "public_lb" {
+  source = "registry.terraform.io/libre-devops/public-lb/azurerm"
+
+  rg_name  = module.rg.rg_name
+  location = module.rg.rg_location
+  tags     = module.rg.rg_tags
+
+  pip_name          = "pip-lbe-${var.short}-${var.loc}-${terraform.workspace}-01"
+  pip_sku           = "Standard"
+  availability_zone = ["1"]
+
+  lb_name                  = "lbe-${var.short}-${var.loc}-${terraform.workspace}-01" // lb-ldo-euw-dev-01
+  lb_bpool_name            = "bpool-${module.public_lb.lb_name}"
+  lb_ip_configuration_name = "lbe-${var.short}-${var.loc}-${terraform.workspace}-01-ipconfig"
+
+  enable_outbound_rule     = true // Condtionally creates an outbound rule
+  outbound_rule_name       = "rule-out-${module.public_lb.lb_name}"
+  outbound_protocol        = "Tcp"
+  allocated_outbound_ports = 1024
 }
 
 // This module does not consider for log analytics oms agent, but tfsec warns anyway.  Code exists to enable it should you wish by check is tabled
@@ -114,6 +134,7 @@ module "win_vm" {
 
   rg_name  = module.rg.rg_name
   location = module.rg.rg_location
+  tags     = module.rg.rg_tags
 
   vm_amount          = 3
   vm_hostname        = "win${var.short}${var.loc}${terraform.workspace}" // winldoeuwdev01 & winldoeuwdev02 & winldoeuwdev03
@@ -130,8 +151,6 @@ module "win_vm" {
   availability_zone    = "alternate"                                    // If more than 1 VM exists, places them in alterate zones, 1, 2, 3 then resetting.  If you want HA, use an availability set.
   storage_account_type = "Standard_LRS"
   identity_type        = "SystemAssigned"
-
-  tags = module.rg.rg_tags
 }
 
 module "run_command_win" {
@@ -140,9 +159,10 @@ module "run_command_win" {
   depends_on = [module.win_vm] // fetches as a data reference so requires depends-on
   location   = module.rg.rg_location
   rg_name    = module.rg.rg_name
-  vm_name    = element(module.win_vm.vm_name, 0)
-  os_type    = "windows"
   tags       = module.rg.rg_tags
+
+  vm_name = element(module.win_vm.vm_name, 0)
+  os_type = "windows"
 
   command = "iex ((new-object net.webclient).DownloadString('https://chocolatey.org/install.ps1')) ; choco install -y git" // Runs this commands on winldoeuwdev01
 }
@@ -152,6 +172,7 @@ module "lnx_vm" {
 
   rg_name  = module.rg.rg_name
   location = module.rg.rg_location
+  tags     = module.rg.rg_tags
 
   vm_amount          = 2
   vm_hostname        = "lnx${var.short}${var.loc}${terraform.workspace}" // lmxldoeuwdev01 & lmxldoeuwdev02
@@ -169,23 +190,22 @@ module "lnx_vm" {
   availability_zone    = "alternate"
   storage_account_type = "Standard_LRS"
   identity_type        = "SystemAssigned"
-
-  tags = module.rg.rg_tags
 }
 
 module "run_command_lnx" {
   source = "registry.terraform.io/libre-devops/run-vm-command/azurerm"
 
   for_each = {
-    for key, value in module.lnx_vm.vm_name : key => value
+    for key, value in module.lnx_vm.vm_name : key => value // Gets all VM names created by Linux VM module
   }
 
   depends_on = [module.lnx_vm] // fetches as a data reference so requires depends-on
   location   = module.rg.rg_location
   rg_name    = module.rg.rg_name
-  vm_name    = each.value
-  os_type    = "linux"
   tags       = module.rg.rg_tags
+
+  vm_name = each.value
+  os_type = "linux"
 
   command = "echo hello > /home/libre-devops.txt" // Runs this commands on all Linux VMs
 }
@@ -206,7 +226,11 @@ resource "azurerm_network_security_rule" "AllowSSHRDPInboundFromBasSubnet" {
 }
 
 data "http" "user_ip" {
-  url = "https://ipv4.icanhazip.com" // If running locally, running this block will fetch your outbound public IP of your home/office/ISP/VPN and add it.  It will add the hosted agent etc if running from Microsoft/GitLab
+  url = "https://checkip.amazonaws.com" // If running locally, running this block will fetch your outbound public IP of your home/office/ISP/VPN and add it.  It will add the hosted agent etc if running from Microsoft/GitLab
+}
+
+output "user_ip" {
+  value = data.http.user_ip.body
 }
 
 // Allow Inbound Access from your hypothetical home IP - you may not want this.
@@ -223,6 +247,7 @@ resource "azurerm_network_security_rule" "AllowSSHRDPInboundFromHomeSubnet" {
   resource_group_name          = module.rg.rg_name
   network_security_group_name  = module.nsg.nsg_name
 }
+
 ```
 
 Source: `{{ page.path }}`
