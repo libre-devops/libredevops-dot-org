@@ -64,7 +64,7 @@ module "public_lb" {
 }
 
 module "private_lb" {
-  source = "github.com/libre-devops/terraform-azurerm-private-lb"
+  source = "registry.terraform.io/libre-devops/private-lb/azurerm"
 
   rg_name  = module.rg.rg_name
   location = module.rg.rg_location
