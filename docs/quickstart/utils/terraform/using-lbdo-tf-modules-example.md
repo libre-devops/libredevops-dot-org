@@ -1,6 +1,6 @@
 # Azure Modules Example
 
-```hcl
+```
 module "rg" {
   source = "registry.terraform.io/libre-devops/rg/azurerm"
 
@@ -42,6 +42,45 @@ module "nsg" {
   subnet_id = element(values(module.network.subnets_ids), 0)                // Adds NSG to sn1-vnet-ldo-euw-dev-01
 }
 
+module "public_lb" {
+  source = "registry.terraform.io/libre-devops/public-lb/azurerm"
+
+  rg_name  = module.rg.rg_name
+  location = module.rg.rg_location
+  tags     = module.rg.rg_tags
+
+  pip_name          = "pip-lbe-${var.short}-${var.loc}-${terraform.workspace}-01"
+  pip_sku           = "Standard"
+  availability_zone = ["1"]
+
+  lb_name                  = "lbe-${var.short}-${var.loc}-${terraform.workspace}-01" // lbe-ldo-euw-dev-01
+  lb_bpool_name            = "bpool-${module.public_lb.lb_name}"
+  lb_ip_configuration_name = "lbe-${var.short}-${var.loc}-${terraform.workspace}-01-ipconfig"
+
+  enable_outbound_rule     = true // Condtionally creates an outbound rule
+  outbound_rule_name       = "rule-out-${module.public_lb.lb_name}"
+  outbound_protocol        = "Tcp"
+  allocated_outbound_ports = 1024
+}
+
+module "private_lb" {
+  source = "github.com/libre-devops/terraform-azurerm-private-lb"
+
+  rg_name  = module.rg.rg_name
+  location = module.rg.rg_location
+  tags     = module.rg.rg_tags
+
+  lb_frontend_ip_configurations = {
+    "lbi-${var.short}-${var.loc}-${terraform.workspace}-01-ipconfig" = {
+      subnet_id                     = element(values(module.network.subnets_ids), 2),
+      private_ip_address_allocation = "Dynamic"
+    },
+  }
+
+  lb_name                  = "lbi-${var.short}-${var.loc}-${terraform.workspace}-01" // lbi-ldo-euw-dev-01
+  lb_bpool_name            = "bpool-${module.public_lb.lb_name}"
+}
+
 // Fix error which causes security errors to be flagged by TFSec, public egress is needed for Azure Bastion to function, its kind of the point :)
 #tfsec:ignore:azure-network-no-public-egress
 module "bastion" {
@@ -67,27 +106,6 @@ module "bastion" {
   bas_host_location      = module.rg.rg_location
   bas_host_rg_name       = module.rg.rg_name
   bas_host_ipconfig_name = "bas-${var.short}-${var.loc}-${terraform.workspace}-01-ipconfig" // bas-ldo-euw-dev-01-ipconfig
-}
-
-module "public_lb" {
-  source = "registry.terraform.io/libre-devops/public-lb/azurerm"
-
-  rg_name  = module.rg.rg_name
-  location = module.rg.rg_location
-  tags     = module.rg.rg_tags
-
-  pip_name          = "pip-lbe-${var.short}-${var.loc}-${terraform.workspace}-01"
-  pip_sku           = "Standard"
-  availability_zone = ["1"]
-
-  lb_name                  = "lbe-${var.short}-${var.loc}-${terraform.workspace}-01" // lb-ldo-euw-dev-01
-  lb_bpool_name            = "bpool-${module.public_lb.lb_name}"
-  lb_ip_configuration_name = "lbe-${var.short}-${var.loc}-${terraform.workspace}-01-ipconfig"
-
-  enable_outbound_rule     = true // Condtionally creates an outbound rule
-  outbound_rule_name       = "rule-out-${module.public_lb.lb_name}"
-  outbound_protocol        = "Tcp"
-  allocated_outbound_ports = 1024
 }
 
 // This module does not consider for log analytics oms agent, but tfsec warns anyway.  Code exists to enable it should you wish by check is tabled
@@ -243,7 +261,6 @@ resource "azurerm_network_security_rule" "AllowSSHRDPInboundFromHomeSubnet" {
   resource_group_name          = module.rg.rg_name
   network_security_group_name  = module.nsg.nsg_name
 }
-
 ```
 
 Source: `{{ page.path }}`
