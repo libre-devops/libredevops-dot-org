@@ -8,7 +8,7 @@ module "rg" {
   location = local.location                                            // compares var.loc with the var.regions var to match a long-hand name, in this case, "euw", so "westeurope"
   tags     = local.tags
 
-  lock_level = "CanNotDelete"
+  #  lock_level = "CanNotDelete" // Do not set this value to skip lock
 }
 
 module "network" {
@@ -24,22 +24,177 @@ module "network" {
   address_space   = ["10.0.0.0/16"]
   subnet_prefixes = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
   subnet_names    = ["sn1-${module.network.vnet_name}", "sn2-${module.network.vnet_name}", "sn3-${module.network.vnet_name}"] //sn1-vnet-ldo-euw-dev-01
-
   subnet_service_endpoints = {
-    subnet2 = ["Microsoft.Storage", "Microsoft.Sql"], // Adds extra subnet endpoints
-    subnet3 = ["Microsoft.AzureActiveDirectory"]
+    "sn1-${module.network.vnet_name}" = ["Microsoft.Storage"]                   // Adds extra subnet endpoints to sn1-vnet-ldo-euw-dev-01
+    "sn2-${module.network.vnet_name}" = ["Microsoft.Storage", "Microsoft.Sql"], // Adds extra subnet endpoints to sn2-vnet-ldo-euw-dev-01
+    "sn3-${module.network.vnet_name}" = ["Microsoft.AzureActiveDirectory"]      // Adds extra subnet endpoints to sn3-vnet-ldo-euw-dev-01
   }
 }
 
 module "nsg" {
   source = "registry.terraform.io/libre-devops/nsg/azurerm"
 
+  for_each = {
+    for key, value in module.network.subnets_ids : key => value // Creates a key-value pair of subnet_ids with the keys being the subnet name and value being the id, creates a default NSG and assigns to each
+  }
+
   rg_name  = module.rg.rg_name
   location = module.rg.rg_location
   tags     = module.rg.rg_tags
 
-  nsg_name  = "nsg-build-${var.short}-${var.loc}-${terraform.workspace}-01" // nsg-build-ldo-euw-dev-01
-  subnet_id = element(values(module.network.subnets_ids), 0)                // Adds NSG to sn1-vnet-ldo-euw-dev-01
+  nsg_name  = "nsg-${each.key}" // nsg-sn*-vnet-ldo-euw-dev-01
+  subnet_id = each.value        // Adds NSG to all subnets
+}
+
+// This module does not consider for CMKs and allows the users to manually set bypasses
+#checkov:skip=CKV2_AZURE_1:CMKs are not considered in this module
+#checkov:skip=CKV2_AZURE_18:CMKs are not considered in this module
+#checkov:skip=CKV_AZURE_33:Storage logging is not configured by default in this module
+#tfsec:ignore:azure-storage-queue-services-logging-enabled tfsec:ignore:azure-storage-allow-microsoft-service-bypass
+module "sa" {
+  source = "registry.terraform.io/libre-devops/storage-account/azurerm"
+
+  rg_name  = module.rg.rg_name
+  location = module.rg.rg_location
+  tags     = module.rg.rg_tags
+
+  storage_account_name = "st${var.short}${var.loc}${terraform.workspace}01"
+  access_tier          = "Hot"
+  identity_type = "SystemAssigned"
+
+  storage_account_properties = {
+
+    // Set this block to enable network rules
+    network_rules = {
+      default_action = "Deny"
+      bypass         = ["AzureServices", "Metrics", "Logging"]
+      ip_rules       = [chomp(data.http.user_ip.body)]
+      subnet_ids     = [element(values(module.network.subnets_ids), 0)]
+
+      private_link_access = {
+        endpoint_resource_id = element(values(module.network.subnets_ids), 0)
+        endpoint_tenant_id   = data.azurerm_client_config.current_creds.tenant_id
+      }
+    }
+
+    custom_domain = {
+      name          = "libredevops.org"
+      use_subdomain = false
+    }
+
+    blob_properties = {
+      versioning_eabled        = false
+      change_feed_enabled      = false
+      default_service_version  = "2020-06-12"
+      last_access_time_enabled = false
+
+      deletion_retention_polcies = {
+        days = 10
+      }
+
+      container_delete_retention_policy = {
+        days = 10
+      }
+
+      cors_rule = {
+        allowed_headers    = ["*"]
+        allowed_methods    = ["GET", "DELETE"]
+        allowed_origins    = ["*"]
+        exposed_headers    = ["*"]
+        max_age_in_seconds = 5
+      }
+    }
+
+    share_properties = {
+
+      versioning_enabled       = true
+      change_feed_enabled      = true
+      default_service_version  = true
+      last_access_time_enabled = true
+
+      cors_rule = {
+        allowed_headers    = ["*"]
+        allowed_methods    = ["GET", "DELETE"]
+        allowed_origins    = ["*"]
+        exposed_headers    = ["*"]
+        max_age_in_seconds = 5
+      }
+
+      smb = {
+        versions                        = ["SMB3.1.1"]
+        authentication_types            = ["Kerberos"]
+        kerberos_ticket_encryption_type = ["AES-256"]
+        channel_encryption_type         = ["AES-256-GCM"]
+      }
+
+      retention_policy = {
+        days = 10
+      }
+    }
+
+    // Enabling this without a queue will cause an error
+    queue_properties = {
+      logging = {
+        delete                = true
+        read                  = true
+        write                 = true
+        version               = "1.0"
+        retention_policy_days = 10
+      }
+
+      cors_rule = {
+        allowed_headers    = ["*"]
+        allowed_methods    = ["GET", "DELETE"]
+        allowed_origins    = ["*"]
+        exposed_headers    = ["*"]
+        max_age_in_seconds = 5
+      }
+
+      minute_metrics = {
+        enabled               = true
+        version               = "1.0.0"
+        include_apis          = true
+        retention_policy_days = 10
+      }
+
+      hour_metrics = {
+        enabled               = true
+        version               = "1.0.0"
+        include_apis          = true
+        retention_policy_days = 10
+      }
+    }
+
+    static_website = {
+      index_document     = null
+      error_404_document = null
+    }
+
+    azure_files_authentication = {
+      directory_type = "AD"
+
+      activte_directory = {
+        storage_sid  = "12345"
+        domain_name  = "libredevops.org"
+        domain_sid   = "4567343"
+        domain_guid  = "aaaa-bbbb-ccc-ddd"
+        forest_naem  = "libredevops.org"
+        netbios_name = "libredevops.org"
+      }
+    }
+
+    // You must have a managed key for this to work
+        customer_managed_key = {
+          key_vault_key_id          = data.azurerm_key_vault.mgmt_kv.id
+          user_assigned_identity_id = data.azurerm_user_assigned_identity.mgmt_user_assigned_id.id
+        }
+
+    routing = {
+      publish_internet_endpoints  = false
+      publish_microsoft_endpoints = true
+      choice                      = "MicrosoftRouting"
+    }
+  }
 }
 
 module "public_lb" {
@@ -157,7 +312,7 @@ module "win_vm" {
   vm_amount          = 3
   vm_hostname        = "win${var.short}${var.loc}${terraform.workspace}" // winldoeuwdev01 & winldoeuwdev02 & winldoeuwdev03
   vm_size            = "Standard_B2ms"
-  vm_os_simple       = "WindowsServer2019"
+  vm_os_simple       = "CISWindowsServer2019L1"
   vm_os_disk_size_gb = "127"
 
   asg_name = "asg-${element(regexall("[a-z]+", element(module.win_vm.vm_name, 0)), 0)}-${var.short}-${var.loc}-${terraform.workspace}-01" //asg-vmldoeuwdev-ldo-euw-dev-01 - Regex strips all numbers from string
@@ -195,7 +350,7 @@ module "lnx_vm" {
   vm_amount          = 2
   vm_hostname        = "lnx${var.short}${var.loc}${terraform.workspace}" // lmxldoeuwdev01 & lmxldoeuwdev02
   vm_size            = "Standard_B2ms"
-  vm_os_simple       = "Ubuntu20.04"
+  vm_os_simple       = "CISUbuntu20.04L1"
   vm_os_disk_size_gb = "127"
 
   asg_name = "asg-${element(regexall("[a-z]+", element(module.lnx_vm.vm_name, 0)), 0)}-${var.short}-${var.loc}-${terraform.workspace}-01" //asg-lnxldoeuwdev-ldo-euw-dev-01 - Regex strips all numbers from string
@@ -244,8 +399,9 @@ resource "azurerm_network_security_rule" "AllowSSHRDPInboundFromBasSubnet" {
 }
 
 data "http" "user_ip" {
-  url = "https://checkip.amazonaws.com" // If running locally, running this block will fetch your outbound public IP of your home/office/ISP/VPN and add it.  It will add the hosted agent etc if running from Microsoft/GitLab
+  url = "https://ipv4.icanhazip.com" // If running locally, running this block will fetch your outbound public IP of your home/office/ISP/VPN and add it.  It will add the hosted agent etc if running from Microsoft/GitLab
 }
+
 
 // Allow Inbound Access from your hypothetical home IP - you may not want this.
 resource "azurerm_network_security_rule" "AllowSSHRDPInboundFromHomeSubnet" {
