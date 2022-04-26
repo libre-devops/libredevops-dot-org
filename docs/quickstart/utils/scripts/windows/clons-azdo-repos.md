@@ -1,5 +1,7 @@
 # Clone all Azure DevOps repos script
 
+{% include list.liquid all=true %}
+
 ```powershell
 #!/usr/bin/env pwsh
 
@@ -34,3 +36,5 @@ foreach ($Repo in $Repos) {
 }
 
 ```
+
+Source: {{ page.path }}
