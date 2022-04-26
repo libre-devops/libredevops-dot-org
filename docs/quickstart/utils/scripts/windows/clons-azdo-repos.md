@@ -1,12 +1,13 @@
 # Clone all Azure DevOps repos script
 
 ```powershell
-param(
-    [string]$Organization
-)
+#!/usr/bin/env pwsh
 
-if ($Organization -notmatch '^https?://dev.azure.com/\w+') {
-    $Organization = "https://dev.azure.com/$Organization"
+$Org="https://dev.azure.com/your_org"
+$Proj="your_proj"
+
+if ($Org -notmatch '^https?://dev.azure.com/\w+') {
+    $Org = "https://dev.azure.com/$Org"
 }
 
 # Make sure we are signed in to Azure
@@ -24,21 +25,12 @@ if ($null -eq $DevOpsExtension) {
     $null = az extension add --name 'azure-devops'
 }
 
-$Projects = az devops project list --organization $Organization --query 'value[].name' -o tsv
-foreach ($Proj in $Projects) {
-    if (-not (Test-Path -Path ".\$Proj" -PathType Container)) {
-        New-Item -Path $Proj -ItemType Directory |
-        Select-Object -ExpandProperty FullName |
-        Push-Location
-    }
-    $Repos = az repos list --organization $Organization --project $Proj | ConvertFrom-Json
-    foreach ($Repo in $Repos) {
-        if(-not (Test-Path -Path $Repo.name -PathType Container)) {
-            Write-Warning -Message "Cloning repo $Proj\$($Repo.Name)"
-            git clone $Repo.webUrl
-        }
+$Repos = az repos list --organization $Org --project $Proj | ConvertFrom-Json
+foreach ($Repo in $Repos) {
+    if(-not (Test-Path -Path $Repo.name -PathType Container)) {
+        Write-Warning -Message "Cloning repo $Proj\$($Repo.Name)"
+        git clone $Repo.webUrl
     }
 }
-
 
 ```
