@@ -72,8 +72,9 @@ lower_case_convert() {
 ```
 
 ## PATH Cleaner
+```
 PATH=$(printf %s "$PATH" | awk -vRS=: -vORS= '!a[$0]++ {if (NR>1) printf(":"); printf("%s", $0) }' )
-
+```
 {% endraw  %}
 
 Source: `{{ page.path }}`
