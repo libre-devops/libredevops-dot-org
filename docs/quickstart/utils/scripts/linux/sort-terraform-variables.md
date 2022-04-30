@@ -28,9 +28,16 @@ You can also just make aliases to make this easier
 ```shell
 echo "alias stfi='curl https://raw.githubusercontent.com/libre-devops/utils/dev/scripts/terraform/tf-sort.sh | bash -s -- input.tf input.tf'" >> ~/.bashrc && source ~/.bashrc
 ```
-
+Then:
+```shell
+stfi
+```
 ### Sort output.tf
 ```shell
 echo "alias stfo='wget -O - https://raw.githubusercontent.com/libre-devops/utils/dev/scripts/terraform/tf-sort.sh | bash -s -- output output.tf'" >> ~/.bashrc && source ~/.bashrc
+```
+Then:
+```shell
+stfo
 ```
 Source: `{{ page.path }}`
