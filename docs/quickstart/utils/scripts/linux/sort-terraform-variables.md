@@ -2,7 +2,7 @@
 
 Copy of script can be found [https://github.com/libre-devops/utils/blob/dev/scripts/terraform/tf-sort.sh](https://github.com/libre-devops/utils/blob/dev/scripts/terraform/tf-sort.sh)
 
-The script takes arguements as inputs, or defaults to reordering a file called input.tf
+The script takes arguments as inputs, or defaults to reordering a file called input.tf and will sort your terraform variables in alphabetical order
 
 ### Using curl with arguments
 ```shell
