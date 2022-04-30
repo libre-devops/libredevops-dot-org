@@ -29,7 +29,7 @@ You can also just make aliases to make this easier
 echo "alias stfi='curl https://raw.githubusercontent.com/libre-devops/utils/dev/scripts/terraform/tf-sort.sh | bash -s -- input.tf input.tf'" >> ~/.bashrc && source ~/.bashrc
 ```
 
-### Sout output.tf
+### Sort output.tf
 ```shell
 echo "alias stfo='wget -O - https://raw.githubusercontent.com/libre-devops/utils/dev/scripts/terraform/tf-sort.sh | bash -s -- output output.tf'" >> ~/.bashrc && source ~/.bashrc
 ```
