@@ -75,6 +75,61 @@ lower_case_convert() {
 ```
 PATH=$(printf %s "$PATH" | awk -vRS=: -vORS= '!a[$0]++ {if (NR>1) printf(":"); printf("%s", $0) }' )
 ```
+
+## Terraform Aliases for bash
+```
+echo "alias stfi='curl https://raw.githubusercontent.com/libre-devops/utils/dev/scripts/terraform/tf-sort.sh | bash -s -- input.tf input.tf'" >> ~/.bashrc && source ~/.bashrc && \
+echo "alias stfo='curl https://raw.githubusercontent.com/libre-devops/utils/dev/scripts/terraform/tf-sort.sh | bash -s -- output.tf output.tf'" >> ~/.bashrc && source ~/.bashrc
+```
+
+## Set arguemnents in script
+```
+#!/usr/bin/env bash
+full_name="${1:-Craig Thacker}" // $firstarg
+email_address="${2:-craigthackerx@gmail.com}" // $secondarg
+```
+
+### Example call
+```
+curl https://raw.githubusercontent.com/craigthackerx/craigthackerx-personal/dev/scripts/setup-bash.sh | bash -s -- '$firstarg' '$secondarg' >> ~/.bashrc && source ~/.bashrc
+
+curl https://raw.githubusercontent.com/craigthackerx/craigthackerx-personal/dev/scripts/setup-bash.sh | bash -s -- 'Craig Thacker' 'craigthackerx@gmail.com' >> ~/.bashrc && source ~/.bashrc
+```
+
+## Setup Bash
+```
+curl https://raw.githubusercontent.com/craigthackerx/craigthackerx-personal/dev/scripts/setup-bash.sh | bash -s -- 'Craig Thacker' 'craigthackerx@gmail.com' >> ~/.bashrc && source ~/.bashrc
+```
+
+## Run something in each directory matching a name
+```
+#!/usr/bin/env bash
+
+set -eou pipefail
+back=$(pwd)
+provider="${1:-azurerm}"
+location="${2:-.}"
+workspace=$(find "${location}" -maxdepth 1 -name "terraform-${provider}-*" -type d)
+
+function stfi () {
+    curl https://raw.githubusercontent.com/libre-devops/utils/dev/scripts/terraform/tf-sort.sh | bash -s -- input.tf input.tf
+}
+
+function stfo () {
+    curl https://raw.githubusercontent.com/libre-devops/utils/dev/scripts/terraform/tf-sort.sh | bash -s -- output.tf output.tf
+}
+
+# Executes script in each sub directory
+for dir in ${workspace}; do
+    cd "${dir}" && \
+    echo "${dir}"
+    stfi && \
+    stfo && \
+    terraform fmt -recursive && \
+    git add --all && git commit -m "Update module" && git push && git tag 1.0.0 --force && git push --tags --force
+    cd "${back}"
+done
+```
 {% endraw  %}
 
 Source: `{{ page.path }}`
