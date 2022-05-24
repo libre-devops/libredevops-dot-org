@@ -102,4 +102,48 @@ jobs:
           TF_VAR_env: ${{ env.SHORTHAND_ENVIRONMENT }}
           TF_VAR_loc: ${{ env.SHORTHAND_LOCATION }}
 ```
+
+### Using custom Action
+
+```
+name: 'Terraform Plan'
+
+#Allow run manually or on push to main or in PR closure
+on:
+  workflow_dispatch:
+
+jobs:
+  azure-terraform-job:
+    name: 'Terraform Build'
+    runs-on: ubuntu-latest
+    environment: tst
+
+    # Use the Bash shell regardless whether the GitHub Actions runner is ubuntu-latest, macos-latest, or windows-latest
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Libre DevOps - Run Terraform for Azure - GitHub Action
+        id: terraform-build
+        uses: libre-devops/azure-terraform-gh-action@v1
+        with:
+          terraform-path: "terraform"
+          terraform-workspace-name: "dev"
+          terraform-backend-storage-rg-name: ${{ secrets.SpokeSaRgName }}
+          terraform-backend-storage-account-name: ${{ secrets.SpokeSaName }}
+          terraform-backend-blob-container-name: ${{ secrets.SpokeSaBlobContainerName }}
+          terraform-backend-storage-access-key: ${{ secrets.SpokeSaPrimaryKey }}
+          terraform-backend-state-name: "lbdo-dev-gh.terraform.tfstate"
+          terraform-provider-client-id: ${{ secrets.SpokeSvpClientId }}
+          terraform-provider-client-secret: ${{ secrets.SpokeSvpClientSecret }}
+          terraform-provider-subscription-id: ${{ secrets.SpokeSubId }}
+          terraform-provider-tenant-id: ${{ secrets.SpokeTenantId }}
+          terraform-compliance-path: "git:https://github.com/craigthackerx/azure-terraform-compliance-naming-convention.git//?ref=main"
+          checkov-skipped-tests: "CKV2_AZURE_8"
+          run-terraform-destroy: "false"
+          run-terraform-plan-only: "true"
+```
 {% endraw  %}
