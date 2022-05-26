@@ -130,6 +130,11 @@ for dir in ${workspace}; do
     cd "${back}"
 done
 ```
+
+## Quick Module update
+```
+cd terraform-module && terraform fmt -recursive && stfi && stfo && terraform-docs markdown . > docs.md && git a && git c -m "Update module" && git p && git tag 1.0.0 --force && git p --tags --force
+```
 {% endraw  %}
 
 Source: `{{ page.path }}`
