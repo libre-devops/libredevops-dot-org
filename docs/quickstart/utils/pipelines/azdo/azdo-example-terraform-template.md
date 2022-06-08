@@ -525,10 +525,11 @@ resources:
     name: libre-devops/azure-naming-convention
     ref: main
 
-  - repository: azure-pipelines-module-development-build
+  # You only need to declare a remote repository if its a GitHub repo, otherwise, you can just use the - self task to clone an Azure DevOps repo.
+  - repository: dev-build
     type: github
     endpoint: github_service_connection
-    name: libre-devops/azure-pipelines-module-development-build
+    name: libre-devops/dev-build
     ref: dev
 
 # You may wish to use a separate or self-hosted agent per job, by default, all jobs will inherit stage agent
@@ -659,10 +660,11 @@ resources:
     name: libre-devops/azure-naming-convention
     ref: main
 
-  - repository: azure-pipelines-module-development-build
+  # You only need to declare a remote repository if its a GitHub repo, otherwise, you can just use the - self task to clone an Azure DevOps repo.
+  - repository: dev-build
     type: github
     endpoint: github_service_connection
-    name: libre-devops/azure-pipelines-module-development-build
+    name: libre-devops/dev-build
     ref: dev
 
   - repository: terraform-azdo-pipeline-template
