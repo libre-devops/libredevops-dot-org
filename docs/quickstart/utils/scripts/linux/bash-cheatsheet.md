@@ -135,6 +135,14 @@ done
 ```
 cd terraform-module && terraform fmt -recursive && stfi && stfo && terraform-docs markdown . > docs.md && git a && git c -m "Update module" && git p && git tag 1.0.0 --force && git p --tags --force ; cd ..
 ```
+
+## Run script as root one liner
+```
+#!/bin/bash
+
+[ "$(whoami)" = root ] || { sudo "$0" "$@"; exit $?; }
+
+```
 {% endraw  %}
 
 Source: `{{ page.path }}`
