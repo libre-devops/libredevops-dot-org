@@ -367,6 +367,6 @@ output "chomp_my_ip" {
            type                       = "TeamServicesAgentLinux"
            type_handler_version       = "1.22"
         }
-
+```
 
 Source: `{{ page.path }}`
