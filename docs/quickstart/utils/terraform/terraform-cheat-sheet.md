@@ -347,4 +347,26 @@ output "chomp_my_ip" {
 
 ```
 
+## Viurtual Machine Scale Set Agent Extension Block
+
+```
+ extension {
+           auto_upgrade_minor_version = false
+           automatic_upgrade_enabled  = false
+           name                       = "Microsoft.Azure.DevOps.Pipelines.Agent"
+           provision_after_extensions = []
+           publisher                  = "Microsoft.VisualStudio.Services"
+           settings                   = jsonencode(
+                {
+                   agentDownloadUrl        = "https://vstsagentpackage.azureedge.net/agent/2.209.0/vsts-agent-linux-x64-2.209.0.tar.gz"
+                   agentFolder             = "/agent"
+                   enableScriptDownloadUrl = "https://vstsagenttools.blob.core.windows.net/tools/ElasticPools/Linux/13/enableagent.sh"
+                   isPipelinesAgent        = true
+                }
+            )
+           type                       = "TeamServicesAgentLinux"
+           type_handler_version       = "1.22"
+        }
+
+
 Source: `{{ page.path }}`
