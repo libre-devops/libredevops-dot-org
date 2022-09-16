@@ -156,6 +156,19 @@ sudo apt-get update -qq
 sudo apt-get -qq -y install podman
 ```
 
+## Install PowerShell Core on Ubuntu
+
+```
+#!/usr/bin/env bash
+
+sudo apt-get update && sudo apt-get install -y wget apt-transport-https software-properties-common && \
+wget -q "https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/packages-microsoft-prod.deb" && \
+sudo dpkg -i packages-microsoft-prod.deb && \
+sudo apt-get update && sudo apt-get install -y powershell && \
+pwsh -Command Set-PSRepository -Name "PSGallery" -InstallationPolicy Trusted ; pwsh -Command Install-Module -Name Az -Force -AllowClobber -Scope AllUsers -Repository
+PSGallery
+```
+
 {% endraw  %}
 
 Source: `{{ page.path }}`
