@@ -165,8 +165,8 @@ sudo apt-get update && sudo apt-get install -y wget apt-transport-https software
 wget -q "https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/packages-microsoft-prod.deb" && \
 sudo dpkg -i packages-microsoft-prod.deb && \
 sudo apt-get update && sudo apt-get install -y powershell && \
-pwsh -Command Set-PSRepository -Name "PSGallery" -InstallationPolicy Trusted ; pwsh -Command Install-Module -Name Az -Force -AllowClobber -Scope AllUsers -Repository
-PSGallery
+pwsh -Command Set-PSRepository -Name "PSGallery" -InstallationPolicy Trusted 
+sudo pwsh -Command Install-Module -Name Az -Force -AllowClobber -Scope AllUsers -Repository PSGallery
 ```
 
 ## Install Docker (moby) on Ubuntu 22.04 with GitHub Runner Agent
@@ -177,7 +177,7 @@ LSB_RELEASE=$(lsb_release -rs)
 
 # Install Microsoft repository
 wget https://packages.microsoft.com/config/ubuntu/$LSB_RELEASE/packages-microsoft-prod.deb
-sudo dpkg -i packages-microsoft-prod.deb
+sudo dpkg -i packages-microsoft-prod.debbrew 
 sudo apt-get install -y apt-transport-https ca-certificates curl software-properties-common
 
 # Install Microsoft GPG public key
