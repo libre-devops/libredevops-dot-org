@@ -28,6 +28,7 @@ $result = @()
 foreach($item in $definitions){
 
 [array]$matchingAssignments = ($assignments | Where-Object {$_.Properties.PolicyDefinitionId -eq $item.PolicyDefinitionId}).PolicyAssignmentId
+[array]$testAssignments = ($assignments | Select-Object Properties -ExpandProperty Properties | Select-Object PolicyDefinitionId)
 
 if($matchingAssignments){
 
@@ -41,10 +42,13 @@ if($matchingAssignments){
     }
 }
 
+
+
 foreach($item in $result){
 
 $item.DefinitionName
-
 $item.Assignments
 }
+
+
 ```
