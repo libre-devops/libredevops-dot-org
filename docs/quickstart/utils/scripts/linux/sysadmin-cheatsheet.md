@@ -330,6 +330,184 @@ http
 
 ```
 
+## Podman Pod Create
+```
+#!/usr/bin/env bash
+
+set -xe
+
+POD_NAME="services"
+
+podman pod create "${POD_NAME}"
+#-p 1222:22/tcp \
+#50001:50001/tcp \
+#8080:8080/tcp \
+#3000:3000/tcp \
+#3222:22/tcp \
+#5432:5432/tcp \
+#8081:8081/tcp
+
+podman create \
+--name=jenkins \
+--pod ${POD_NAME} \
+-e ACCEPT_EULA=Y \
+-e JENKINS_SLAVE_AGENT_PORT=50001 \
+-v craig-workspace_jenkins_home:/var/jenkins_home \
+--restart unless-stopped \
+"docker.io/jenkins/jenkins:latest" && \
+
+podman create \
+--name=gitea \
+--pod ${POD_NAME} \
+-e USER_UID=1000 \
+-e USER_GID=1000 \
+-e APP_NAME=self-hosted \
+-e REQUIRE_SIGNIN_VIEW=false \
+-v gitea:/data \
+-v /etc/localtime:/etc/localtime:ro \
+--restart unless-stopped \
+docker.io/gitea/gitea:latest && \
+
+podman create \
+--name=postgres-db \
+--pod ${POD_NAME} \
+-e POSTGRES_USER=gitea \
+-e POSTGRES_PASSWORD=gitea \
+-e POSTGRES_DB=gitea \
+-v postgres:/var/lib/postgresql/data \
+--restart unless-stopped \
+docker.io/postgres:latest && \
+
+podman create \
+--name=nexus \
+--pod ${POD_NAME} \
+-v nexus-data:/nexus-data \
+--restart unless-stopped \
+docker.io/sonatype/nexus3
+
+```
+
+## Kubernetes Pod Yaml
+```
+piVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app: services
+  name: services
+spec:
+  containers:
+  - env:
+    - name: ACCEPT_EULA
+      value: "Y"
+    - name: JENKINS_SLAVE_AGENT_PORT
+      value: "50001"
+    image: docker.io/jenkins/jenkins:latest
+    ports:
+      - containerPort: 8080
+      - containerPort: 1222
+      - containerPort: 50001
+    name: jenkins
+    resources: {}
+    securityContext:
+      capabilities:
+        drop:
+        - CAP_MKNOD
+        - CAP_NET_RAW
+        - CAP_AUDIT_WRITE
+    volumeMounts:
+    - mountPath: /var/jenkins_home
+      name: jenkins_home-pvc
+  - args:
+    - /bin/s6-svscan
+    - /etc/s6
+    env:
+    - name: REQUIRE_SIGNIN_VIEW
+      value: "false"
+    - name: USER_UID
+      value: "1000"
+    - name: USER_GID
+      value: "1000"
+    - name: APP_NAME
+      value: self-hosted
+    image: docker.io/gitea/gitea:latest
+    ports:
+      - containerPort: 3000
+      - containerPort: 3222
+    name: gitea
+    resources: {}
+    securityContext:
+      capabilities:
+        drop:
+        - CAP_MKNOD
+        - CAP_NET_RAW
+        - CAP_AUDIT_WRITE
+    volumeMounts:
+    - mountPath: /etc/localtime
+      name: etc-localtime-host-0
+      readOnly: true
+    - mountPath: /data
+      name: gitea-pvc
+  - args:
+    - postgres
+    env:
+    - name: POSTGRES_PASSWORD
+      value: gitea
+    - name: POSTGRES_DB
+      value: gitea
+    - name: POSTGRES_USER
+      value: gitea
+    image: docker.io/library/postgres:latest
+    ports:
+      - containerPort: 5432
+    name: postgres-db
+    resources: {}
+    securityContext:
+      capabilities:
+        drop:
+        - CAP_MKNOD
+        - CAP_NET_RAW
+        - CAP_AUDIT_WRITE
+    volumeMounts:
+    - mountPath: /var/lib/postgresql/data
+      name: postgres-pvc
+  - image: docker.io/sonatype/nexus3:latest
+    ports:
+      - containerPort: 8081
+    name: nexus
+    resources: {}
+    securityContext:
+      capabilities:
+        drop:
+        - CAP_MKNOD
+        - CAP_NET_RAW
+        - CAP_AUDIT_WRITE
+    volumeMounts:
+    - mountPath: /nexus-data
+      name: nexus-data-pvc
+  hostname: services
+  restartPolicy: Never
+  volumes:
+  - name: jenkins_home-pvc
+    persistentVolumeClaim:
+      claimName: jenkins_home
+  - hostPath:
+      path: /etc/localtime
+      type: File
+    name: etc-localtime-host-0
+  - name: gitea-pvc
+    persistentVolumeClaim:
+      claimName: gitea
+  - name: postgres-pvc
+    persistentVolumeClaim:
+      claimName: postgres
+  - name: nexus-data-pvc
+    persistentVolumeClaim:
+      claimName: nexus-data
+status: {}
+
+```
+
 {% endraw  %}
 
 Source: `{{ page.path }}`
