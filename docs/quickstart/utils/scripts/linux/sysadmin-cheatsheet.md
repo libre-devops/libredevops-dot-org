@@ -200,7 +200,7 @@ http
 		server_name jenkins.libredevops.org;
 
 		ssl_certificate /etc/nginx/ssl/fullchain.cer;
-		ssl_certificate_key /etc/nginx/ssl/wildcard.libredevops.org.key;
+		ssl_certificate_key /etc/nginx/gssl/wildcard.libredevops.org.key;
 
 		location /
 		{
