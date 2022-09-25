@@ -148,7 +148,7 @@ RUN echo 'alias powershell="pwsh"' >> ~/.bashrc
 
 ```
 # HTTPS Nginx reverse proxy with podman endpoints (Nginx running on host)
-You can beautify your nginx config here
+You can beautify your nginx config [here](https://nginxbeautifier.github.io/)
 
 ```nginx
 events
