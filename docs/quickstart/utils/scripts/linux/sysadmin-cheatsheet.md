@@ -389,7 +389,7 @@ docker.io/sonatype/nexus3
 
 ## Kubernetes Pod Yaml
 ```
-piVersion: v1
+apiVersion: v1
 kind: Pod
 metadata:
   labels:
