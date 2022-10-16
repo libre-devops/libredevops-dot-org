@@ -137,6 +137,10 @@ done
 cd terraform-module && terraform fmt -recursive && stfi && stfo && terraform-docs markdown . > docs.md && git a && git c -m "Update module" && git p && git tag 1.0.0 --force && git p --tags --force ; cd ..
 ```
 
+```
+cd terraform-module && terraform fmt -recursive && stfi && stfo && echo "```hcl" > README.md && cat terraform/build.tf >> README.md && echo "```" >> README.md && terraform-docs markdown . >> README.md && git a && git c -m "Update module" && git p && git tag 1.0.0 --force && git p --tags --force ; cd ..
+```
+
 ## Run script as root one liner
 ```
 #!/bin/bash
