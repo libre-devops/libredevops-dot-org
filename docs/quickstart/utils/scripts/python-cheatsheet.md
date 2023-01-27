@@ -17,7 +17,7 @@ def azure_authenticate():
     return credentials
 ```
 ## Authenticate to Azure, setup a class, instantiate the class and get a resource id
-```python3
+```python
 import os
 from azure.identity import ClientSecretCredential
 from azure.mgmt.resource import ResourceManagementClient
