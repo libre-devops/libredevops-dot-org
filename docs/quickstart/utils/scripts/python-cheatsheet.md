@@ -2,6 +2,14 @@
 
 {% raw  %}
 
+## Activate a venv
+```python
+python3 -m venv myvenv
+currentdir=${PWD##*/} # Get name of currentdir
+
+alias mkvenv="currentdir=${PWD##*/} && python3 -m venv ${currentdir}"
+```
+
 ## Authenticate to Azure using environment variables
 ```python
 import os
