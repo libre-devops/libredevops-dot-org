@@ -248,6 +248,17 @@ tar xzf "${actionsPackageName}" && rm -rf "${actionsPackageName}"
 
 ```
 
+## Prepare local terraform variables
+
+```
+echo 'export ARM_TENANT_ID="blah"' >> ~/.bashrc
+echo 'export ARM_CLIENT_ID="blah"' >> ~/.bashrc
+echo 'export ARM_CLIENT_SECRET="blah"' >> ~/.bashrc
+echo 'export ARM_SUBSCRIPTION_ID="blah"' >> ~/.bashrc
+echo 'export ARM_DEPLOY_LOCATION="uksouth"' >> ~/.bashrc
+echo 'export ARM_ACCESS_KEY="blah"' >> ~/.bashrc
+```
+
 {% endraw  %}
 
 Source: `{{ page.path }}`
