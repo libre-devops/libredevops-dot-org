@@ -80,7 +80,7 @@ PATH=$(printf %s "$PATH" | awk -vRS=: -vORS= '!a[$0]++ {if (NR>1) printf(":"); p
 ## Add something to path
 
 ```
-echo "export PATH=$HOME/.local:$PATH >> ~/.bashrc
+echo "export PATH=$HOME/.local:$PATH" >> ~/.bashrc
 ```
 
 ## Terraform Aliases for bash
