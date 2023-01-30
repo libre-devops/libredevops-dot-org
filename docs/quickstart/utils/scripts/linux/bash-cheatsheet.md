@@ -77,6 +77,12 @@ lower_case_convert() {
 PATH=$(printf %s "$PATH" | awk -vRS=: -vORS= '!a[$0]++ {if (NR>1) printf(":"); printf("%s", $0) }' )
 ```
 
+## Add something to path
+
+```
+echo "export PATH=$HOME/.local:$PATH >> ~/.bashrc
+```
+
 ## Terraform Aliases for bash
 ```
 echo "alias stfi='curl https://raw.githubusercontent.com/libre-devops/utils/dev/scripts/terraform/tf-sort.sh | bash -s -- input.tf input.tf'" >> ~/.bashrc && source ~/.bashrc && \
