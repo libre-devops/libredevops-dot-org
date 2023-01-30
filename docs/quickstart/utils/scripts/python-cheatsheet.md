@@ -83,6 +83,43 @@ obj.check_resources()
 
 ```
 
+## Using the Azure metadata service, query some properties of your VM
+```python
+import os
+from azure.identity import ManagedIdentityCredential
+import requests
+import json
+
+credential = ManagedIdentityCredential()
+no_proxy = os.environ["NO_PROXY"] = "*"
+url = "http://169.254.169.254/metadata/instance?api-version=2021-02-01"
+headers = {"Metadata": "true"}
+
+r = requests.get(url=url, headers=headers)
+
+parsed_json = json.loads(r.content)
+pretty_json = json.dumps(parsed_json, indent=2)
+
+print(pretty_json)
+subscription_id = parsed_json["compute"]["subscriptionId"]
+resource_id = parsed_json["compute"]["resourceId"]
+segments = resource_id.split("/")
+print(segments)
+segement_subscription_id = segments[2]
+segement_resource_group_name = segments[4]
+segement_provider = segments[6]
+segement_resource_type = segments[7]
+segement_resource_name = segments[8]
+print(
+    f"The subscription id is {segement_subscription_id}"
+    f"The resource group name is {segement_resource_group_name}"
+    f"The provider name is {segement_provider}"
+    f"The resource type is {segement_resource_type}"
+    f"The resource name is {segement_resource_name}"
+)
+
+```
+
 {% endraw  %}
 
 Source: `{{ page.path }}`
