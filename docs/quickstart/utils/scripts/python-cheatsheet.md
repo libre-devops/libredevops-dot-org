@@ -458,6 +458,45 @@ override.tf.json
 terraform.rc
 
 ```
+## Example Python Function app using a Managed Identity
+```python
+from azure.identity import DefaultAzureCredential
+from azure.mgmt.resource import ResourceManagementClient
+import azure.functions as func
+import os
+import logging
+import datetime
+
+# Use ManagedIdentityCredential to log into Azure
+subscription_id = os.environ["ARM_SUBSCRIPTION_ID"]
+tenant_id = os.environ["ARM_TENANT_ID"]
+client_id = os.environ["ARM_CLIENT_ID"]
+function_app_name = os.environ["FUNCTION_APP_NAME"]
+resource_group_name = os.environ["RESOURCE_GROUP_NAME"]
+
+def main(getazureinfo: func.TimerRequest) -> None:
+    utc_timestamp = datetime.datetime.utcnow().replace(
+        tzinfo=datetime.timezone.utc).isoformat()
+
+    credential = DefaultAzureCredential(managed_identity_client_id=client_id)  # User assigned Managed Identity
+    # credential = DefaultAzureCredential() # system-assigned identity
+
+    # Create a ResourceManagementClient using the authenticated credential
+    client = ResourceManagementClient(credential, subscription_id)
+
+    # Get the current resource group
+    resource_group = client.resource_groups.get(resource_group_name)
+
+    # List all resources in the resource group
+    resources = client.resources.list_by_resource_group(resource_group.name)
+
+    # Print the id of each resource
+    for resource in resources:
+        logging.info(f"The resources within {resource_group_name}: {resource.id}")
+
+    logging.info('Python timer trigger function ran at %s', utc_timestamp)
+
+```
 {% endraw  %}
 
 Source: `{{ page.path }}`
