@@ -125,7 +125,14 @@ print(
     f"The resource name is {segement_resource_name}\n"
 )
 
-```# Byte-compiled / optimized / DLL files
+```
+
+# Example .gitignore 
+```
+# Pycharm ignore
+.idea/
+
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
