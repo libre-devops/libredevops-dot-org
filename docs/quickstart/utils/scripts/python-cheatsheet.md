@@ -338,6 +338,12 @@ def main(getazureinfo: func.TimerRequest) -> None:
     logging.info('Python timer trigger function ran at %s', utc_timestamp)
 
 ```
+
+## Upgrade all Outdated pip packages
+```
+pip freeze | %{$_.split('==')[0]} | %{pip install --upgrade $_} # Windows
+pip3 list --outdated --format=freeze | grep -v '^\-e' | cut -d = -f 1 | xargs -n1 pip3 install -U  # linux
+```
 {% endraw  %}
 
 Source: `{{ page.path }}`
