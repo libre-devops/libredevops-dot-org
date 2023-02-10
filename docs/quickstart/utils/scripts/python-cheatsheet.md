@@ -348,6 +348,23 @@ python3 -m pip install --upgrade pip ; pip freeze | %{$_.split('==')[0]} | %{pip
 ```
 python3 -m pip install --upgrade pip && pip3 list --outdated --format=freeze | grep -v '^\-e' | cut -d = -f 1 | xargs -n1 pip3 install -U  # linux
 ```
+
+## Configure Logging in your app
+```python
+import logging
+
+# Set logging level. .DEBUG, .WARNING, .INFO etc
+logging.basicConfig(level=logging.DEBUG)
+
+# create a stream handler and set its level to logging.DEBUG
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.DEBUG)
+
+# add the stream handler to the root logger
+root_logger = logging.getLogger()
+root_logger.addHandler(console_handler)
+
+```
 {% endraw  %}
 
 Source: `{{ page.path }}`
