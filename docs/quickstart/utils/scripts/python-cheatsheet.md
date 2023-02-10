@@ -342,11 +342,11 @@ def main(getazureinfo: func.TimerRequest) -> None:
 ## Upgrade all Outdated pip packages
 ### Windows
 ```
-pip freeze | %{$_.split('==')[0]} | %{pip install --upgrade $_} # Windows
+python3 -m pip install --upgrade pip ; pip freeze | %{$_.split('==')[0]} | %{pip install --upgrade $_} # Windows
 ```
 ### Linux
 ```
-pip3 list --outdated --format=freeze | grep -v '^\-e' | cut -d = -f 1 | xargs -n1 pip3 install -U  # linux
+python3 -m pip install --upgrade pip && pip3 list --outdated --format=freeze | grep -v '^\-e' | cut -d = -f 1 | xargs -n1 pip3 install -U  # linux
 ```
 {% endraw  %}
 
