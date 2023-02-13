@@ -395,5 +395,15 @@ dynamic "identity" {
     }
   }
   ```
+  
+  ## Remove `-` and spaces from a string and title it
+  ```
+  replace(replace(title("rg-craig-test"), "-", ""), " ", "")
+  RgCraigTest
+  ```
+  
+  ## Create complex data structures from nested list of objects and dynamic blocks
+  ```
+  ```
 
 Source: `{{ page.path }}`
