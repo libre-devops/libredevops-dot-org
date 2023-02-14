@@ -57,6 +57,17 @@ update-ca-certificates
 
 ```
 
+### Install GitHub CLI
+```
+#!/usr/bin/env bash
+type -p curl >/dev/null || sudo apt install curl -y
+curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+&& sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+&& echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+&& sudo apt update \
+&& sudo apt install gh -y
+```
+
 ### Set WSL workspaces
 ```
 ln -s /mnt/c/Users winusers
@@ -81,7 +92,7 @@ echo 'command -v pyenv >/dev/null || export PATH="$PYENV_ROOT/bin:$PATH"' >> ~/.
 echo 'eval "$(pyenv init -)"' >> ~/.bashrc && \
 echo 'export PATH=$HOME/.local:$PATH' >> ~/.bashrc && \
 echo 'export PATH=$HOME/.pyenv:$PATH' >> ~/.bashrc && \
-echo 'export PATH=$HOME/.pyenv/bin:$PATH' >> ~/.bashrc && \
+echo 'export PATH=$HOME/.pyenv/bin:$PATH' >> ~/.bashrc
 
 ```
 
