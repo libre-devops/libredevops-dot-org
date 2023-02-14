@@ -1,24 +1,12 @@
-# PowerShell Cheat Sheet
+# AWS Cheat Sheet
 
-- May also work on Linux
+{% raw  %}
 
-## Convert string to "SecureString" format, needed for things such as keyvault etc
+## Generic
 
-```
-#!/usr/bin/env pwsh
-$SubId = $(Get-AzContext | Select-Object -ExpandProperty Subscription)
-$spokeSubId = ConvertTo-SecureString "$SubId" -AsPlainText -Force
-```
+## Powershell
 
-## Set Strict Mode
-
-```
-#!/usr/bin/env pwsh
-Set-StrictMode -Version 2
-Set-PSDebug -Trace 2
-```
-
-## Get Az Policy Assignments
+### Get Az Policy Assignments
 ```
 $TenantId = "01b9e453-84bc-4dc5-88de-a97a1fd42455"
 $CurrentDir = $(Get-Location).Path
@@ -165,10 +153,8 @@ $Result = Get-AllPolicyDefinitionAssignments -TenantId $TenantId -Verbose
 
 ```
 
-## Set a requires parameter in powershell to prevent scripts from running which don't meet version constraints
+## Azure-CLI
 
-```
-#Requires -Version 7.2
-#Requires -Modules @{ ModuleName="Az"; ModuleVersion="7.5.0"}
-#Requires -Modules @{ ModuleName="Microsoft.Graph"; ModuleVersion="1.9.6"}
-```
+{% endraw  %}
+
+Source: `{{ page.path }}`

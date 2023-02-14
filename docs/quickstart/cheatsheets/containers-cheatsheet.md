@@ -1,89 +1,78 @@
-# SysAdmin Cheat Sheet
+# AWS Cheat Sheet
 
 {% raw  %}
 
-## Docker-Compose.yml
-```yaml
-version: '3.8'
+## Docker
+### Install Docker (moby) on Ubuntu 22.04 with GitHub Runner Agent
+```
+#!/usr/bin/env bash
 
-networks:
-  podman-net:
-    external: false
+LSB_RELEASE=$(lsb_release -rs)
 
-services:
+# Install Microsoft repository
+wget https://packages.microsoft.com/config/ubuntu/$LSB_RELEASE/packages-microsoft-prod.deb
+sudo dpkg -i packages-microsoft-prod.debbrew 
+sudo apt-get install -y apt-transport-https ca-certificates curl software-properties-common
 
-  jenkins:
-    build: ./jenkins
-    image: "ghcr.io/libre-devops/jenkins-self-hosted:latest"
-    container_name: jenkins
-    restart: unless-stopped
-    environment:
-      - ACCEPT_EULA=Y
-      - JENKINS_SLAVE_AGENT_PORT=50001
-    networks:
-      - podman-net
-    ports:
-      - "1222:22/tcp"
-      - "50001:50001/tcp"
-      - "8080:8080/tcp"
-    volumes:
-    - type: volume
-      source: jenkins_home
-      target: /var/jenkins_home
+# Install Microsoft GPG public key
+curl -L https://packages.microsoft.com/keys/microsoft.asc | apt-key add -
 
-  gitea:
-    image: "docker.io/gitea/gitea:latest"
-    container_name: gitea
-    restart: unless-stopped
-    environment:
-      - USER_UID=1000
-      - USER_GID=1000
-      - APP_NAME=self-hosted
-      - REQUIRE_SIGNIN_VIEW=false
-    volumes:
-      - gitea:/data
-      - /etc/localtime:/etc/localtime:ro
-    networks:
-      - podman-net
-    ports:
-      - "3000:3000"
-      - "3222:22"
-    depends_on:
-      - gitea-db
+curl https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > microsoft.gpg
+mv microsoft.gpg /etc/apt/trusted.gpg.d/microsoft.gpg
 
-  gitea-db:
-    image: "docker.io/postgres:latest"
-    container_name: postgres-db
-    restart: unless-stopped
-    environment:
-      - POSTGRES_USER=gitea
-      - POSTGRES_PASSWORD=gitea
-      - POSTGRES_DB=gitea
-    volumes:
-      - postgres:/var/lib/postgresql/data
-    networks:
-      - podman-net
-    ports:
-      - "5432:5432"
+# update
+sudo apt-get -yq update
+sudo apt-get -yq dist-upgrade
 
-  nexus:
-    image: docker.io/sonatype/nexus3
-    container_name: nexus
-    volumes:
-      - "nexus-data:/nexus-data"
-    networks:
-      - podman-net
-    ports:
-      - "8081:8081"
+# Check to see if docker is already installed
+docker_package=moby
+echo "Determing if Docker ($docker_package) is installed"
+if ! IsPackageInstalled $docker_package; then
+    echo "Docker ($docker_package) was not found. Installing..."
+    sudo apt-get remove -y moby-engine moby-cli
+    sudo apt-get update
+    sudo apt-get install -y moby-engine moby-cli
+    sudo apt-get install --no-install-recommends -y moby-buildx
+    sudo apt-get install -y moby-compose
+else
+    echo "Docker ($docker_package) is already installed"
+fi
 
-volumes:
-  jenkins_home:
-  gitea:
-  postgres:
-  nexus: {}
+# Enable docker.service
+sudo systemctl is-active --quiet docker.service || sudo systemctl start docker.service
+sudo systemctl is-enabled --quiet docker.service || sudo systemctl enable docker.service
+
+# Docker daemon takes time to come up after installing
+sleep 10
+docker info
+
+# Always attempt to logout so we do not leave our credentials on the built
+# image. Logout _should_ return a zero exit code even if no credentials were
+# stored from earlier.
+docker logout
+
+###########################################################################################################################################
+
+USER="actions"
+REPO="runner"
+OS="linux"
+ARCH="x64"
+PACKAGE="tar.gz"
+ACTIONS_URL="https://github.com/libre-devops/azdo-agent-scale-sets"
+TOKEN="blah"
+
+runnerLatestAgentVersion="$(curl --silent "https://api.github.com/repos/${USER}/${REPO}/releases/latest" | jq -r .tag_name)"
+strippedTagRunnerAgentVersion="$(echo "${runnerLatestAgentVersion}" | sed 's/v//')" && \
+runnerPackageUrl="https://github.com/${USER}/${REPO}/releases/download/${runnerLatestAgentVersion}/actions-runner-${OS}-${ARCH}-${strippedTagRunnerAgentVersion}.${PACKAGE}"
+actionsPackageName="actions-runner-${OS}-${ARCH}-${strippedTagRunnerAgentVersion}.${PACKAGE}"
+curl -o "${actionsPackageName}" -L "${runnerPackageUrl}"
+tar xzf "${actionsPackageName}" && rm -rf "${actionsPackageName}"
+./config.sh --url "${ACTIONS_URL}" --token "${TOKEN}" && \
+./run.sh --unattended
+
 ```
 
-## Jenkins Dockerfile
+### Jenkins Dockerfile
 ```dockerfile
 FROM docker.io/jenkins/jenkins:lts
 
@@ -144,110 +133,13 @@ RUN chown -R ${NORMAL_USER} $(brew --prefix)/*
 USER ${NORMAL_USER}
 
 RUN echo 'alias powershell="pwsh"' >> ~/.bashrc
-
-
 ```
-# HTTPS Nginx reverse proxy with podman endpoints (Nginx running on host)
-You can beautify your nginx config [here](https://nginxbeautifier.github.io/)
 
-```nginx
-events
-{
-	worker_connections 4096;
-}
+## Docker-Compose
 
-http
-{
+## Podman
 
-	upstream gitea
-	{
-		server 127.0.0.1:3000 fail_timeout=0;
-	}
-
-	upstream jenkins
-	{
-		server 127.0.0.1:8080 fail_timeout=0;
-	}
-
-	upstream nexus
-	{
-		server 127.0.0.1:8081 fail_timeout=0;
-	}
-	server
-	{
-		listen 443 ssl;
-		server_name gitea.libredevops.org;
-
-		ssl_certificate /etc/nginx/ssl/fullchain.cer;
-		ssl_certificate_key /etc/nginx/ssl/wildcard.libredevops.org.key;
-
-		location /
-		{
-			proxy_pass http://gitea;
-			proxy_http_version 1.1;
-			proxy_set_header Host $host;
-			proxy_set_header X-Real-IP $remote_addr;
-			proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-			proxy_set_header X-Forwarded-Proto $scheme;
-			proxy_set_header Upgrade $http_upgrade;
-			proxy_set_header Connection "upgrade";
-			proxy_redirect http:// https://;
-		}
-	}
-	server
-	{
-		listen 443 ssl;
-		server_name jenkins.libredevops.org;
-
-		ssl_certificate /etc/nginx/ssl/fullchain.cer;
-		ssl_certificate_key /etc/nginx/gssl/wildcard.libredevops.org.key;
-
-		location /
-		{
-			proxy_pass http://jenkins;
-			proxy_http_version 1.1;
-			proxy_set_header Host $host;
-			proxy_set_header X-Real-IP $remote_addr;
-			proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-			proxy_set_header X-Forwarded-Proto $scheme;
-			proxy_set_header Upgrade $http_upgrade;
-			proxy_set_header Connection "upgrade";
-			proxy_redirect http:// https://;
-
-			# Required for HTTP-based CLI to work over SSL
-			proxy_buffering off;
-			proxy_request_buffering off;
-
-			# workaround for https://issues.jenkins-ci.org/browse/JENKINS-45651
-			add_header 'X-SSH-Endpoint' 'jenkins.libredevops.org:50022' always;
-
-		}
-	}
-	server
-	{
-		listen 443 ssl;
-		server_name nexus.libredevops.org;
-
-		ssl_certificate /etc/nginx/ssl/fullchain.cer;
-		ssl_certificate_key /etc/nginx/ssl/wildcard.libredevops.org.key;
-
-		location /
-		{
-			proxy_pass http://nexus;
-			proxy_http_version 1.1;
-			proxy_set_header Host $host;
-			proxy_set_header X-Real-IP $remote_addr;
-			proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-			proxy_set_header X-Forwarded-Proto $scheme;
-			proxy_set_header Upgrade $http_upgrade;
-			proxy_set_header Connection "upgrade";
-			proxy_redirect http:// https://;
-		}
-	}
-}
-
-```
-# HTTP Reverse Proxy with Podman endpoints
+### HTTP Reverse Proxy with Podman endpoints
 ```nginx
 events
 {
@@ -327,10 +219,9 @@ http
 		}
 	}
 }
-
 ```
 
-## Podman Pod Create
+### Podman Pod Create
 ```
 #!/usr/bin/env bash
 
@@ -387,7 +278,10 @@ docker.io/sonatype/nexus3
 
 ```
 
-## Kubernetes Pod Yaml
+
+## Kubernetes
+
+### Kubernetes Pod Yaml
 ```
 apiVersion: v1
 kind: Pod
