@@ -44,13 +44,41 @@ sudo pwsh -Command Install-Module -Name Az -Force -AllowClobber -Scope AllUsers 
 
 ### Update CA Certificates on an Ubuntu host
 ```
+#!/usr/bin/env bash
+sudo cp *.crt /usr/local/share/ca-certificates/
+sudo cp *.crt /etc/ssl/certs
+mkdir -p ~/.local/share/ca-certificates/ && cp *.crt ~/.local/share/ca-certificates/ 
+update-ca-certificates
+```
 
+### Configure Python PIP conf
+```
+#!/usr/bin/env bash
+
+```
+
+### Set WSL workspaces
+```
+ln -s /mnt/c/Users winusers
+ln -s /mnt/C/Users/craig winhome
+ln -s /mnt/C/Users/craig/craig-workspace craig-worksppace
+ln -s /mnt/C/Users/craig/Desktop windesktop
 ```
 
 ### Install Pyenv on Ubuntu
 ```
 #!/usr/bin/env bash
 sudo apt-get install -y \
+git \
+build-essential \
+gcc \
+make \
+python3-pip \
+python3-tk && \
+git clone https://github.com/pyenv/pyenv.git ~/.pyenv && \
+echo 'export PYENV_ROOT="$HOME/.pyenv"' >> ~/.bashrc && \
+echo 'command -v pyenv >/dev/null || export PATH="$PYENV_ROOT/bin:$PATH"' >> ~/.bashrc && \
+echo 'eval "$(pyenv init -)"' >> ~/.bashrc
 
 ```
 
@@ -58,6 +86,12 @@ sudo apt-get install -y \
 
 ### Update CA Certificates on Fedora
 ```
+#!/usr/bin/env bash
+
+sudo dnf install -y ca-certificates
+sudo cp *.crt /etc/pki/ca-trust/source/anchors/
+mkdir -p ~/.pki/nssdb/ && cp *.crt  ~/.pki/nssdb/
+update-ca-trust
 ```
 
 ### Install Pyenv on Fedora
@@ -77,6 +111,7 @@ python3-tkinter \
 lz-devel \
 tk-devel \
 git 
+
 
 
 ```
