@@ -5,6 +5,7 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="b4af1357-3eca-4de8-8931-66b07067058d" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/docs/quickstart/cheatsheets/linux-cheatsheet.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/quickstart/cheatsheets/linux-cheatsheet.md" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -54,7 +55,7 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1676391822789</updated>
-      <workItem from="1676391823987" duration="2767000" />
+      <workItem from="1676391823987" duration="3774000" />
     </task>
     <servers />
   </component>

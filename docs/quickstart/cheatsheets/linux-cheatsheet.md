@@ -84,8 +84,27 @@ git \
 build-essential \
 gcc \
 make \
+openssl \
+libssl-dev \
+zlib1g-dev \
+libbz2-dev \
+libreadline-dev \
+libsqlite3-dev \
+wget \
+curl \
+llvm \
+libncursesw5-dev \
+xz-utils \
+tk-dev \
+libxml2-dev \
+libxmlsec1-dev \
+libffi-dev \
+liblzma-dev
 python3-pip \
+unzip \
+zip \
 python3-tk && \
+echo "done package installs && \
 git clone https://github.com/pyenv/pyenv.git ~/.pyenv && \
 echo 'export PYENV_ROOT="$HOME/.pyenv"' >> ~/.bashrc && \
 echo 'command -v pyenv >/dev/null || export PATH="$PYENV_ROOT/bin:$PATH"' >> ~/.bashrc && \
@@ -93,6 +112,29 @@ echo 'eval "$(pyenv init -)"' >> ~/.bashrc && \
 echo 'export PATH=$HOME/.local:$PATH' >> ~/.bashrc && \
 echo 'export PATH=$HOME/.pyenv:$PATH' >> ~/.bashrc && \
 echo 'export PATH=$HOME/.pyenv/bin:$PATH' >> ~/.bashrc
+
+```
+
+### Install TFenv on Ubuntu
+```
+git clone --depth=1 https://github.com/tfutils/tfenv.git ~/.tfenv
+echo 'export PATH=$PATH:$HOME/.tfenv/bin' >> ~/.bashrc
+```
+
+### Install Pkenv on Ubuntu
+```
+git clone https://github.com/iamhsa/pkenv.git ${HOME}/.pkenv && \
+echo 'export PATH="${HOME}/.pkenv/bin:$PATH"' >> ${HOME}/.bashrc
+```
+
+### Install Goenv on Ubuntu
+```
+git clone https://github.com/syndbg/goenv.git ~/.goenv && \
+echo 'export GOENV_ROOT="$HOME/.goenv"' >> ~/.bashrc && \
+echo 'export PATH="$GOENV_ROOT/bin:$PATH"' >> ~/.bashrc && \
+echo 'eval "$(goenv init -)"' >> ~/.bashrc && \
+echo 'export PATH="$GOROOT/bin:$PATH"' >> ~/.bashrc && \
+echo 'export PATH="$PATH:$GOPATH/bin"' >> ~/.bashrc
 
 ```
 
