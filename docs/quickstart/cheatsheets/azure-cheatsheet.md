@@ -1,4 +1,4 @@
-# AWS Cheat Sheet
+# Azure Cheat Sheet
 
 {% raw  %}
 

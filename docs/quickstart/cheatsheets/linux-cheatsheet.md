@@ -90,7 +90,7 @@ zlib1g-dev \
 libbz2-dev \
 libreadline-dev \
 libsqlite3-dev \
-python3-is-python \
+python-is-python3 \
 wget \
 curl \
 llvm \
