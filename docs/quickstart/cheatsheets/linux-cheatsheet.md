@@ -28,6 +28,11 @@ sudo apt-get update -qq
 sudo apt-get -qq -y install podman
 ```
 
+## Set ubuntu as default shell or run shell from Windows
+```
+"wsl.exe" -d Ubuntu "bash"
+```
+
 ### Install PowerShell Core on Ubuntu
 
 ```
