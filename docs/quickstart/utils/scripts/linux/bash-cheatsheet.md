@@ -258,6 +258,10 @@ echo 'export ARM_SUBSCRIPTION_ID="blah"' >> ~/.bashrc
 echo 'export ARM_DEPLOY_LOCATION="uksouth"' >> ~/.bashrc
 echo 'export ARM_ACCESS_KEY="blah"' >> ~/.bashrc
 ```
+Fedora/WSL nice to have
+```
+yum install zlib-devel bzip2
+```
 
 {% endraw  %}
 
