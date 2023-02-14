@@ -258,9 +258,9 @@ echo 'export ARM_SUBSCRIPTION_ID="blah"' >> ~/.bashrc
 echo 'export ARM_DEPLOY_LOCATION="uksouth"' >> ~/.bashrc
 echo 'export ARM_ACCESS_KEY="blah"' >> ~/.bashrc
 ```
-Fedora/WSL nice to have
+Fedora/WSL Pyenv
 ```
-yum install zlib-devel bzip2-devel ncurses-devel libffi-devel sqllite-devel make gcc readline-devel python3-pip python3-tkinter lz-devel
+yum install zlib-devel bzip2-devel ncurses-devel libffi-devel sqllite-devel make gcc readline-devel python3-pip python3-tkinter lz-devel tk-devel
 ```
 
 {% endraw  %}
