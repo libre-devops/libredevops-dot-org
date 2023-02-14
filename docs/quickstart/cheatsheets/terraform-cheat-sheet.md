@@ -422,8 +422,34 @@ terraform {
 }
   ```
   
-  ## Create complex data structures from nested list of objects and dynamic blocks
-  ```
-  ```
+## Create complex data structures from nested list of objects and dynamic blocks
+```
+```
+  
+### Determine your OS with terraform
+  
+First, add this to your repo and call it `printf.cmd`:
+```bat
+:: This is a hack for terraform to consider whether an OS is Linux or Windows.
+@echo off
+echo {"os": "Windows"}
+```
+Then in terraform:
+```hcl
+data "external" "os" {
+  working_dir = path.module
+  program = ["printf", "{\"os\": \"Linux\"}"]
+}
+
+locals {
+  os = data.external.os.result.os
+  check = local.os == "Windows" ? "We are on Windows" : "We are on Linux"
+}
+
+output "os" {
+  value = local.os
+}
+```
+  
 
 Source: `{{ page.path }}`
