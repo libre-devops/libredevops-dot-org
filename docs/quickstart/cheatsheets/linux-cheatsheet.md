@@ -161,6 +161,23 @@ sudo pwsh -Command Install-Module -Name Az -Force -AllowClobber -Scope AllUsers 
 
 ### Install Pyenv on Fedora
 ```
+#!/usr/bin/env bash
+sudo yum install \
+zlib-devel \
+bzip-devel \
+ncurses-devel \
+libffi-devel \
+sqllite-devel \
+make \
+gcc \
+readline-devel \
+python3-pip \
+python3-tkinter \
+lz-devel \
+tk-devel \
+git 
+
+
 ```
 
 {% endraw  %}

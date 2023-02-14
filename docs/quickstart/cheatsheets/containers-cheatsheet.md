@@ -401,6 +401,26 @@ spec:
 status: {}
 
 ```
+##.git config
+```
+[alias]
+	a = add --all
+	c = commit
+	p = push
+[core]
+	editor = nano
+[user]
+	name = Craig Thacker
+	email = craigthackerx@gmail.com
+[credential "https://github.com"]
+	helper = 
+	helper = !/home/linuxbrew/.linuxbrew/Cellar/gh/2.22.1/bin/gh auth git-credential
+[credential "https://gist.github.com"]
+	helper = 
+	helper = !/home/linuxbrew/.linuxbrew/Cellar/gh/2.22.1/bin/gh auth git-credential
+[pull]
+	rebase = true
+```
 
 {% endraw  %}
 

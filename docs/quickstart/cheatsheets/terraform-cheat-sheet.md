@@ -395,5 +395,35 @@ dynamic "identity" {
     }
   }
   ```
+  
+  ## Remove `-` and spaces from a string and title it
+  ```
+  replace(replace(title("rg-craig-test"), "-", ""), " ", "")
+  RgCraigTest
+  ```
+  
+  ##Make override.tf for local dev
+  ```
+terraform {
+  #Use the latest by default, uncomment below to pin or use hcl.lck
+  required_providers {
+    azurerm = {
+      source = "hashicorp/azurerm"
+      #      configuration_aliases = [azurerm.default-provider]
+      #      version = "~> 2.68.0"
+    }
+  }
+  backend "azurerm" {
+    subscription_id      = "blah"
+    storage_account_name = "blah"
+    container_name       = "blah"
+    key                  = "blah.terraform.tfstate"
+  }
+}
+  ```
+  
+  ## Create complex data structures from nested list of objects and dynamic blocks
+  ```
+  ```
 
 Source: `{{ page.path }}`
