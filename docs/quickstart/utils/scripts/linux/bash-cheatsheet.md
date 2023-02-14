@@ -260,7 +260,7 @@ echo 'export ARM_ACCESS_KEY="blah"' >> ~/.bashrc
 ```
 Fedora/WSL nice to have
 ```
-yum install zlib-devel bzip2
+yum install zlib-devel bzip2-devel ncurses-devel libffi-devel sqllite-devel make gcc readline-devel python3-pip python3-tkinter
 ```
 
 {% endraw  %}
