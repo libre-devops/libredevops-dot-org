@@ -90,6 +90,7 @@ zlib1g-dev \
 libbz2-dev \
 libreadline-dev \
 libsqlite3-dev \
+python3-is-python \
 wget \
 curl \
 llvm \
@@ -109,9 +110,7 @@ git clone https://github.com/pyenv/pyenv.git ~/.pyenv && \
 echo 'export PYENV_ROOT="$HOME/.pyenv"' >> ~/.bashrc && \
 echo 'command -v pyenv >/dev/null || export PATH="$PYENV_ROOT/bin:$PATH"' >> ~/.bashrc && \
 echo 'eval "$(pyenv init -)"' >> ~/.bashrc && \
-echo 'export PATH=$HOME/.local:$PATH' >> ~/.bashrc && \
-echo 'export PATH=$HOME/.pyenv:$PATH' >> ~/.bashrc && \
-echo 'export PATH=$HOME/.pyenv/bin:$PATH' >> ~/.bashrc
+echo 'export PATH=$HOME/.local:$PATH' >> ~/.bashrc
 
 ```
 
