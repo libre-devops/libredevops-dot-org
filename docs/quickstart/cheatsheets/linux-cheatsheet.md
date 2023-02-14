@@ -4,6 +4,7 @@
 
 ## Generic
 
+
 ### Install homebrew
 ```
 #!/usr/bin/env bash
@@ -44,6 +45,27 @@ sudo dpkg -i packages-microsoft-prod.deb && \
 sudo apt-get update && sudo apt-get install -y powershell && \
 pwsh -Command Set-PSRepository -Name "PSGallery" -InstallationPolicy Trusted 
 sudo pwsh -Command Install-Module -Name Az -Force -AllowClobber -Scope AllUsers -Repository PSGallery
+```
+### .gitconfig
+```
+[alias]
+	a = add --all
+	c = commit
+	p = push
+[core]
+	editor = nano
+[credential]
+	helper = manager-core
+[user]
+	email = craig@craigthacker.dev
+	name = Craig Thacker
+[filter "lfs"]
+	process = git-lfs filter-process
+	required = true
+	clean = git-lfs clean -- %f
+	smudge = git-lfs smudge -- %f
+[credential "helperselector"]
+	selected = manager-core
 ```
 
 ### Update CA Certificates on an Ubuntu host
