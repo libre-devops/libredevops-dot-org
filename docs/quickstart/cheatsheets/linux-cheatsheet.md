@@ -58,7 +58,18 @@ update-ca-certificates
 ### Configure Python PIP conf
 ```
 #!/usr/bin/env bash
+pip config set global.cert ca.crt
+echo 'export REQUESTS_CA_BUNDLE="ca.crt"'
+```
 
+### Setup Terraform environment variables
+```
+echo 'export ARM_TENANT_ID=""'
+echo 'export ARM_CLIENT_ID=""'
+echo 'export ARM_CLIENT_SECRET=""'
+echo 'export ARM_SUBSCRIPTION_ID=""'
+echo 'export ARM_DEPLOY_LOCATION=""'
+echo 'export ARM_ACCESS_KEY=""'
 ```
 
 ### Install GitHub CLI
