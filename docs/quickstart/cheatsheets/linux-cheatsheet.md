@@ -197,21 +197,24 @@ update-ca-trust
 #!/usr/bin/env bash
 sudo yum install \
 zlib-devel \
-bzip-devel \
+bzip2-devel \
 ncurses-devel \
 libffi-devel \
-sqllite-devel \
+sqlite-devel \
 make \
 gcc \
 readline-devel \
 python3-pip \
 python3-tkinter \
-lz-devel \
+xz-devel \
 tk-devel \
-git 
-
-
-
+git && \
+echo "done package installs" && \
+git clone https://github.com/pyenv/pyenv.git ~/.pyenv && \
+echo 'export PYENV_ROOT="$HOME/.pyenv"' >> ~/.bashrc && \
+echo 'command -v pyenv >/dev/null || export PATH="$PYENV_ROOT/bin:$PATH"' >> ~/.bashrc && \
+echo 'eval "$(pyenv init -)"' >> ~/.bashrc && \
+echo 'export PATH=$HOME/.local:$PATH' >> ~/.bashrc
 ```
 
 {% endraw  %}
