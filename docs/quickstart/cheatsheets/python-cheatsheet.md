@@ -2,12 +2,39 @@
 
 {% raw  %}
 
-## Activate a venv
-```python
-python3 -m venv myvenv
-currentdir=${PWD##*/} # Get name of currentdir
+## Activate a venv with handy functions
+```shell
+#!/usr/bin/env bash
 
-alias mkvenv="currentdir=${PWD##*/} && python3 -m venv ${currentdir}"
+# Define the mkvenv function
+function mkvenv() {
+  local curdir=$(basename $(pwd))
+  mkdir -p ~/.virtualenv
+  python3 -m venv ~/.virtualenv/${curdir}
+  echo "Virtual environment for ${curdir} created"
+}
+
+# Define the avenv function
+function avenv() {
+  local curdir=$(basename $(pwd))
+  if [ -d ~/.virtualenv/${curdir} ]; then
+    source ~/.virtualenv/${curdir}/bin/activate
+    echo "Virtual environment for ${curdir} activated"
+  else
+    echo "Error: No virtual environment found for ${curdir}"
+  fi
+}
+
+# Append the functions to your .bashrc file
+echo "Appending functions to .bashrc"
+echo "" >> ~/.bashrc
+echo "# Define mkvenv function" >> ~/.bashrc
+declare -f mkvenv >> ~/.bashrc
+echo "" >> ~/.bashrc
+echo "# Define avenv function" >> ~/.bashrc
+declare -f avenv >> ~/.bashrc
+echo "" >> ~/.bashrc
+
 ```
 
 ## Authenticate to Azure using environment variables
