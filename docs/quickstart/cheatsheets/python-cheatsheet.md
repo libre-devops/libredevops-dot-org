@@ -9,16 +9,16 @@
 # Define the mkvenv function
 function mkvenv() {
   local curdir=$(basename $(pwd))
-  mkdir -p ~/.virtualenv
-  python3 -m venv ~/.virtualenv/${curdir}
+  mkdir -p ~/.virtualenvs
+  python3 -m venv ~/.virtualenvs/${curdir}
   echo "Virtual environment for ${curdir} created"
 }
 
 # Define the avenv function
 function avenv() {
   local curdir=$(basename $(pwd))
-  if [ -d ~/.virtualenv/${curdir} ]; then
-    source ~/.virtualenv/${curdir}/bin/activate
+  if [ -d ~/.virtualenvs/${curdir} ]; then
+    source ~/.virtualenvs/${curdir}/bin/activate
     echo "Virtual environment for ${curdir} activated"
   else
     echo "Error: No virtual environment found for ${curdir}"
