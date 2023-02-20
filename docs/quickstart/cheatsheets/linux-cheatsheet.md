@@ -92,12 +92,12 @@ echo 'export REQUESTS_CA_BUNDLE="ca.crt"'
 
 ### Setup Terraform environment variables
 ```
-echo 'export ARM_TENANT_ID=""'
-echo 'export ARM_CLIENT_ID=""'
-echo 'export ARM_CLIENT_SECRET=""'
-echo 'export ARM_SUBSCRIPTION_ID=""'
-echo 'export ARM_DEPLOY_LOCATION=""'
-echo 'export ARM_ACCESS_KEY=""'
+echo 'export ARM_TENANT_ID=""' >> ~/.bashrc
+echo 'export ARM_CLIENT_ID=""' >> ~/.bashrc
+echo 'export ARM_CLIENT_SECRET=""' >> ~/.bashrc
+echo 'export ARM_SUBSCRIPTION_ID=""' >> ~/.bashrc
+echo 'export ARM_DEPLOY_LOCATION=""' >> ~/.bashrc
+echo 'export ARM_ACCESS_KEY=""' >> ~/.bashrc
 ```
 
 ### Install GitHub CLI
@@ -109,6 +109,18 @@ curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo 
 && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
 && sudo apt update \
 && sudo apt install gh -y
+```
+
+### Install Keybase on Ubuntu
+```
+curl --remote-name https://prerelease.keybase.io/keybase_amd64.deb
+sudo apt install ./keybase_amd64.deb
+run_keybase
+```
+
+### Install Bitwarden
+```
+sudo snap install bitwarden # yes, really.
 ```
 
 ### Set WSL workspaces
