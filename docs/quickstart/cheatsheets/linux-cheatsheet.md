@@ -218,7 +218,7 @@ tk-dev \
 libxml2-dev \
 libxmlsec1-dev \
 libffi-dev \
-liblzma-dev
+liblzma-dev \
 python3-pip \
 unzip \
 zip \
@@ -229,6 +229,9 @@ echo 'export PYENV_ROOT="$HOME/.pyenv"' >> ~/.bashrc && \
 echo 'command -v pyenv >/dev/null || export PATH="$PYENV_ROOT/bin:$PATH"' >> ~/.bashrc && \
 echo 'eval "$(pyenv init -)"' >> ~/.bashrc && \
 echo 'export PATH=$HOME/.local:$PATH' >> ~/.bashrc
+source ~/.bashrc
+pyenv install 3.10
+python global 3.10
 
 ```
 
@@ -253,6 +256,27 @@ echo 'eval "$(goenv init -)"' >> ~/.bashrc && \
 echo 'export PATH="$GOROOT/bin:$PATH"' >> ~/.bashrc && \
 echo 'export PATH="$PATH:$GOPATH/bin"' >> ~/.bashrc
 
+```
+
+### Install Various DevOps/Handy tools (requires other tools mentioned
+```
+#!/usr/bin/env bash
+source ~/.bashrc
+sudo apt-get update && sudo apt-get install -y zip unzip
+pip3 install pipx && \
+pipx install podman-compose && \
+pipx install terraform-compliance && \
+pipx install checkov && \
+pipx install azure-cli && \
+pipx install black && \
+tfenv install latest && \
+tfenv use latest && \
+pkenv install latest && \
+pkenv use latest && \
+goenv install 1.20.1 && \
+goenv use 1.20.1 && \
+brew install terraform-docs && \
+echo "alias td='terraform-docs markdown . > README.md'"
 ```
 
 ## Fedora/RHEL
