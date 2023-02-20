@@ -264,19 +264,22 @@ echo 'export PATH="$PATH:$GOPATH/bin"' >> ~/.bashrc
 source ~/.bashrc
 sudo apt-get update && sudo apt-get install -y zip unzip
 pip3 install pipx && \
+pipx ensurepath && \
+source ~/.bashrc && \
 pipx install podman-compose && \
 pipx install terraform-compliance && \
 pipx install checkov && \
 pipx install azure-cli && \
-pipx install black && \
+pipx install black && \ 
+pipx install pipenv && \
 tfenv install latest && \
 tfenv use latest && \
-pkenv install latest && \
-pkenv use latest && \
+pkenv install 1.8.6 && \
+pkenv use 1.8.6 && \
 goenv install 1.20.1 && \
-goenv use 1.20.1 && \
+goenv global 1.20.1 && \
 brew install terraform-docs && \
-echo "alias td='terraform-docs markdown . > README.md'"
+echo "alias td='terraform-docs markdown . > README.md'" >> ~/.bashrc
 ```
 
 ## Fedora/RHEL
