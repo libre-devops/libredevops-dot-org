@@ -164,6 +164,28 @@ echo  -e "\e[32mDone.\e[39m"
 sudo snap install bitwarden # yes, really.
 ```
 
+### Install VSCode Ubuntu
+```
+#!/usr/bin/env bash
+sudo apt-get install wget gpg
+wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > packages.microsoft.gpg
+sudo install -D -o root -g root -m 644 packages.microsoft.gpg /etc/apt/keyrings/packages.microsoft.gpg
+sudo sh -c 'echo "deb [arch=amd64,arm64,armhf signed-by=/etc/apt/keyrings/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main" > /etc/apt/sources.list.d/vscode.list'
+rm -f packages.microsoft.
+sudo apt-get install -y apt-transport-https
+sudo apt-get update
+sudo apt-get install code -y
+```
+
+### Install Edge Stable on Ubuntu
+```
+curl https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > microsoft.gpg
+sudo install -o root -g root -m 644 microsoft.gpg /etc/apt/trusted.gpg.d/
+sudo sh -c 'echo "deb [arch=amd64] https://packages.microsoft.com/repos/edge stable main" > /etc/apt/sources.list.d/microsoft-edge-dev.list'
+sudo rm microsoft.gpg
+sudo apt-get update && sudo apt-get install microsoft-edge-stable
+```
+
 ### Set WSL workspaces
 ```
 ln -s /mnt/c/Users winusers
