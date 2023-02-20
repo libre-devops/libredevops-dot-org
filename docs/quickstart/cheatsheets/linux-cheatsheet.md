@@ -164,6 +164,15 @@ echo  -e "\e[32mDone.\e[39m"
 sudo snap install bitwarden # yes, really.
 ```
 
+### Install Azure Core Functions Tools
+```
+curl https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > microsoft.gpg
+sudo mv microsoft.gpg /etc/apt/trusted.gpg.d/microsoft.gpg && \
+sudo sh -c 'echo "deb [arch=amd64] https://packages.microsoft.com/repos/microsoft-ubuntu-$(lsb_release -cs)-prod $(lsb_release -cs) main" > /etc/apt/sources.list.d/dotnetdev.list' && \
+sudo apt-get update && \
+sudo apt-get install azure-functions-core-tools-4 -y
+```
+
 ### Install VSCode Ubuntu
 ```
 #!/usr/bin/env bash
