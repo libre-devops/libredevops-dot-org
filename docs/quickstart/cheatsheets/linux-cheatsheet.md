@@ -203,6 +203,7 @@ echo "[-] Downloading latest version of DroidSansMono Nerd Font [-]"
 FONT_URL=$(curl -s https://api.github.com/repos/ryanoasis/nerd-fonts/releases/latest | grep -o "https://github.com/ryanoasis/nerd-fonts/releases/download/.*/DroidSansMono.zip")
 curl -L $FONT_URL -o DroidSansMono.zip
 unzip DroidSansMono.zip -d ~/.fonts
+rm -rf DroidSansMono.zip
 fc-cache -fv
 echo "[-] DroidSansMono Nerd Font installation completed [-]"
 
