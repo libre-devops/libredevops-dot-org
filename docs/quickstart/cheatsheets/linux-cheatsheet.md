@@ -195,6 +195,39 @@ sudo rm microsoft.gpg
 sudo apt-get update && sudo apt-get install microsoft-edge-stable
 ```
 
+### Install Starship
+```
+curl -sS https://starship.rs/install.sh | sh && \
+mkdir -p ~/.config && touch ~/.config/startship.toml && \
+echo '
+# Set command timeout higher
+command_timeout = 10000 
+
+# Get editor completions based on the config schema
+"$schema" = "https://starship.rs/config-schema.json"
+
+# Config Azure
+[azure]
+disabled = false
+format = "on [$symbol($subscription)]($style) "
+symbol = "$"
+style = "blue bold"
+
+# Inserts a blank line between shell prompts
+add_newline = true
+
+# Replace the '❯' symbol in the prompt with '➜'
+[character]
+success_symbol = "[➜](bold green)"
+
+# Disable the package module, hiding it from the prompt completely
+[package]
+disabled = true
+' > ~/.config/startship.toml && \
+echo 'eval "$(starship init bash)"' >> ~/.bashrc
+
+```
+
 ### Set WSL workspaces
 ```
 ln -s /mnt/c/Users winusers
