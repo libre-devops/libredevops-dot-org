@@ -197,6 +197,15 @@ sudo apt-get update && sudo apt-get install microsoft-edge-stable
 
 ### Install Starship
 ```
+#!/usr/bin/env bash
+# install DroidSansMono Nerd Font --> u can choose another at: https://www.nerdfonts.com/font-downloads
+echo "[-] Downloading latest version of DroidSansMono Nerd Font [-]"
+FONT_URL=$(curl -s https://api.github.com/repos/ryanoasis/nerd-fonts/releases/latest | grep -o "https://github.com/ryanoasis/nerd-fonts/releases/download/.*/DroidSansMono.zip")
+curl -L $FONT_URL -o DroidSansMono.zip
+unzip DroidSansMono.zip -d ~/.fonts
+fc-cache -fv
+echo "[-] DroidSansMono Nerd Font installation completed [-]"
+
 curl -sS https://starship.rs/install.sh | sh && \
 mkdir -p ~/.config && touch ~/.config/startship.toml && \
 echo '
