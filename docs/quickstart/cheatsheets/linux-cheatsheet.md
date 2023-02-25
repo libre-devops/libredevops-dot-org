@@ -378,6 +378,14 @@ ln -s /mnt/C/Users/craig/Desktop windesktop
 "wsl.exe" -u root -d Ubuntu "bash"
 ```
 
+### Set WSL Resources
+```
+@"
+[wsl2]
+memory=8GB  
+processors=2
+"@ | Set-Content -Path "$Env:USERPROFILE\.wslconfig"
+```
 
 {% endraw  %}
 
