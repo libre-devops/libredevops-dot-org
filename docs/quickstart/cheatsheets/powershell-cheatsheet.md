@@ -29,7 +29,7 @@ Set-PSDebug -Trace 2
 
 ## Install starship
 ```
-choco install -y startship ; `
+choco install -y starship ; `
 @"
 # Set command timeout higher
 command_timeout = 10000 
@@ -54,5 +54,8 @@ success_symbol = '[➜](bold green)'
 # Disable the package module, hiding it from the prompt completely
 [package]
 disabled = true
-"@ | Set-Content -Path "$env:APPDATA\starship.toml" ; `
+"@ | Set-Content -Path "$env:APPDATA\starship.toml"
+
+# You must now run `notepad $PROFILE` and add `Invoke-Expression (&starship init powershell)`
+
 ```
