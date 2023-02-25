@@ -41,7 +41,7 @@ command_timeout = 10000
 [azure]
 disabled = false
 format = 'on [$symbol($subscription)]($style) '
-symbol = '$'
+symbol = '# '
 style = 'blue bold'
 
 # Inserts a blank line between shell prompts
