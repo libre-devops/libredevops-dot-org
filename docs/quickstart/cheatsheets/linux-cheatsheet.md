@@ -238,14 +238,6 @@ echo 'eval "$(starship init bash)"' >> ~/.bashrc
 
 ```
 
-### Set WSL workspaces
-```
-ln -s /mnt/c/Users winusers
-ln -s /mnt/C/Users/craig winhome
-ln -s /mnt/C/Users/craig/craig-workspace craig-worksppace
-ln -s /mnt/C/Users/craig/Desktop windesktop
-```
-
 ### Install Pyenv on Ubuntu
 ```
 #!/usr/bin/env bash
@@ -369,6 +361,16 @@ echo 'export PYENV_ROOT="$HOME/.pyenv"' >> ~/.bashrc && \
 echo 'command -v pyenv >/dev/null || export PATH="$PYENV_ROOT/bin:$PATH"' >> ~/.bashrc && \
 echo 'eval "$(pyenv init -)"' >> ~/.bashrc && \
 echo 'export PATH=$HOME/.local:$PATH' >> ~/.bashrc
+```
+
+## WSL Cheatsheet
+
+### Set WSL workspaces
+```
+ln -s /mnt/c/Users winusers
+ln -s /mnt/C/Users/craig winhome
+ln -s /mnt/C/Users/craig/craig-workspace craig-worksppace
+ln -s /mnt/C/Users/craig/Desktop windesktop
 ```
 
 {% endraw  %}
