@@ -55,5 +55,4 @@ success_symbol = '[➜](bold green)'
 [package]
 disabled = true
 "@ | Set-Content -Path "$env:APPDATA\starship.toml" ; `
-Add-Content $PROFILE "`nInvoke-Expression (& starship init powershell)`"
 ```
