@@ -393,7 +393,7 @@ processors=2
 Invoke-WebRequest -Uri "https://github.com/sakai135/wsl-vpnkit/releases/latest/download/wsl-vpnkit.tar.gz" -OutFile "wsl-vpnkit.tar.gz" ; `
 wsl --import wsl-vpnkit --version 2 $env:USERPROFILE\wsl-vpnkit wsl-vpnkit.tar.gz ; `
 wsl -d wsl-vpnkit ; `
-wsl.exe -d wsl-vpnkit --cd /app service wsl-vpnkit stop
+wsl.exe -d wsl-vpnkit --cd /app service wsl-vpnkit start
 
 ```
 
