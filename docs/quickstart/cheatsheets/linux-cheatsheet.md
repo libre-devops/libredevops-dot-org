@@ -387,6 +387,16 @@ processors=2
 "@ | Set-Content -Path "$Env:USERPROFILE\.wslconfig"
 ```
 
+### Install WSL2 VPN Toolkit
+```
+# Download the latest release of WSL VPNKit
+Invoke-WebRequest -Uri "https://github.com/sakai135/wsl-vpnkit/releases/latest/download/wsl-vpnkit.tar.gz" -OutFile "wsl-vpnkit.tar.gz" ; `
+wsl --import wsl-vpnkit --version 2 $env:USERPROFILE\wsl-vpnkit wsl-vpnkit.tar.gz ; `
+wsl -d wsl-vpnkit ; `
+wsl.exe -d wsl-vpnkit --cd /app service wsl-vpnkit stop
+
+```
+
 {% endraw  %}
 
 Source: `{{ page.path }}`
