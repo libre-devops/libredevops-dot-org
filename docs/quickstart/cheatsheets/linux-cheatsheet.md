@@ -373,6 +373,12 @@ ln -s /mnt/C/Users/craig/craig-workspace craig-worksppace
 ln -s /mnt/C/Users/craig/Desktop windesktop
 ```
 
+### Set ubuntu as default shell or run shell from Windows as root user
+```
+"wsl.exe" -u root -d Ubuntu "bash"
+```
+
+
 {% endraw  %}
 
 Source: `{{ page.path }}`
