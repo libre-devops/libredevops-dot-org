@@ -215,8 +215,28 @@ echo 'eval "$(starship init bash)"' >> ~/.bashrc
 ```
 #!/usr/bin/env bash
 
+
+
 function tfrel ()
 {
+    print_success() {
+        lightcyan='\033[1;36m'
+        nocolor='\033[0m'
+        echo -e "${lightcyan}$1${nocolor}"
+    }
+
+    print_error() {
+        lightred='\033[1;31m'
+        nocolor='\033[0m'
+        echo -e "${lightred}$1${nocolor}"
+    }
+
+    print_alert() {
+        yellow='\033[1;33m'
+        nocolor='\033[0m'
+        echo -e "${yellow}$1${nocolor}"
+    }
+
     set -e
     local curdir=$(basename $(pwd));
     alias stfi='curl https://raw.githubusercontent.com/libre-devops/utils/dev/scripts/terraform/tf-sort.sh | bash -s -- input.tf input.tf'
@@ -234,7 +254,7 @@ function tfrel ()
             echo "" > README.md && echo '```hcl' | cat - main.tf | cat - README.md > temp.md && mv temp.md README.md
 
         else
-            echo "Not a build directory, no build.tf found"
+            print_alert "Not a build directory, no build.tf found"
         fi
         td
         git add --all
@@ -244,7 +264,7 @@ function tfrel ()
         git push --tags --force
 
     else
-        echo "Error: No terraform files found within ${curdir}";
+        print_error "Error: No terraform files found within ${curdir}";
     fi
 }
 
