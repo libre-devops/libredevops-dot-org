@@ -237,7 +237,6 @@ function tfrel ()
         echo -e "${yellow}$1${nocolor}"
     }
 
-    set -e
     local curdir=$(basename $(pwd));
     alias stfi='curl https://raw.githubusercontent.com/libre-devops/utils/dev/scripts/terraform/tf-sort.sh | bash -s -- input.tf input.tf'
     alias stfo='curl https://raw.githubusercontent.com/libre-devops/utils/dev/scripts/terraform/tf-sort.sh | bash -s -- output.tf output.tf'
