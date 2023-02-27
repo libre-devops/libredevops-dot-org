@@ -1,11 +1,6 @@
 # Git Cheat Sheet
 
 {% raw  %}
-### Terraform Aliases for bash
-```
-echo "alias stfi='curl https://raw.githubusercontent.com/libre-devops/utils/dev/scripts/terraform/tf-sort.sh | bash -s -- input.tf input.tf'" >> ~/.bashrc && source ~/.bashrc && \
-echo "alias stfo='curl https://raw.githubusercontent.com/libre-devops/utils/dev/scripts/terraform/tf-sort.sh | bash -s -- output.tf output.tf'" >> ~/.bashrc && source ~/.bashrc
-```
 
 ### .gitconfig
 ```

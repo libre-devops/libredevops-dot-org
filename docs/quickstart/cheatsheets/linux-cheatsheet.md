@@ -211,6 +211,49 @@ echo 'eval "$(starship init bash)"' >> ~/.bashrc
 
 ```
 
+### Terraform Release Function
+```
+#!/usr/bin/env bash
+
+function tfrel ()
+{
+    set -e
+    local curdir=$(basename $(pwd));
+    alias stfi='curl https://raw.githubusercontent.com/libre-devops/utils/dev/scripts/terraform/tf-sort.sh | bash -s -- input.tf input.tf'
+    alias stfo='curl https://raw.githubusercontent.com/libre-devops/utils/dev/scripts/terraform/tf-sort.sh | bash -s -- output.tf output.tf'
+    alias td='terraform-docs markdown . >> README.md'
+
+    if ls *.tf &> /dev/null; then
+        rm -rf README.md
+        stfi
+        stfo
+        if [ -f build.tf ];  then
+            echo "" > README.md && echo '```hcl' | cat - build.tf | cat - README.md > temp.md && mv temp.md README.md
+
+        elif [ -f main.tf ]; then
+            echo "" > README.md && echo '```hcl' | cat - main.tf | cat - README.md > temp.md && mv temp.md README.md
+
+        else
+            echo "Not a build directory, no build.tf found"
+        fi
+        td
+        git add --all
+        git commit -m "Update module"
+        git push
+        git tag 1.0.0 --force
+        git push --tags --force
+
+    else
+        echo "Error: No terraform files found within ${curdir}";
+    fi
+}
+
+echo "Appending functions to .bashrc"
+echo "" >> ~/.bashrc
+echo "# Define tfrel function" >> ~/.bashrc
+declare -f tfrel >> ~/.bashrc
+```
+
 ### Install Pyenv on Ubuntu
 ```
 #!/usr/bin/env bash
@@ -289,6 +332,7 @@ pipx install checkov && \
 pipx install azure-cli && \
 pipx install black && \ 
 pipx install pipenv && \
+pipx install beautysh && \
 tfenv install latest && \
 tfenv use latest && \
 pkenv install 1.8.6 && \
