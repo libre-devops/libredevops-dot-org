@@ -250,6 +250,8 @@ function tfrel() {
         print_alert "Not a build directory, no build.tf or main.tf found"
     fi
     terraform-docs markdown . >> README.md
+    stfi
+    stfo
     git add --all
     git commit -m "Update module"
     git push
