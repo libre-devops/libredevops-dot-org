@@ -238,8 +238,10 @@ function tfrel() {
     local build_file=""
     if [ -f build.tf ]; then
         build_file="build.tf"
+        print_success "${build_file} found"
     elif [ -f main.tf ]; then
         build_file="main.tf"
+        print_success "${build_file} found"
     fi
     if [ "$build_file" != "" ]; then
         echo "" > README.md
