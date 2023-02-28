@@ -327,6 +327,10 @@ data "http" "user_ip" {
   url = "https://ipv4.icanhazip.com"
 }
 
+data "http" "user_ip_from_aws" {
+ url = "https://checkip.amazonaws.com"
+}
+
 output "my_ip" {
   value = data.http.user_ip.body
 }
