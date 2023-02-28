@@ -251,6 +251,7 @@ function tfrel() {
     else
         print_alert "Not a build directory, no build.tf or main.tf found"
     fi
+    terraform fmt -recursive
     terraform-docs markdown . >> README.md
     stfi
     stfo
