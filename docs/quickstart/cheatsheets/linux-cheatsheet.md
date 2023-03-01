@@ -347,6 +347,7 @@ pipx install checkov && \
 pipx install azure-cli && \
 pipx install black && \ 
 pipx install pipenv && \
+pipx install bandit && \
 pipx install beautysh && \
 tfenv install latest && \
 tfenv use latest && \
@@ -358,6 +359,11 @@ brew install terraform-docs && \
 echo "alias td='terraform-docs markdown . > README.md'" >> ~/.bashrc
 ```
 
+## Some handy aliases 
+
+```
+echo "alias unsecure-update='sudo apt-get -o Acquire::https::Verify-Peer=false update'" >> ~/.bashrc
+```
 ## Fedora/RHEL
 
 ### Update CA Certificates on Fedora
