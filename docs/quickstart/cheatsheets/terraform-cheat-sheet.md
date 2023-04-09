@@ -454,6 +454,49 @@ output "os" {
   value = local.os
 }
 ```
-  
+## Local workflow
+```
+  local_workflow ()
+{
+    workspace_name="uat"
+    tests_path="${HOME}/craig-workspace/azure-naming-convention/az-terraform-compliance-policy"
+
+    terraform init -upgrade
+    if [ $? -ne 0 ]; then
+        echo "Error: terraform init failed"
+        return 1
+    fi
+
+    terraform workspace new ${workspace_name} || terraform workspace select ${workspace_name}
+
+    terraform plan -out pipeline.plan
+    if [ $? -ne 0 ]; then
+        echo "Error: terraform plan failed"
+        return 1
+    fi
+
+    tfsec . --force-all-dirs
+    if [ $? -ne 0 ]; then
+        echo "Error: tfsec failed"
+        return 1
+    fi
+
+    terraform show -json pipeline.plan > pipeline.plan.json
+
+    checkov -f pipeline.plan.json
+    if [ $? -ne 0 ]; then
+        echo "Error: checkov failed"
+        return 1
+    fi
+
+    terraform-compliance -p pipeline.plan -f ${tests_path}
+    if [ $? -ne 0 ]; then
+        echo "Error: terraform-compliance failed"
+        return 1
+    fi
+
+    rm -rf
+}
+```
 
 Source: `{{ page.path }}`
