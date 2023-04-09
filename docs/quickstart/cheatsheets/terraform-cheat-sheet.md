@@ -456,7 +456,7 @@ output "os" {
 ```
 ## Local workflow
 ```
-  local_workflow ()
+local_workflow ()
 {
     workspace_name="uat"
     tests_path="${HOME}/craig-workspace/azure-naming-convention/az-terraform-compliance-policy"
@@ -495,8 +495,12 @@ output "os" {
         return 1
     fi
 
-    rm -rf
+    rm -rf pipeline.plan
+    rm -rf pipeline.plan.json
+    rm -rf .terraform
+    rm -rf .terraform.lock.hcl
 }
+
 ```
 
 Source: `{{ page.path }}`
