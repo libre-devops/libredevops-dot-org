@@ -465,6 +465,7 @@ RUN mkdir -p /azp && \
     libreadline-dev \
     libsqlite3-dev \
     libssl-dev \
+    libtidy-dev \
     libxml2-dev \
     libyaml-dev \
     libzip-dev \
@@ -553,11 +554,6 @@ RUN git clone https://github.com/syndbg/goenv.git ~/.goenv && \
     goenv install ${GO_LATEST_VERSION} && \
     goenv global ${GO_LATEST_VERSION}
 
-RUN git clone https://github.com/phpenv/phpenv ~/.phpenv && \
-    git clone https://github.com/php-build/php-build ~/.phpenv/plugins/php-build && \
-    PHP_LATEST_VERSION=$(phpenv install -l | grep -E -v 'snapshot|dev|rc|alpha|beta' | tail -1) && \
-    phpenv install ${PHP_LATEST_VERSION} && \
-    phpenv global ${PHP_LATEST_VERSION}
 
 # Install Dotnet SDK non-interactively
 RUN curl -L dotnet-install.sh https://dot.net/v1/dotnet-install.sh | bash
