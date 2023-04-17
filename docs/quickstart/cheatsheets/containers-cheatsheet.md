@@ -406,7 +406,7 @@ status: {}
 #Use supplier image
 FROM docker.io/ubuntu:latest
 
-RUN rm -rf /bin/sh && cp /bin/bash /bin/sh
+RUN rm -rf /bin/sh && ln -sf /bin/bash /bin/sh
 LABEL org.opencontainers.image.source=https://github.com/libre-devops/azdo-agent-containers
 
 ARG DEBIAN_FRONTEND=noninteractive
