@@ -306,7 +306,7 @@ echo 'eval "$(pyenv init -)"' >> ~/.bashrc && \
 echo 'export PATH=$HOME/.local:$PATH' >> ~/.bashrc
 source ~/.bashrc
 pyenv install 3.10
-python global 3.10
+pyenv global 3.10
 
 ```
 
