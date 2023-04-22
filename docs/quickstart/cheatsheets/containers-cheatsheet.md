@@ -580,6 +580,32 @@ CMD [ "./start.sh" ]
 
 ```
 
+## Random Docker-Compose 
+
+```
+---
+version: "3.8"
+services:
+  rdesktop:
+    image: ghcr.io/libre-devops/gui-tooling-container:latest
+    container_name: tooling-container
+    privileged: true
+    volumes:
+      - dev-container-home:/home
+      - dev-container-opt:/opt
+    environment:
+      - TZ=Europe/London
+    ports:
+      - 3389:3389
+    shm_size: "1gb" #optional
+    restart: unless-stopped
+
+volumes:
+  dev-container-home:
+  dev-container-opt:
+  ```
+
+
 {% endraw  %}
 
 Source: `{{ page.path }}`
