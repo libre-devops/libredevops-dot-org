@@ -3,14 +3,14 @@
 ```hcl
 
 terraform {
-  #Use the latest by default, uncomment below to pin or use hcl.lck
   required_providers {
     azurerm = {
       source = "hashicorp/azurerm"
-      #      configuration_aliases = [azurerm.default-provider]
-      #      version = "~> 2.68.0"
+      # Uncomment below to pin or use hcl.lck
+      # version = "~> 2.68.0"
     }
   }
+  
   backend "azurerm" {
     storage_account_name = "example"
     container_name       = "example"
@@ -19,15 +19,15 @@ terraform {
   }
 }
 
-
 provider "azurerm" {
-
   features {
-
+    # Add provider features if needed
   }
 }
 
-data "azurerm_client_config" "current" {}
+data "azurerm_client_config" "current" {
+  # Fetch Azure client configuration
+}
 
 variable "short" {
   description = "This is passed as an environment variable, it is for a shorthand name for the environment, for example hello-world = hw"
@@ -67,15 +67,14 @@ locals {
   }
 }
 
-
 module "rg" {
   source = "registry.terraform.io/libre-devops/rg/azurerm"
 
-  rg_name  = "rg-${var.short}-${var.loc}-${terraform.workspace}-vault" // rg-ldo-euw-dev-build
-  location = local.location                                            // compares var.loc with the var.regions var to match a long-hand name, in this case, "euw", so "westeurope"
+  rg_name  = "rg-${var.short}-${var.loc}-${terraform.workspace}-vault"
+  location = local.location
   tags     = local.tags
 
-  #  lock_level = "CanNotDelete" // Do not set this value to skip lock
+  # lock_level = "CanNotDelete" // Do not set this value to skip lock
 }
 
 resource "azurerm_user_assigned_identity" "managed_id" {
@@ -92,7 +91,6 @@ resource "azurerm_role_assignment" "mi_owner" {
   skip_service_principal_aad_check = true
 }
 
-
 module "network" {
   source = "registry.terraform.io/libre-devops/network/azurerm"
 
@@ -100,7 +98,7 @@ module "network" {
   location = module.rg.rg_location
   tags     = module.rg.rg_tags
 
-  vnet_name     = "vnet-${var.short}-${var.loc}-${terraform.workspace}-01" // vnet-ldo-euw-dev-01
+  vnet_name     = "vnet-${var.short}-${var.loc}-${terraform.workspace}-01"
   vnet_location = module.network.vnet_location
 
   address_space   = ["10.0.0.0/16"]
@@ -220,7 +218,7 @@ resource "azurerm_network_security_rule" "smb_inbound" {
   network_security_group_name = module.nsg.nsg_name
 }
 
-# Create random string so soft deleted key vaults dont conflict - consider removing for production
+# Create random string so soft-deleted key vaults don't conflict - consider removing for production
 resource "random_string" "random" {
   length  = 6
   special = false
@@ -327,8 +325,7 @@ module "sa" {
   identity_type        = "SystemAssigned"
 
   storage_account_properties = {
-
-    // Set this block to enable network rules
+    # Set this block to enable network rules
     network_rules = {
       default_action = "Allow"
       bypass         = ["AzureServices", "Metrics", "Logging"]
@@ -455,7 +452,7 @@ module "linux_vm" {
 
   user_data = base64encode(data.azurerm_client_config.current.tenant_id)
 
-  asg_name = "asg-${element(regexall("[a-z]+", element(module.linux_vm.vm_name, 0)), 0)}-${var.short}-${var.loc}-${terraform.workspace}-01" //asg-vmldoeuwdev-ldo-euw-dev-01 - Regex strips all numbers from string
+  asg_name = "asg-${element(regexall("[a-z]+", element(module.linux_vm.vm_name, 0)), 0)}-${var.short}-${var.loc}-${terraform.workspace}-01" // Regex strips all numbers from string
 
   admin_username = "LibreDevOpsAdmin"
   admin_password = random_password.password.result
@@ -489,12 +486,12 @@ module "jmp_vm" {
   vm_os_simple       = "WindowsServer2022Gen2"
   vm_os_disk_size_gb = "127"
 
-  asg_name = "asg-${element(regexall("[a-z]+", element(module.jmp_vm.vm_name, 0)), 0)}-${var.short}-${var.loc}-${terraform.workspace}-01" //asg-vmldoeuwdev-ldo-euw-dev-01 - Regex strips all numbers from string
+  asg_name = "asg-${element(regexall("[a-z]+", element(module.jmp_vm.vm_name, 0)), 0)}-${var.short}-${var.loc}-${terraform.workspace}-01" //Regex strips all numbers from string
 
   admin_username = "LibreDevOpsAdmin"
   admin_password = random_password.password.result // Created with the Libre DevOps Terraform Pre-Requisite script
 
-  subnet_id            = element(values(module.network.subnets_ids), 0) // Places in sn1-vnet-ldo-euw-dev-01
+  subnet_id            = element(values(module.network.subnets_ids), 0) // Places in sn1
   availability_zone    = "alternate"                                    // If more than 1 VM exists, places them in alterate zones, 1, 2, 3 then resetting.  If you want HA, use an availability set.
   storage_account_type = "StandardSSD_LRS"
   identity_type        = "UserAssigned"
@@ -531,6 +528,8 @@ resource "azurerm_virtual_machine_extension" "mount" {
   }
   SETTINGS
 }
+
+
 
 ```
 
