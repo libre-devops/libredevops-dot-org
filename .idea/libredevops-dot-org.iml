@@ -104,5 +104,6 @@
     <orderEntry type="library" scope="PROVIDED" name="unf_ext (v0.0.8.2, ruby-3.1.3-p185) [gem]" level="application" />
     <orderEntry type="library" scope="PROVIDED" name="unicode-display_width (v1.8.0, ruby-3.1.3-p185) [gem]" level="application" />
     <orderEntry type="library" scope="PROVIDED" name="zeitwerk (v2.6.8, ruby-3.1.3-p185) [gem]" level="application" />
+    <orderEntry type="module" module-name="libredevops-dot-org-main" />
   </component>
 </module>
