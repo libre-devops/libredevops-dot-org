@@ -167,6 +167,7 @@ callouts:
 plugins:
   - jekyll-seo-tag
   - jekyll-github-metadata
+  - jemoji
 
 kramdown:
   syntax_highlighter_opts:
