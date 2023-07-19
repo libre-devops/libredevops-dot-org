@@ -1,0 +1,50 @@
+Folder PATH listing for volume OS
+Volume serial number is 58ED-C405
+C:.
++---assets
+ª   +---css
+ª   +---images
+ª   +---js
+ª       +---vendor
++---bin
++---docs
+ª   +---docs
+ª   +---quickstart
+ª       +---cheatsheets
+ª       +---utils
+ª           +---nginx
+ª           +---pipelines
+ª           ª   +---azdo
+ª           ª   +---gh
+ª           ª   +---jenkins
+ª           +---scripts
+ª           ª   +---linux
+ª           ª   +---windows
+ª           +---terraform
++---fixtures
++---lib
+ª   +---tasks
++---_includes
+ª   +---common
+ª   ª   +---assets
+ª   ª   +---core
+ª   ª   +---rest
+ª   +---components
+ª   +---css
+ª   +---icons
+ª   +---js
+ª   +---lunr
+ª   +---templates
+ª   +---vendor
++---_layouts
+ª   +---vendor
++---_sass
+    +---color_schemes
+    +---custom
+    +---support
+    ª   +---mixins
+    +---utilities
+    +---vendor
+        +---normalize.scss
+        +---OneDarkJekyll
+        +---OneLightJekyll

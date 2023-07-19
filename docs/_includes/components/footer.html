@@ -1,73 +1,73 @@
 {% capture footer_custom %}
-  {%- include footer_custom.html -%}
+{%- include footer_custom.html -%}
 {% endcapture %}
 {% if footer_custom != "" or site.last_edit_timestamp or site.gh_edit_link %}
-  <hr>
-  <footer>
-    {% if site.back_to_top %}
-      <p><a href="#top" id="back-to-top">{{ site.back_to_top_text }}</a></p>
+<hr>
+<footer>
+  {% if site.back_to_top %}
+  <p><a href="#top" id="back-to-top">{{ site.back_to_top_text }}</a></p>
+  {% endif %}
+
+  {{ footer_custom }}
+
+  {% if site.last_edit_timestamp or site.gh_edit_link %}
+  <div class="d-flex mt-2">
+    {% if site.last_edit_timestamp and site.last_edit_time_format and page.last_modified_date %}
+    <p class="text-small text-grey-dk-000 mb-0 mr-2">
+      Page last modified: <span class="d-inline-block">{{ page.last_modified_date | date: site.last_edit_time_format }}</span>.
+    </p>
     {% endif %}
-
-    {{ footer_custom }}
-
-    {% if site.last_edit_timestamp or site.gh_edit_link %}
-      <div class="d-flex mt-2">
-        {% if site.last_edit_timestamp and site.last_edit_time_format and page.last_modified_date %}
-          <p class="text-small text-grey-dk-000 mb-0 mr-2">
-            Page last modified: <span class="d-inline-block">{{ page.last_modified_date | date: site.last_edit_time_format }}</span>.
-          </p>
-        {% endif %}
-        {% if
-          site.gh_edit_link and
-          site.gh_edit_link_text and
-          site.gh_edit_repository and
-          site.gh_edit_branch and
-          site.gh_edit_view_mode
-        %}
-          <p class="text-small text-grey-dk-000 mb-0">
-            <a href="{{ site.gh_edit_repository }}/{{ site.gh_edit_view_mode }}/{{ site.gh_edit_branch }}{% if site.gh_edit_source %}/{{ site.gh_edit_source }}{% endif %}{% if page.collection and site.collections_dir %}/{{ site.collections_dir }}{% endif %}/{{ page.path }}" id="edit-this-page">{{ site.gh_edit_link_text }}</a>
-          </p>
-        <div class="icon-bar">
-          <div class="col-xl-8 offset-xl-2 col-lg-10 offset-lg-1">
-            <a href="mailto:libredevops@craigthacker.dev" title="Email me">
+    {% if
+    site.gh_edit_link and
+    site.gh_edit_link_text and
+    site.gh_edit_repository and
+    site.gh_edit_branch and
+    site.gh_edit_view_mode
+    %}
+    <p class="text-small text-grey-dk-000 mb-0">
+      <a href="{{ site.gh_edit_repository }}/{{ site.gh_edit_view_mode }}/{{ site.gh_edit_branch }}{% if site.gh_edit_source %}/{{ site.gh_edit_source }}{% endif %}{% if page.collection and site.collections_dir %}/{{ site.collections_dir }}{% endif %}/{{ page.path }}" id="edit-this-page">{{ site.gh_edit_link_text }}</a>
+    </p>
+    {% endif %}
+  </div>
+  {% endif %}
+    <div class="icon-bar">
+      <div class="col-xl-8 offset-xl-2 col-lg-10 offset-lg-1">
+        <a href="mailto:libredevops@craigthacker.dev" title="Email me">
       <span class="fa-stack fa-lg" aria-hidden="true">
         <i class="fas fa-circle fa-stack-2x"></i>
         <i class="fas fa-envelope fa-stack-1x fa-inverse"></i>
       </span>
-              <span class="sr-only">Email</span>
-            </a>
-            <a href="https://github.com/libre-devops" title="GitHub">
+          <span class="sr-only">Email</span>
+        </a>
+        <a href="https://github.com/libre-devops" title="GitHub">
       <span class="fa-stack fa-lg" aria-hidden="true">
         <i class="fas fa-circle fa-stack-2x"></i>
         <i class="fab fa-github fa-stack-1x fa-inverse"></i>
       </span>
-              <span class="sr-only">GitHub</span>
-            </a>
-            <a href="https://registry.terraform.io/namespaces/libre-devops" title="Terraform Registry">
+          <span class="sr-only">GitHub</span>
+        </a>
+        <a href="https://registry.terraform.io/namespaces/libre-devops" title="Terraform Registry">
       <span class="fa-stack fa-lg" aria-hidden="true">
         <i class="fas fa-circle fa-stack-2x"></i>
         <i class="fas fa-code fa-stack-1x fa-inverse"></i>
       </span>
-              <span class="sr-only">Terraform Registry</span>
-            </a>
-            <a href="https://hub.docker.com/u/libredevops" title="Docker Hub">
+          <span class="sr-only">Terraform Registry</span>
+        </a>
+        <a href="https://hub.docker.com/u/libredevops" title="Docker Hub">
       <span class="fa-stack fa-lg" aria-hidden="true">
         <i class="fas fa-circle fa-stack-2x"></i>
         <i class="fab fa-docker fa-stack-1x fa-inverse"></i>
       </span>
-              <span class="sr-only">Docker Hub</span>
-            </a>
-            <a href="https://keybase.io/team/libredevops" title="Keybase">
+          <span class="sr-only">Docker Hub</span>
+        </a>
+        <a href="https://keybase.io/team/libredevops" title="Keybase">
       <span class="fa-stack fa-lg" aria-hidden="true">
         <i class="fas fa-circle fa-stack-2x"></i>
         <i class="fab fa-keybase fa-stack-1x fa-inverse"></i>
       </span>
-              <span class="sr-only">Docker Hub</span>
-            </a>
-          </div>
-        </div>
-        {% endif %}
+          <span class="sr-only">Docker Hub</span>
+        </a>
       </div>
-    {% endif %}
-  </footer>
+  </div>
+</footer>
 {% endif %}
