@@ -29,3 +29,13 @@ As such, if you see something or DevOps resources under the Libre DevOps banner,
 Hopefully the resources will help you get started down your journey, if you find any issues, feel free to raise a GitHub issue or pull request with your questions.
 
 If you wish to contact the site owner in its current iteration directly and discreetly, please use the contact link at the bottom of the page.
+
+#### Thank you to the contributors of Libre DevOps!
+
+<ul class="list-style-none">
+{% for contributor in site.github.contributors %}
+  <li class="d-inline-block mr-1">
+     <a href="{{ contributor.html_url }}"><img src="{{ contributor.avatar_url }}" width="32" height="32" alt="{{ contributor.login }}"></a>
+  </li>
+{% endfor %}
+</ul>
