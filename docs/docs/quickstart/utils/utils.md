@@ -1,9 +1,9 @@
 ---
 layout: default
-title: Terraform
+title: Utils
 has_children: true
-parent: Utils
-permalink: /docs/quickstart/utils/terraform
+parent: Quickstart
+permalink: /docs/quickstart/utils
 ---
 
 ## Table of contents
