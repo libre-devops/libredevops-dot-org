@@ -2,7 +2,6 @@
 layout: default
 title: Terraform Example Build
 parent: Terraform
-
 ---
 
 ## Table of contents

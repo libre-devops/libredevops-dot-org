@@ -3,7 +3,6 @@ layout: default
 title: Terraform
 has_children: true
 parent: Utils
-
 ---
 
 ## Table of contents
