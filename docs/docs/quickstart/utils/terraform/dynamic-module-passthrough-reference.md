@@ -2,6 +2,7 @@
 layout: default
 title: Dynamic Module Passthrough Reference
 parent: Terraform
+grand_parent: Utils
 ---
 
 ## Table of contents

@@ -2,6 +2,7 @@
 layout: default
 title: Terraform Example Build
 parent: Terraform
+grand_parent: Utils
 ---
 
 ## Table of contents
