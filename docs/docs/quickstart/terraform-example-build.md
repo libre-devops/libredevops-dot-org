@@ -2,6 +2,8 @@
 layout: default
 title: Terraform Example Build
 permalink: /docs/quickstart/utils/terraform/terraform-example-build
+parent: Terraform
+
 ---
 
 ## Table of contents

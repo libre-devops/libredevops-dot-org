@@ -58,6 +58,7 @@
     "nodejs_package_manager_path": "npm",
     "ruby.rails.projectView.checked": "true",
     "ruby.structure.view.model.defaults.configured": "true",
+    "run.code.analysis.last.selected.profile": "pProject Default",
     "vue.rearranger.settings.migration": "true"
   }
 }]]></component>
@@ -70,6 +71,9 @@
       <recent name="C:\Users\craig\craig-workspace\.libre-devops\libredevops-dot-org\docker" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
+      <recent name="C:\Users\craig\craig-workspace\.libre-devops\libredevops-dot-org\docs\docs\quickstart" />
+      <recent name="C:\Users\craig\craig-workspace\.libre-devops\libredevops-dot-org\docs\docs\quickstart\utils" />
+      <recent name="C:\Users\craig\craig-workspace\.libre-devops\libredevops-dot-org\docs\docs" />
       <recent name="C:\Users\craig\craig-workspace\.libre-devops\libredevops-dot-org\docs\_includes" />
     </key>
   </component>
@@ -128,7 +132,7 @@
       <workItem from="1690041438910" duration="3000" />
       <workItem from="1690041463838" duration="21000" />
       <workItem from="1690041491793" duration="144000" />
-      <workItem from="1690686863276" duration="1493000" />
+      <workItem from="1690686863276" duration="2066000" />
     </task>
     <servers />
   </component>

@@ -4,6 +4,7 @@ title: Utils
 nav_order: 5
 has_children: true
 permalink: /docs/quickstart/utils
+parent: Quickstart
 ---
 
 ## Table of contents
