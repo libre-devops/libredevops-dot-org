@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Azure Naming Convention
-permalink: /docs/azure-naming-convention
+permalink: /docs/documents/azure-naming-convention
 ---
 # Azure Naming Convention
 

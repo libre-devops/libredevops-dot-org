@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Azure DevOps Agent Container
-permalink: /docs/azure-devops-agent-container
+permalink: /docs/documents/azure-devops-agent-container
 ---
 
 # Azure DevOps Agent Containers

@@ -48,7 +48,7 @@
     "WebServerToolWindowFactoryState": "false",
     "git-widget-placeholder": "main",
     "ignore.virus.scanning.warn.message": "true",
-    "last_opened_file_path": "C:/Users/craig/craig-workspace/.libre-devops/libredevops-dot-org/docs/docs/cheatsheets",
+    "last_opened_file_path": "C:/Users/craig/craig-workspace/.libre-devops/libredevops-dot-org/docs/docs/quickstart/utils",
     "node.js.detected.package.eslint": "true",
     "node.js.detected.package.stylelint": "true",
     "node.js.detected.package.tslint": "true",
@@ -64,11 +64,11 @@
 }]]></component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
+      <recent name="C:\Users\craig\craig-workspace\.libre-devops\libredevops-dot-org\docs\docs\quickstart\utils" />
       <recent name="C:\Users\craig\craig-workspace\.libre-devops\libredevops-dot-org\docs\docs\cheatsheets" />
       <recent name="C:\Users\craig\craig-workspace\.libre-devops\libredevops-dot-org\docs\_includes" />
       <recent name="C:\Users\craig\craig-workspace\.libre-devops\libredevops-dot-org" />
       <recent name="C:\Users\craig\craig-workspace\.libre-devops\libredevops-dot-org\docs" />
-      <recent name="C:\Users\craig\craig-workspace\.libre-devops\libredevops-dot-org\docs\assets\images" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
       <recent name="C:\Users\craig\craig-workspace\.libre-devops\libredevops-dot-org\docs\docs\quickstart\utils" />
@@ -133,7 +133,7 @@
       <workItem from="1690041438910" duration="3000" />
       <workItem from="1690041463838" duration="21000" />
       <workItem from="1690041491793" duration="144000" />
-      <workItem from="1690686863276" duration="4424000" />
+      <workItem from="1690686863276" duration="5395000" />
     </task>
     <servers />
   </component>
