@@ -3,6 +3,7 @@ layout: default
 title: Terraform
 has_children: true
 parent: Utils
+grand_parent: Quickstart
 permalink: /docs/quickstart/utils/terraform
 ---
 
