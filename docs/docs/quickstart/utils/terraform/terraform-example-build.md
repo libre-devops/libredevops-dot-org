@@ -1,5 +1,17 @@
-# Example Terraform Build
+---
+layout: default
+title: Terraform Example Build
+---
 
+## Table of contents
+{: .no_toc .text-delta }
+
+1. TOC
+   {:toc}
+
+---
+
+# Example Build
 ```hcl
 
 terraform {

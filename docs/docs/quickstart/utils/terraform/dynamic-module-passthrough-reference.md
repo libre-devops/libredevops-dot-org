@@ -1,6 +1,19 @@
+---
+layout: default
+title: Dynamic Module Passthrough Reference
+---
+
+## Table of contents
+{: .no_toc .text-delta }
+
+1. TOC
+   {:toc}
+
+---
+
 # Dynamic Block Passthrough
 
-```
+```hcl
 resource "azurerm_redis_cache" "redis" {
   name                          = var.redis_name
   location                      = var.location
