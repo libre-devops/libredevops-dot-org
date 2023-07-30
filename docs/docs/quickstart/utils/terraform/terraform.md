@@ -3,7 +3,7 @@ layout: default
 title: Utils
 nav_order: 5
 has_children: true
-permalink: /docs/quickstart/utils
+permalink: /docs/quickstart/utils/terraform
 ---
 
 ## Table of contents

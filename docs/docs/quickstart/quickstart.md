@@ -3,7 +3,7 @@ layout: default
 title: Quickstart
 nav_order: 4
 has_children: true
-permalink: quickstart
+permalink: /docs/quickstart
 ---
 
 # Quickstart
