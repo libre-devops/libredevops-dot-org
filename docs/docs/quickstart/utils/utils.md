@@ -3,11 +3,8 @@ layout: default
 title: Quickstart
 nav_order: 5
 has_children: true
-permalink: docs/quickstart/utils
+permalink: quickstart/utils
 ---
-
-# Typography Utilities
-{: .no_toc }
 
 ## Table of contents
 {: .no_toc .text-delta }
