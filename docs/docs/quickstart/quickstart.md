@@ -1,12 +1,14 @@
 ---
-title: Quickstart
 layout: default
-nav_order: 4.5
+title: Quickstart
+nav_order: 4
 has_children: true
+permalink: docs/quickstart
 ---
 
 # Quickstart
+{: .no_toc }
 
-{% include list.liquid all=true %}
+---
 
 Source: `{{ page.path }}`

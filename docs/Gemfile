@@ -1,7 +1,22 @@
 source "https://rubygems.org"
 gemspec
 
-gem "jekyll-github-metadata", ">= 2.15"
+gem "jekyll-github-metadata"
 gem "jemoji"
 gem 'jekyll-remote-include'
-gem "webrick", "~> 1.7"
+gem "webrick"
+gem 'jemoji'
+gem 'jekyll'
+gem 'jekyll-seo-tag'
+gem 'gemoji'
+gem 'i18n'
+gem 'jekyll-sass-converter'
+gem 'kramdown'
+gem 'mercenary'
+gem 'rouge'
+gem 'activesupport'
+gem 'sass'
+gem 'tzinfo'
+gem 'zeitwerk'
+gem 'sass-listen'
+gem 'thread_safe'
