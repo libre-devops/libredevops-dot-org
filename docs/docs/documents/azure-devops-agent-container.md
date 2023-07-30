@@ -2,6 +2,7 @@
 layout: default
 title: Azure DevOps Agent Container
 permalink: /docs/documents/azure-devops-agent-container
+parent: Documents
 ---
 
 # Azure DevOps Agent Containers

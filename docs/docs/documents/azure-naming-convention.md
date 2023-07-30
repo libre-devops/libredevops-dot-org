@@ -2,6 +2,7 @@
 layout: default
 title: Azure Naming Convention
 permalink: /docs/documents/azure-naming-convention
+parent: Documents
 ---
 # Azure Naming Convention
 
