@@ -1,3 +1,10 @@
+---
+layout: default
+title: Jenkins Pipeline - Terraform
+parent: Utils
+grand_parent: Quickstart
+---
+
 # Terraform Pipeline for Jenkins
 
 {% raw  %}

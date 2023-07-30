@@ -1,3 +1,10 @@
+---
+layout: default
+title: Azure DevOps Agent Script
+parent: Utils
+grand_parent: Quickstart
+---
+
 # Azure DevOps Agent Start Script - Bash
 
 Inspiration taken from [Microsoft](https://docs.microsoft.com/en-us/azure/devops/pipelines/agents/docker?view=azure-devops).

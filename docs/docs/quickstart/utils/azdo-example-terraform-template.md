@@ -1,3 +1,10 @@
+---
+layout: default
+title: Azure DevOps Pipeline - Terraform
+parent: Utils
+grand_parent: Quickstart
+---
+
 # Terraform Template for Azure DevOps
 
 A copy of these templates is stored [here](https://github.com/libre-devops/terraform-azdo-pipeline-template)

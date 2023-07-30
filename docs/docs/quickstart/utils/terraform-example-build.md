@@ -1,8 +1,8 @@
 ---
 layout: default
 title: Terraform Example Build
-parent: Terraform
-grand_parent: Utils
+parent: Utils
+grand_parent: Quickstart
 ---
 
 ## Table of contents

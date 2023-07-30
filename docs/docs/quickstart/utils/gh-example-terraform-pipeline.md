@@ -1,4 +1,9 @@
-# Terraform Pipeline for GitHub Actions
+---
+layout: default
+title: GitHub Actions Pipeline - Terraform
+parent: Utils
+grand_parent: Quickstart
+---
 
 {% raw  %}
 ```yaml

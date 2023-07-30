@@ -1,3 +1,9 @@
+---
+layout: default
+title:  Nginx Cheatsheet
+parent: Cheatsheets
+---
+
 # Nginx Examples
 
 {% raw  %}

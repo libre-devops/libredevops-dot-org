@@ -1,4 +1,12 @@
- # Terrafrom Pre-Requisite - Azure-Cli - Bash
+---
+layout: default
+title: Azure Pre-requisite script
+parent: Utils
+grand_parent: Quickstart
+---
+
+
+# Terrafrom Pre-Requisite - Azure-Cli - Bash
 
 {% raw  %}
 - Purpose:

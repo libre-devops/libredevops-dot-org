@@ -1,3 +1,10 @@
+---
+layout: default
+title: Sort Terraform Variables in Alphabetical order
+parent: Utils
+grand_parent: Quickstart
+---
+
 # Sort Terraform Variables in Alphabetical Order
 
 Copy of script can be found [https://github.com/libre-devops/utils/blob/dev/scripts/terraform/tf-sort.sh](https://github.com/libre-devops/utils/blob/dev/scripts/terraform/tf-sort.sh)

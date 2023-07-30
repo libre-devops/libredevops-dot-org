@@ -1,8 +1,8 @@
 ---
 layout: default
-title: Dynamic Module Passthrough Reference
-parent: Terraform
-grand_parent: Utils
+title: Terraform Dynamic Module Passthrough Reference
+parent: Utils
+grand_parent: Quickstart
 ---
 
 ## Table of contents

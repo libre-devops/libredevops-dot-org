@@ -1,3 +1,10 @@
+---
+layout: default
+title: Azure Pre-requisite Script - Powershell
+parent: Utils
+grand_parent: Quickstart
+---
+
 # Terrafrom Pre-Requisite - Azure PowerShell - PowerShell
 
 {% raw  %}

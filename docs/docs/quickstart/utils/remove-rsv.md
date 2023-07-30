@@ -1,3 +1,10 @@
+---
+layout: default
+title: Remove Items from Recovery Services Vault
+parent: Utils
+grand_parent: Quickstart
+---
+
 # Remove Recovery Services Vault and all backup items
 
 - Disable soft delete and security features

@@ -212,6 +212,54 @@ terraform.rc
 git checkout --orphan temp_branch && git add -A && git commit -m "Initial commit" && git branch -D main && git branch -m main && git push -f origin main
 ```
 
+# Clone GitHub org repos
+```shell
+#!/usr/bin/env bash
+
+org="libre-devops"
+
+gh repo list ${org} --limit 1000 | while read -r repo _; do
+  gh repo clone "$repo" "$repo"
+done
+```
+
+# Clone all Azure DevOps repos script
+
+```powershell
+#!/usr/bin/env pwsh
+
+$Org="https://dev.azure.com/your_org"
+$Proj="your_proj"
+
+if ($Org -notmatch '^https?://dev.azure.com/\w+') {
+    $Org = "https://dev.azure.com/$Org"
+}
+
+# Make sure we are signed in to Azure
+$AccountInfo = az account show 2>&1
+try {
+    $AccountInfo = $AccountInfo | ConvertFrom-Json -ErrorAction Stop
+}
+catch {
+    az login --allow-no-subscriptions
+}
+
+# Make sure we have Azure DevOps extension installed
+$DevOpsExtension = az extension list --query '[?name == ''azure-devops''].name' -o tsv
+if ($null -eq $DevOpsExtension) {
+    $null = az extension add --name 'azure-devops'
+}
+
+$Repos = az repos list --organization $Org --project $Proj | ConvertFrom-Json
+foreach ($Repo in $Repos) {
+    if(-not (Test-Path -Path $Repo.name -PathType Container)) {
+        Write-Warning -Message "Cloning repo $Proj\$($Repo.Name)"
+        git clone $Repo.webUrl
+    }
+}
+
+```
+
 {% endraw  %}
 
 Source: `{{ page.path }}`
