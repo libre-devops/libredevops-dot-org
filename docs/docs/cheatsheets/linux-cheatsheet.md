@@ -1,3 +1,9 @@
+---
+layout: default
+title: Linux Cheatsheet
+parent: Cheatsheets
+---
+
 # Linux Cheat Sheet
 
 {% raw  %}

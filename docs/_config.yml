@@ -42,7 +42,7 @@ exclude:
    - package.json
    - package-lock.json
    - Rakefile
-   - quickstart.md
+   - cheatsheets.md
    - CODE_OF_CONDUCT.md
    - docker-compose.yml
    - Dockerfile

@@ -1,3 +1,9 @@
+---
+layout: default
+title: PowerShell Cheatsheet
+parent: Cheatsheets
+---
+
 # PowerShell Cheat Sheet
 
 - May also work on Linux

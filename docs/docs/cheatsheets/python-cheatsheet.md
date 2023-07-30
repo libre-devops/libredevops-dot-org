@@ -1,3 +1,9 @@
+---
+layout: default
+title: Python Cheatsheet
+parent: Cheatsheets
+---
+
 # Python Cheat Sheet
 
 {% raw  %}

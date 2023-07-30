@@ -1,3 +1,9 @@
+---
+layout: default
+title: Azure Cheatsheet
+parent: Cheatsheets
+---
+
 # Azure Cheat Sheet
 
 {% raw  %}

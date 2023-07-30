@@ -1,3 +1,9 @@
+---
+layout: default
+title: Git Cheatsheet
+parent: Cheatsheets
+---
+
 # Git Cheat Sheet
 
 {% raw  %}

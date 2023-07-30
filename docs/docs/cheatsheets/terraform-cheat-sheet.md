@@ -1,3 +1,9 @@
+---
+layout: default
+title: Terraform Cheatsheet
+parent: Cheatsheets
+---
+
 # Terraform Cheat Sheet
 
 {% include list.liquid all=true %}

@@ -1,3 +1,9 @@
+---
+layout: default
+title: Bash Cheatsheet
+parent: Cheatsheets
+---
+
 # Bash Cheat Sheet
 
 {% raw  %}
