@@ -2,6 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
+      <module fileurl="file://$PROJECT_DIR$/../../.craigthackerx/craigthacker-dot-dev/.idea/craigthacker-dot-dev.iml" filepath="$PROJECT_DIR$/../../.craigthackerx/craigthacker-dot-dev/.idea/craigthacker-dot-dev.iml" />
       <module fileurl="file://$PROJECT_DIR$/../just-the-docs/.idea/just-the-docs.iml" filepath="$PROJECT_DIR$/../just-the-docs/.idea/just-the-docs.iml" />
       <module fileurl="file://$PROJECT_DIR$/.idea/libredevops-dot-org.iml" filepath="$PROJECT_DIR$/.idea/libredevops-dot-org.iml" />
     </modules>

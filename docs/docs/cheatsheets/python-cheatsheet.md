@@ -382,20 +382,145 @@ python3 -m pip install --upgrade pip ; pip freeze | %{$_.split('==')[0]} | %{pip
 pip3 list -o | cut -f1 -d' ' | tr " " "\n" | awk '{if(NR>=3)print}' | cut -d' ' -f1 | xargs -n1 pip3 install -U 
 ```
 
-## Configure Logging in your app
+## Various Python Utils and code examples
 ```python
 import logging
+import requests
+import time
+import os
+from pathlib import Path
+from urllib.parse import urljoin
 
-# Set logging level. .DEBUG, .WARNING, .INFO etc
-logging.basicConfig(level=logging.DEBUG)
 
-# create a stream handler and set its level to logging.DEBUG
-console_handler = logging.StreamHandler()
-console_handler.setLevel(logging.DEBUG)
+class CustomFormatter(logging.Formatter):
+    """Logging Formatter to add colors"""
 
-# add the stream handler to the root logger
-root_logger = logging.getLogger()
-root_logger.addHandler(console_handler)
+    lightcyan = "\033[1;36m"
+    lightred = "\033[1;31m"
+    yellow = "\033[1;33m"
+    nocolor = "\033[0m"
+    purple = "\033[0;35m"
+    format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+    FORMATS = {
+        logging.DEBUG: lightcyan + format + nocolor,
+        logging.INFO: purple + format + nocolor,
+        logging.WARNING: yellow + format + nocolor,
+        logging.ERROR: lightred + format + nocolor,
+        logging.CRITICAL: lightred + format + nocolor,
+    }
+
+    def format(self, record):
+        log_fmt = self.FORMATS.get(record.levelno)
+        formatter = logging.Formatter(log_fmt)
+        return formatter.format(record)
+
+
+# Create logger
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+# Console handler with custom formatter
+ch = logging.StreamHandler()
+ch.setLevel(logging.DEBUG)
+ch.setFormatter(CustomFormatter())
+
+# Add handlers to logger
+logger.addHandler(ch)
+
+
+def print_success(message):
+    lightcyan = "\033[1;36m"
+    nocolor = "\033[0m"
+    print(f"{lightcyan}{message}{nocolor}")
+
+
+def print_error(message):
+    lightred = "\033[1;31m"
+    nocolor = "\033[0m"
+    print(f"{lightred}{message}{nocolor}")
+
+
+def print_alert(message):
+    yellow = "\033[1;33m"
+    nocolor = "\033[0m"
+    print(f"{yellow}{message}{nocolor}")
+
+
+def handle_download_error(arch):
+    print_error(
+        f"- Failed to download {arch} providers, it is possible the providers in question do not have a release for that platform e.g, no windows_amd64 release but has a darwin and linux release. Another factor could be the proxy interfering with the download or a general failure has occurred\n"
+    )
+
+
+def get_provider_data_with_retry(url, retries=3, backoff_in_seconds=1):
+    for n in range(retries):
+        try:
+            logger.debug("Attempting to get provider data")
+            return requests.get(url).json()
+        except Exception as e:
+            if n == retries - 1:  # This was the last attempt
+                logger.error(f"An error as occurred: {e}")
+                raise
+            else:
+                print_error(
+                    f"Failed to fetch provider data, attempt {n+1} of {retries}. Retrying in {backoff_in_seconds} seconds."
+                )
+                time.sleep(backoff_in_seconds)
+                backoff_in_seconds *= 2  # Exponential backoff
+
+
+def get_latest_terraform_version():
+    response = requests.get("https://checkpoint-api.hashicorp.com/v1/check/terraform")
+    data = response.json()
+    print(f"Current version: {data['current_version']}")
+    return data["current_version"]
+
+
+def check_terraform_version_and_get_url(version):
+    base_url = (
+        "https://releases.hashicorp.com/terraform/{}/terraform_{}_linux_amd64.zip"
+    )
+    response = requests.head(base_url.format(version, version))
+    if response.status_code == 200:
+        return base_url.format(version, version)
+    else:
+        return None
+
+
+def download_terraform_zip(
+    url,
+    version,
+    destination_path,
+    os_names={"linux", "darwin", "windows"},
+    retries=3,
+    backoff_in_seconds=1,
+):
+    for n in range(retries):
+        for os_name in os_names:
+            try:
+                response = requests.get(url)
+                file_path = os.path.join(
+                    destination_path, f"terraform_{version}_{os_name}_amd64.zip"
+                )
+
+                # Create the destination directory if it does not exist
+                os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+                with open(file_path, "wb") as f:
+                    f.write(response.content)
+                logger.debug(f"Downloaded {url} to {file_path}")
+            except Exception as e:
+                logger.error(f"An error has occurred during the download: {e}")
+                if n == retries - 1:  # This was the last attempt
+                    logger.error(f"An error has occurred: {e}")
+                    raise
+                else:
+                    logger.debug(
+                        f"Failed to fetch provider data, attempt {n + 1} of {retries}. Retrying in {backoff_in_seconds} seconds."
+                    )
+                    time.sleep(backoff_in_seconds)
+                    backoff_in_seconds *= 2  # Exponential backoff
 
 ```
 {% endraw  %}

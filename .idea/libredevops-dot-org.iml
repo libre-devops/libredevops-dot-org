@@ -9,6 +9,7 @@
     <orderEntry type="inheritedJdk" />
     <orderEntry type="sourceFolder" forTests="false" />
     <orderEntry type="module" module-name="just-the-docs" />
+    <orderEntry type="module" module-name="craigthacker-dot-dev" />
   </component>
   <component name="TemplatesService">
     <option name="TEMPLATE_FOLDERS">
