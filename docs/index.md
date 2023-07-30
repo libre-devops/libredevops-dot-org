@@ -9,7 +9,7 @@ permalink: /
 # Welcome to Libre DevOps
 
 <p align="center">
-    <img src="/assets/images/libre-devops-black.png">
+    <img src="/assets/images/libre-devops-white.png">
 </p>
 
 
