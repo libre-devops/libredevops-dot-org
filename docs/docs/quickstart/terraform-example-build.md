@@ -1,7 +1,19 @@
 ---
 layout: default
 title: Terraform Example Build
+permalink: /docs/quickstart/utils/terraform/terraform-example-build
 ---
+
+## Table of contents
+{: .no_toc .text-delta }
+
+1. TOC
+   {:toc}
+
+---
+
+Source: `{{ page.path }}`
+
 
 ## Table of contents
 {: .no_toc .text-delta }

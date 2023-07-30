@@ -1,5 +1,7 @@
 ---
-sort: 2
+layout: default
+title: Azure DevOps Agent Container
+permalink: /docs/azure-devops-agent-container
 ---
 
 # Azure DevOps Agent Containers

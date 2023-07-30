@@ -1,6 +1,7 @@
 ---
 layout: default
 title: Dynamic Module Passthrough Reference
+permalink: /docs/quickstart/utils/terraform/dynamic-module-passthrough-reference
 ---
 
 ## Table of contents

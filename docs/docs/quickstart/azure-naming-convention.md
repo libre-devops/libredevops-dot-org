@@ -1,5 +1,7 @@
 ---
-sort: 1
+layout: default
+title: Azure Naming Convention
+permalink: /docs/azure-naming-convention
 ---
 # Azure Naming Convention
 
