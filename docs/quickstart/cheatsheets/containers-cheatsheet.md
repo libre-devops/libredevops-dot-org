@@ -142,7 +142,8 @@ RUN echo 'alias powershell="pwsh"' >> ~/.bashrc
 ### Fix WSL Shared mount in podman 
 
 ```powershell
-wsl.exe -u root -e mount --make-rshared /
+wsl.exe -e sh -c 'echo "wsl.exe -u root -e mount --make-rshared /" | sudo tee /etc/profile.d/02-shared-root.sh > /dev/null && sudo chmod +x /etc/profile.d/02-shared-root.sh'
+
 ```
 
 
