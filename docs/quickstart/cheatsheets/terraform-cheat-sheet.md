@@ -503,4 +503,13 @@ local_workflow ()
 
 ```
 
+# Terraform state force-unlock one-liner
+
+```powershell
+$lockId = (terraform plan 2>&1 | Select-String -Pattern 'ID:\s+([\w-]+)' | ForEach-Object { $_.Matches.Groups[1].Value }); terraform force-unlock $lockId -force
+```
+
+```bash
+lockId=$(terraform plan 2>&1 | grep -oP 'ID:\s+\K[\w-]+') && terraform force-unlock $lockId -force
+```
 Source: `{{ page.path }}`
