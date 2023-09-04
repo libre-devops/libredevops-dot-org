@@ -206,6 +206,12 @@ terraform.rc
 git checkout --orphan temp_branch && git add -A && git commit -m "Initial commit" && git branch -D main && git branch -m main && git push -f origin main
 ```
 
+### Presrve file permissions in Git
+
+```
+git update-index --chmod=+x timestamp.sh
+```
+
 {% endraw  %}
 
 Source: `{{ page.path }}`
