@@ -209,7 +209,7 @@ git checkout --orphan temp_branch && git add -A && git commit -m "Initial commit
 ### Presrve file permissions in Git
 
 ```
-git update-index --chmod=+x timestamp.sh
+git update-index --chmod=+x timestamp.sh && git update-index --chmod=+x timestamp.ps1
 ```
 
 {% endraw  %}
