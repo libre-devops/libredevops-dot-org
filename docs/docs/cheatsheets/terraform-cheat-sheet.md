@@ -462,51 +462,159 @@ output "os" {
 ```
 ## Local workflow
 ```
-local_workflow ()
-{
-    workspace_name="uat"
-    tests_path="${HOME}/craig-workspace/azure-naming-convention/az-terraform-compliance-policy"
+terraform_run() {
 
-    terraform init -upgrade
-    if [ $? -ne 0 ]; then
-        echo "Error: terraform init failed"
-        return 1
+rm -rf .terraform tfplan* terraform.lock.hcl
+
+    if command -v tfenv &> /dev/null && \
+        command -v terraform &> /dev/null && \
+        command -v terraform-compliance &> /dev/null && \
+        command -v tfsec &> /dev/null && \
+        command -v checkov &> /dev/null; then
+        echo "All packages are installed"
+    else
+        echo "Packages needed to run are not installed, exiting" && return 1
     fi
 
-    terraform workspace new ${workspace_name} || terraform workspace select ${workspace_name}
 
-    terraform plan -out pipeline.plan
-    if [ $? -ne 0 ]; then
-        echo "Error: terraform plan failed"
-        return 1
-    fi
+    # Environment Variables
+    terraform_workspace="prd"
+    checkov_skipped_tests=""
+    terraform_compliance_policy_path="git:https://github.com/libre-devops/azure-naming-convention.git//?ref=main"
+    terraform_version="1.5.5"
 
-    tfsec . --force-all-dirs
-    if [ $? -ne 0 ]; then
-        echo "Error: tfsec failed"
-        return 1
-    fi
+    # Setup Tfenv and Install terraform
+    setup_tfenv() {
+        if [ -z "${terraform_version}" ]; then
+            echo "terraform_version is empty or not set., setting to latest" && export terraform_version="latest"
 
-    terraform show -json pipeline.plan > pipeline.plan.json
+        else
+            echo "terraform_version is set, installing terraform version ${terraform_version}"
+        fi
 
-    checkov -f pipeline.plan.json
-    if [ $? -ne 0 ]; then
-        echo "Error: checkov failed"
-        return 1
-    fi
+        tfenv install ${terraform_version} && tfenv use ${terraform_version}
+    }
 
-    terraform-compliance -p pipeline.plan -f ${tests_path}
-    if [ $? -ne 0 ]; then
-        echo "Error: terraform-compliance failed"
-        return 1
-    fi
+    # Terraform Init, Validate & Plan
+    terraform_plan() {
+        terraform init && \
+            terraform workspace new ${terraform_workspace} || terraform workspace select $terraform_workspace
+        terraform validate && \
+            terraform fmt -recursive && \
+            terraform plan -out "$(pwd)/tfplan.plan"
+	    terraform show -json tfplan.plan | tee tfplan.json >/dev/null
+    }
 
-    rm -rf pipeline.plan
-    rm -rf pipeline.plan.json
-    rm -rf .terraform
-    rm -rf .terraform.lock.hcl
+    # Terraform-Compliance Check
+    terraform_compliance_check() {
+        terraform-compliance -p "$(pwd)/tfplan.json" -f ${terraform_compliance_policy_path}
+    }
+0
+    # TFSec Check
+    tfsec_check() {
+        tfsec . --force-all-dirs
+    }
+
+    # CheckOv Check
+    checkov_check() {
+        checkov -f tfplan.json --skip-check "${checkov_skipped_test}"
+    }
+
+    # Cleanup tfplan
+    cleanup_tfplan() {
+        rm -rf "$(pwd)/tfplan" && rm -rf "$(pwd)/tfplan.json"
+    }
+
+    # Call the functions in sequence
+    setup_tfenv && \
+    terraform_plan && \
+    terraform_compliance_check && \
+    tfsec_check && \
+    checkov_check
+    cleanup_tfplan
+}
+```
+
+# Terraform state force-unlock one-liner
+
+```powershell
+$lockId = (terraform plan 2>&1 | Select-String -Pattern 'ID:\s+([\w-]+)' | ForEach-Object { $_.Matches.Groups[1].Value }); terraform force-unlock -force $lockId
+```
+
+```bash
+lockId=$(terraform plan 2>&1 | grep -oP 'ID:\s+\K[\w-]+') && terraform force-unlock -force $lockId
+```
+
+# Generate timestamp tags without terraform function (not known until apply issue)
+
+```
+data "external" "detect_os" {
+  working_dir = path.module
+  program = ["printf", "{\"os\": \"Linux\"}"]
+}
+
+data "external" "generate_timestamp" {
+  program = data.external.detect_os.result.os == "Linux" ? ["${path.module}/timestamp.sh"] : ["powershell", "${path.module}/timestamp.ps1"]
+}
+
+locals {
+  dynamic_tags = {
+    "LastUpdated" = data.external.generate_timestamp.result["timestamp"]
+    "Environment" = terraform.workspace
+  }
+
+  tags = merge(var.static_tags, local.dynamic_tags)
+}
+
+variable "static_tags" {
+  type        = map(string)
+  description = "The tags variable"
+  default = {
+    "CostCentre"  = "671888"
+    "ManagedBy"   = "Terraform"
+    "Contact"     = "help@libredevops.org"
+  }
 }
 
 ```
+### timestamp.sh
+```
+#!/usr/bin/env bash
 
+DATE=$(date '+%d-%m-%Y:%H:%M')
+echo "{\"timestamp\": \"$DATE\"}"
+
+```
+
+### timestamp.ps1
+```
+#!/usr/bin/env pwsh
+
+# Generate the current timestamp in the required format
+$date = Get-Date -Format "dd-MM-yyyy:HH:mm"
+
+# Convert it to a JSON output for Terraform's external data source
+$jsonOutput = @{
+    timestamp = $date
+} | ConvertTo-Json
+
+# Print the JSON output
+Write-Output $jsonOutput
+
+```
+
+### timestamp.py
+```
+import datetime
+
+# Get current time
+now = datetime.datetime.now()
+
+# Format the time
+timestamp = now.strftime("%d-%m-%Y:%H:%M")
+
+# Print as JSON
+print("{\"timestamp\": \"" + timestamp + "\"}")
+```
 Source: `{{ page.path }}`
+
