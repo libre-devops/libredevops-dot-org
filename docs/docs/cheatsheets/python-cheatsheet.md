@@ -348,7 +348,122 @@ def download_terraform_zip(
                         f"Failed to fetch provider data, attempt {n + 1} of {retries}. Retrying in {backoff_in_seconds} seconds."
                     )
                     time.sleep(backoff_in_seconds)
+
+
+
                     backoff_in_seconds *= 2  # Exponential backoff
+```
+
+## Sort terraform variables.tf
+
+```python3
+import re
+import argparse
+
+
+def read_terraform_file(filename):
+    with open(filename, "r") as file:
+        file_content = file.read()
+    return file_content
+
+
+def write_terraform_file(filename, sorted_vars):
+    with open(filename, "w") as file:
+        file.write(sorted_vars)
+
+
+def sort_terraform_variables(content):
+    # Revised regex pattern to match variable blocks with nested structures
+    pattern = re.compile(r'variable\s+"[^"]+"\s+\{.*?\n}', re.DOTALL)
+    variables = pattern.findall(content)
+    # Sort variables alphabetically
+    variables.sort(key=lambda x: re.search(r'variable\s+"([^"]+)"', x).group(1))
+    return "\n\n".join(variables)
+
+
+def parse_arguments():
+    parser = argparse.ArgumentParser(description="Sort Terraform variables.")
+    parser.add_argument(
+        "-i",
+        "--in-file",
+        type=str,
+        help="Input Terraform file",
+        default="./variables.tf",
+    )
+    parser.add_argument(
+        "-o",
+        "--out-file",
+        type=str,
+        help="Output Terraform file",
+        default="./variables.tf",
+    )
+    return parser.parse_args()
+
+
+def main():
+    args = parse_arguments()
+    content = read_terraform_file(args.in_file)
+    sorted_vars = sort_terraform_variables(content)
+    write_terraform_file(args.out_file, sorted_vars)
+    print(f"Sorted variables written to {args.out_file}")
+
+
+if __name__ == "__main__":
+    main()
+
+```
+
+## Sort terraform outputs.tf
+
+```python3
+import re
+import argparse
+
+
+def read_terraform_file(filename):
+    with open(filename, "r") as file:
+        file_content = file.read()
+    return file_content
+
+
+def write_terraform_file(filename, sorted_vars):
+    with open(filename, "w") as file:
+        file.write(sorted_vars)
+
+
+def sort_terraform_outputs(content):
+    pattern = re.compile(r'output\s+"[^"]+"\s+\{.*?\n}', re.DOTALL)
+    outputs = pattern.findall(content)
+    outputs.sort(key=lambda x: re.search(r'output\s+"([^"]+)"', x).group(1))
+    return "\n\n".join(outputs)
+
+
+def parse_arguments():
+    parser = argparse.ArgumentParser(description="Sort Terraform output variables.")
+    parser.add_argument(
+        "-i", "--in-file", type=str, help="Input Terraform file", default="./outputs.tf"
+    )
+    parser.add_argument(
+        "-o",
+        "--out-file",
+        type=str,
+        help="Output Terraform file",
+        default="./outputs.tf",
+    )
+    return parser.parse_args()
+
+
+def main():
+    args = parse_arguments()
+    content = read_terraform_file(args.in_file)
+    sorted_outputs = sort_terraform_outputs(content)
+    write_terraform_file(args.out_file, sorted_outputs)
+    print(f"Sorted outputs written to {args.out_file}")
+
+
+if __name__ == "__main__":
+    main()
+
 ```
 {% endraw  %}
 
