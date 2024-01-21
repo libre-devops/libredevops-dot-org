@@ -28,7 +28,10 @@ As such, if you see something or DevOps resources under the Libre DevOps banner,
 
 Hopefully the resources will help you get started down your journey, if you find any issues, feel free to raise a GitHub issue or pull request with your questions.
 
-If you wish to contact the site owner in its current iteration directly and discreetly, please use the contact link at the bottom of the page.
+### Can't find what you are looking for?
+
+Libre DevOps works in cooperation with [CyberScot](https://cyber.scot), check out the [GitHub](https://github.com/cyber-scot) there, otherwise, if you wish to contact the site owner in its current iteration directly and discreetly, please use the contact link at the bottom of the page.  You can also raise an Issue on the GitHub :wink:
+
 
 #### Thank you to the contributors of Libre DevOps!
 
