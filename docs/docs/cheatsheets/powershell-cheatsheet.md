@@ -65,3 +65,83 @@ disabled = true
 # You must now run `notepad $PROFILE` and add `Invoke-Expression (&starship init powershell)`
 
 ```
+# Various functions
+```
+param (
+    [Parameter(Mandatory)]
+    [string]$ApplicationId,
+
+    [Parameter(Mandatory)]
+    [string]$TenantId,
+
+    [Parameter(Mandatory)]
+    [string]$Secret,
+
+    [string]$SubscriptionId
+)
+
+# Ensure the Az module is installed
+if (-not(Get-Module -ListAvailable -Name Az))
+{
+    Write-Error "This script requires the Az module. Please install it using 'Install-Module -Name Az -AllowClobber -Scope CurrentUser' and then re-run this script."
+    exit
+}
+
+function Connect-AzAccountWithServicePrincipal
+{
+    param (
+        [string]$ApplicationId,
+        [string]$TenantId,
+        [string]$Secret,
+        [string]$SubscriptionId
+    )
+
+    try
+    {
+        $SecureSecret = $Secret | ConvertTo-SecureString -AsPlainText -Force
+        $Credential = New-Object System.Management.Automation.PSCredential ($ApplicationId, $SecureSecret)
+        Connect-AzAccount -ServicePrincipal -Credential $Credential -Tenant $TenantId -ErrorAction Stop
+
+        if (-not [string]::IsNullOrEmpty($SubscriptionId))
+        {
+            Set-AzContext -SubscriptionId $SubscriptionId
+        }
+
+        Write-Host "Successfully logged in to Azure." -ForegroundColor Cyan
+    }
+    catch
+    {
+        Write-Error "Failed to log in to Azure with the provided service principal details: $_"
+        throw $_
+    }
+}
+
+function Register-ResourceProviderIfNecessary
+{
+    param (
+        [string]$ProviderNamespace
+    )
+
+    $provider = Get-AzResourceProvider -ProviderNamespace $ProviderNamespace
+
+    if ($provider.RegistrationState -ne "Registered")
+    {
+        Write-Host "Registering the '$ProviderNamespace' resource provider..." -ForegroundColor Yellow
+        Register-AzResourceProvider -ProviderNamespace $ProviderNamespace | Out-Null
+
+        # Wait for the registration to complete
+        do
+        {
+            Start-Sleep -Seconds 10
+            $provider = Get-AzResourceProvider -ProviderNamespace $ProviderNamespace
+        }
+        while ($provider.RegistrationState -ne "Registered")
+
+        Write-Host "The '$ProviderNamespace' resource provider has been registered." -ForegroundColor Green
+    }
+    else
+    {
+        Write-Host "The '$ProviderNamespace' resource provider is already registered." -ForegroundColor Green
+    }
+}
+```
