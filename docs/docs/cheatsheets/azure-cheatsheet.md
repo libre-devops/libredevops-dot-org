@@ -501,6 +501,18 @@ function Get-AllPolicyDefinitionAssignments {
     }
 }
 
+
+Connect-AzAccount
+$TenantId = $TenantId
+$Result = Get-AllPolicyDefinitionAssignments -TenantId $TenantId -Verbose
+
+```
+
+## Bash
+
+### Login to Azure (Azure CLI)
+
+```shell
 #!/usr/bin/env bash
 
 ##############################################################################
@@ -703,17 +715,6 @@ main() {
 
 main "$@"
 
-Connect-AzAccount
-$TenantId = $TenantId
-$Result = Get-AllPolicyDefinitionAssignments -TenantId $TenantId -Verbose
-
-```
-
-## Bash
-
-### Login to Azure (Azure CLI)
-
-```shell
 
 ```
 
