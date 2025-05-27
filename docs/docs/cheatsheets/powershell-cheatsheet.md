@@ -150,39 +150,43 @@ function Register-ResourceProviderIfNecessary
 
 ```powershell
 
+#Run-AzTerraform.ps1 	- 	https://github.com/libre-devops/terraform-module-template/blob/main/Run-AzTerraform.ps1
+#LibreDevOpsModules 	- 	https://github.com/libre-devops/powershell-helpers
+# PSGallery	   	-	https://www.powershellgallery.com/packages/LibreDevOpsHelpers/1.0.0
+
 function tfbuild {
     param(
         # override any of these defaults at the call-site like:
         #   tfbuild -TerraformWorkspace staging -TerraformPlan true
-        [string]$TerraformCodeLocation		= 'examples',
-        [string]$TerraformWorkspace		    = 'dev',
-        [string]$TerraformStackToRunJson	= '["module-development"]',
-        [string]$RunTerraformInit		    = 'true',
-        [string]$RunTerraformValidate		= 'true',
-        [string]$RunTerraformPlan		    = 'true',
-        [string]$RunTerraformPlanDestroy	= 'false',
-        [string]$RunTerraformDestroy		= 'false',
-        [string]$RunTerraformApply		    = 'true',
-        [string]$TerraformInitExtraArgsJson	= '["-reconfigure","-upgrade"]',
+        [string]$TerraformCodeLocation			= 'examples',
+        [string]$TerraformWorkspace		    	= 'dev',
+        [string]$TerraformStackToRunJson		= '["module-development"]',
+        [string]$RunTerraformInit		    	= 'true',
+        [string]$RunTerraformValidate			= 'true',
+        [string]$RunTerraformPlan		    	= 'true',
+        [string]$RunTerraformPlanDestroy		= 'false',
+        [string]$RunTerraformDestroy			= 'false',
+        [string]$RunTerraformApply		    	= 'true',
+        [string]$TerraformInitExtraArgsJson		= '["-reconfigure","-upgrade"]',
         [string]$DebugMode			        = 'false',
-        [string]$InstallCheckov			    = 'false'
+        [string]$InstallCheckov			    	= 'false'
     )
 
 	$workingDirectory = $(Get-Location).Path
 
     & pwsh -File "$workingDirectory\Run-AzTerraform.ps1" `
-        -TerraformCodeLocation		$TerraformCodeLocation `
-        -TerraformWorkspace		    $TerraformWorkspace `
-        -TerraformStackToRunJson	$TerraformStackToRunJson `
-        -RunTerraformInit		    $RunTerraformInit `
-        -RunTerraformValidate		$RunTerraformValidate `
-        -RunTerraformPlan		    $RunTerraformPlan `
-        -RunTerraformPlanDestroy	$RunTerraformPlanDestroy `
-	    -RunTerraformDestroy		$RunTerraformDestroy `
-	    -RunTerraformApply		    $RunTerraformApply `
-        -TerraformInitExtraArgsJson	$TerraformInitExtraArgsJson `
-        -DebugMode			        $DebugMode `
-	    -InstallCheckov			    $InstallCheckov
+        -TerraformCodeLocation				$TerraformCodeLocation `
+        -TerraformWorkspace		    		$TerraformWorkspace `
+        -TerraformStackToRunJson			$TerraformStackToRunJson `
+        -RunTerraformInit		    		$RunTerraformInit `
+        -RunTerraformValidate				$RunTerraformValidate `
+        -RunTerraformPlan		    		$RunTerraformPlan `
+        -RunTerraformPlanDestroy			$RunTerraformPlanDestroy `
+	-RunTerraformDestroy				$RunTerraformDestroy `
+	-RunTerraformApply		    		$RunTerraformApply `
+        -TerraformInitExtraArgsJson			$TerraformInitExtraArgsJson `
+        -DebugMode			        	$DebugMode `
+	-InstallCheckov			    		$InstallCheckov
 }
 
 function tfdestroy {
@@ -190,34 +194,34 @@ function tfdestroy {
         # override any of these defaults at the call-site like:
         #   tfbuild -TerraformWorkspace staging -TerraformPlan true
         [string]$TerraformCodeLocation		= 'examples',
-        [string]$TerraformWorkspace		    = 'dev',
+        [string]$TerraformWorkspace		= 'dev',
         [string]$TerraformStackToRunJson	= '["module-development"]',
-        [string]$RunTerraformInit		    = 'true',
+        [string]$RunTerraformInit		= 'true',
         [string]$RunTerraformValidate		= 'true',
-        [string]$RunTerraformPlan		    = 'false',
+        [string]$RunTerraformPlan		= 'false',
         [string]$RunTerraformPlanDestroy	= 'true',
         [string]$RunTerraformDestroy		= 'true',
-        [string]$RunTerraformApply		    = 'false',
+        [string]$RunTerraformApply		= 'false',
         [string]$TerraformInitExtraArgsJson	= '["-reconfigure","-upgrade"]',
-        [string]$DebugMode			        = 'false',
-        [string]$InstallCheckov			    = 'false'
+        [string]$DebugMode			= 'false',
+        [string]$InstallCheckov			= 'false'
     )
 
 	$workingDirectory = $(Get-Location).Path
 
     & pwsh -File "$workingDirectory\Run-AzTerraform.ps1" `
-        -TerraformCodeLocation		$TerraformCodeLocation `
-        -TerraformWorkspace		    $TerraformWorkspace `
-        -TerraformStackToRunJson	$TerraformStackToRunJson `
-        -RunTerraformInit		    $RunTerraformInit `
-        -RunTerraformValidate		$RunTerraformValidate `
-        -RunTerraformPlan		    $RunTerraformPlan `
-        -RunTerraformPlanDestroy	$RunTerraformPlanDestroy `
-	    -RunTerraformDestroy		$RunTerraformDestroy `
-	    -RunTerraformApply		    $RunTerraformApply `
-        -TerraformInitExtraArgsJson	$TerraformInitExtraArgsJson `
+        -TerraformCodeLocation			$TerraformCodeLocation `
+        -TerraformWorkspace		    	$TerraformWorkspace `
+        -TerraformStackToRunJson		$TerraformStackToRunJson `
+        -RunTerraformInit		    	$RunTerraformInit `
+        -RunTerraformValidate			$RunTerraformValidate `
+        -RunTerraformPlan		    	$RunTerraformPlan `
+        -RunTerraformPlanDestroy		$RunTerraformPlanDestroy `
+	-RunTerraformDestroy			$RunTerraformDestroy `
+	-RunTerraformApply		    	$RunTerraformApply `
+        -TerraformInitExtraArgsJson		$TerraformInitExtraArgsJson `
         -DebugMode			        $DebugMode `
-	    -InstallCheckov			    $InstallCheckov
+	-InstallCheckov			    	$InstallCheckov
 }
 
 ```
