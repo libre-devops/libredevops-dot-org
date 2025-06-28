@@ -225,3 +225,9 @@ function tfdestroy {
 }
 
 ```
+
+## Install Modules 1 liner
+
+```powershell
+Install-Module -Name @("Microsoft.Graph", "Az", "Pester", "LibreDevOpsHelpers", "Microsoft.PowerShell.PSResourceGet") -Force -AllowClobber -Scope CurrentUser -Repository PSGallery 
+```
