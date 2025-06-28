@@ -8,7 +8,7 @@ parent: Cheatsheets
 
 {% raw  %}
 
-### .gitconfig
+### Linux/WSL .gitconfig
 ```
 [alias]
         a = add --all
@@ -16,24 +16,53 @@ parent: Cheatsheets
         p = push
 [core]
         editor = nano
+        longpaths = true
 [credential]
-        helper = manager-core
+        helper = /mnt/c/Users/craig/scoop/apps/git/current/mingw64/bin/git-credential-manager.exe
+        useHttpPath = true
+        azreposCredentialType = oauth   
 [user]
-        email = craigthackerx@gmail.com
         name = Craig Thacker
+        email = craigthackerx@gmail.com
 [filter "lfs"]
         process = git-lfs filter-process
         required = true
         clean = git-lfs clean -- %f
         smudge = git-lfs smudge -- %f
-[credential "helperselector"]
-        selected = manager-core
 [credential "https://github.com"]
         helper =
         helper = !/usr/bin/gh auth git-credential
 [credential "https://gist.github.com"]
         helper =
         helper = !/usr/bin/gh auth git-credential
+```
+
+### Windiws .gitconfig
+```
+[alias]
+        a = add --all
+        c = commit
+        p = push
+[core]
+        editor = nano
+        longpaths = true
+[credential]
+        useHttpPath = true
+        azreposCredentialType = oauth   
+[user]
+        name = Craig Thacker
+        email = craigthackerx@gmail.com
+[filter "lfs"]
+        process = git-lfs filter-process
+        required = true
+        clean = git-lfs clean -- %f
+        smudge = git-lfs smudge -- %f
+[credential "https://github.com"]
+        helper =
+        helper = !'C:\\Users\\craig\\scoop\\apps\\gh\\current\\bin\\gh.exe' auth git-credential
+[credential "https://gist.github.com"]
+        helper =
+        helper = !'C:\\Users\\craig\\scoop\\apps\\gh\\current\\bin\\gh.exe' auth git-credential   
 ```
 
 # Example .gitignore 
