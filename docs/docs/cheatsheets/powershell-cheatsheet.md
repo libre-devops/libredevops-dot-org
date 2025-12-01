@@ -231,3 +231,229 @@ function tfdestroy {
 ```powershell
 Install-Module -Name @("Microsoft.Graph", "Az", "Pester", "LibreDevOpsHelpers", "Microsoft.PowerShell.PSResourceGet") -Force -AllowClobber -Scope CurrentUser -Repository PSGallery 
 ```
+
+## Format Terraform
+
+```powershell
+param(
+    [string]$VariablesInFile = "./variables.tf",
+    [string]$VariablesOutFile = "./variables.tf",
+    [string]$OutputsInFile = "./outputs.tf",
+    [string]$OutputsOutFile = "./outputs.tf",
+    [bool]$SortInputs = $true,
+    [bool]$SortOutputs = $true,
+    [bool]$FormatTerraform = $true,
+    [bool]$GenerateNewReadme = $true,
+    [bool]$RunModuleDevelopmentCommands = $true
+)
+
+$CurrentDirectory = (Get-Location).Path
+$ErrorOccurred = $false
+
+function Fail {
+    param([string]$Message)
+    Write-Error $Message
+    $Global:ErrorOccurred = $true
+}
+
+function Format-Terraform {
+    try {
+        $terraformPath = Get-Command terraform -ErrorAction Stop
+        Write-Host "Terraform found at: $($terraformPath.Source)" -ForegroundColor Green
+        terraform fmt -recursive -error-on-changes
+        Write-Host "Terraform formatting finished" -ForegroundColor Green
+    }
+    catch {
+        Fail "Terraform formatting failed: $($_.Exception.Message)"
+    }
+}
+
+function Read-TerraformFile {
+    param ([string]$Filename)
+
+    if (-not (Test-Path $Filename)) {
+        Fail "File not found: $Filename"
+        return $null
+    }
+
+    try {
+        return Get-Content $Filename -Raw -ErrorAction Stop
+    }
+    catch {
+        Fail "Error reading file '$Filename': $($_.Exception.Message)"
+        return $null
+    }
+}
+
+function Write-TerraformFile {
+    param(
+        [string]$Filename,
+        [string]$FileContent
+    )
+
+    if ([string]::IsNullOrWhiteSpace($FileContent)) {
+        Fail "Empty or null content passed for writing to $Filename"
+        return
+    }
+
+    try {
+        $FileContent | Set-Content $Filename -ErrorAction Stop
+    }
+    catch {
+        Fail "Error writing file '$Filename': $($_.Exception.Message)"
+    }
+}
+
+function Sort-TerraformOutputs {
+    param ([string]$OutputsContent)
+
+    try {
+        $pattern = 'output\s+"[^"]+"\s+\{[\s\S]*?\n\}'
+        $outputs = [regex]::Matches($OutputsContent, $pattern) | ForEach-Object { $_.Value }
+
+        if ($outputs.Count -eq 0) {
+            Write-Warning "No output blocks found. Skipping sort."
+            return $OutputsContent
+        }
+
+        return ($outputs | Sort-Object { [regex]::Match($_, 'output\s+"([^"]+)"').Groups[1].Value }) -join "`n`n"
+    }
+    catch {
+        Fail "Error sorting Terraform outputs: $($_.Exception.Message)"
+        return $null
+    }
+}
+
+function Sort-TerraformVariables {
+    param ([string]$VariablesContent)
+
+    try {
+        $pattern = 'variable\s+"[^"]+"\s+\{[\s\S]*?\n\}'
+        $vars = [regex]::Matches($VariablesContent, $pattern) | ForEach-Object { $_.Value }
+
+        if ($vars.Count -eq 0) {
+            Write-Warning "No variable blocks found. Skipping sort."
+            return $VariablesContent
+        }
+
+        return ($vars | Sort-Object { [regex]::Match($_, 'variable\s+"([^"]+)"').Groups[1].Value }) -join "`n`n"
+    }
+    catch {
+        Fail "Error sorting Terraform variables: $($_.Exception.Message)"
+        return $null
+    }
+}
+
+function Update-ReadmeWithTerraformDocs {
+
+    try {
+        $terraformDocsPath = Get-Command terraform-docs -ErrorAction Stop
+        Write-Host "terraform-docs found at: $($terraformDocsPath.Source)" -ForegroundColor Green
+    }
+    catch {
+        Write-Warning "terraform-docs not installed. Skipping README generation."
+        return
+    }
+
+    $buildFile = ""
+    if (Test-Path "./build.tf") {
+        $buildFile = "./build.tf"
+    } elseif (Test-Path "./main.tf") {
+        $buildFile = "./main.tf"
+    } else {
+        Write-Warning "No build.tf or main.tf found; cannot generate README"
+        return
+    }
+
+    try {
+        Set-Content "README.md" -Value '```hcl'
+        Get-Content $buildFile | Add-Content "README.md"
+        Add-Content "README.md" -Value '```'
+
+        $terraformDocs = terraform-docs markdown . 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Fail "terraform-docs failed: $terraformDocs"
+        } else {
+            $terraformDocs | Add-Content "README.md"
+        }
+    }
+    catch {
+        Fail "Error generating README: $($_.Exception.Message)"
+    }
+}
+
+function Run-ModuleDevelopmentCommands {
+    param (
+        [bool]$FormatTerraform,
+        [bool]$SortInputs,
+        [bool]$SortOutputs,
+        [bool]$GenerateNewReadme,
+        [string]$VariablesInFile,
+        [string]$VariablesOutFile,
+        [string]$OutputsInFile,
+        [string]$OutputsOutFile
+    )
+
+    try {
+        Set-Location "./examples/module-dev"
+    }
+    catch {
+        Fail "Failed to change directory to ./examples/module-dev: $($_.Exception.Message)"
+        return
+    }
+
+    Write-Host "Running commands in /examples/module-dev" -ForegroundColor Green
+
+    if ($FormatTerraform) { Format-Terraform }
+
+    if ($SortInputs) {
+        $content = Read-TerraformFile $VariablesInFile
+        $sorted = Sort-TerraformVariables $content
+        if ($sorted) { Write-TerraformFile $VariablesOutFile $sorted }
+    }
+
+    if ($SortOutputs) {
+        $content = Read-TerraformFile $OutputsInFile
+        $sorted = Sort-TerraformOutputs $content
+        if ($sorted) { Write-TerraformFile $OutputsOutFile $sorted }
+    }
+
+    if ($GenerateNewReadme) {
+        Update-ReadmeWithTerraformDocs
+    }
+
+    Set-Location $CurrentDirectory
+}
+
+# -------------------------
+# Main Execution Flow
+# -------------------------
+
+if ($RunModuleDevelopmentCommands) {
+    Run-ModuleDevelopmentCommands -FormatTerraform $FormatTerraform -SortInputs $SortInputs -SortOutputs $SortOutputs -GenerateNewReadme $GenerateNewReadme -VariablesInFile $VariablesInFile -VariablesOutFile $VariablesOutFile -OutputsInFile $OutputsInFile -OutputsOutFile $OutputsOutFile
+}
+
+if ($FormatTerraform) { Format-Terraform }
+
+if ($SortInputs) {
+    $content = Read-TerraformFile $VariablesInFile
+    $sorted = Sort-TerraformVariables $content
+    if ($sorted) { Write-TerraformFile $VariablesOutFile $sorted }
+}
+
+if ($SortOutputs) {
+    $content = Read-TerraformFile $OutputsInFile
+    $sorted = Sort-TerraformOutputs $content
+    if ($sorted) { Write-TerraformFile $OutputsOutFile $sorted }
+}
+
+if ($GenerateNewReadme) { Update-ReadmeWithTerraformDocs }
+
+if ($ErrorOccurred) {
+    Write-Host "The script completed with ERRORS." -ForegroundColor Red
+    exit 1
+}
+
+Write-Host "Success: Script completed successfully." -ForegroundColor Green
+exit 0
+```
