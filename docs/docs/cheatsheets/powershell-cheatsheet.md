@@ -457,3 +457,46 @@ if ($ErrorOccurred) {
 Write-Host "Success: Script completed successfully." -ForegroundColor Green
 exit 0
 ```
+### Export CSV from watchlist (credit to manualbashing)
+```powershell
+function Export-SentinelWatchlist {
+    [CmdletBinding()]
+    param (
+        # Id of the subscription in which the sentinel workspace is located
+        [Parameter()]
+        [string]
+        $SubscriptionId = (Get-AzContext).Subscription.Id,
+
+        # Name of the resourec group in which the sentinel workspace is located
+        [Parameter(Mandatory)]
+        [string]
+        $ResourceGroupName,
+
+        # Name of the sentinel workspace
+        [Parameter(Mandatory)]
+        [string]
+        $WorkspaceName,
+
+        # Short name of the Sentinel Watchlist
+        [Parameter(Mandatory)]
+        [string]
+        $WatchlistName,
+
+        # Path and filename of the exported watchlist csv
+        [Parameter()]
+        [string]
+        $OutputFilePath = 'watchlist.csv'
+    )
+    
+    $uri = "https://management.azure.com/subscriptions/${SubscriptionId}" +
+    "/resourceGroups/${ResourceGroupName}" + 
+    "/providers/Microsoft.OperationalInsights/workspaces/${WorkspaceName}" + 
+    "/providers/Microsoft.SecurityInsights/watchlists/${WatchlistName}" + 
+    "/watchlistItems?api-version=2022-12-01-preview"
+    $response = Invoke-AzRestMethod -Method Get -Uri $uri | 
+        Select-Object -ExpandProperty Content | 
+        ConvertFrom-Json
+    $response.value.properties.itemsKeyValue | 
+        Export-Csv -Encoding UTF8 -Path $OutputFilePath -QuoteFields:$false
+}
+```
