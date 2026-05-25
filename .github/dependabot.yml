@@ -1,0 +1,34 @@
+version: 2
+updates:
+  # npm — group minor/patch into one PR per week to reduce noise;
+  # major versions get individual PRs so they can be reviewed separately.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/London
+    groups:
+      minor-and-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+
+  # GitHub Actions — group all updates together.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/London
+    groups:
+      actions:
+        patterns: ["*"]
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - github-actions

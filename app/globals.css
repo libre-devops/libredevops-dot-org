@@ -30,10 +30,15 @@
 }
 
 /* ── Base ──────────────────────────────────────────────────────── */
+html {
+  overflow-x: hidden;
+}
+
 html, body {
   margin: 0;
   padding: 0;
   min-height: 100%;
+  max-width: 100%;
   background: var(--bg-primary);
   color: var(--text-primary);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -59,7 +64,9 @@ a {
   position: sticky;
   top: 0;
   z-index: 100;
+  width: 100%;
   box-shadow: var(--shadow-lg);
+  overflow: hidden;
 }
 
 .site-nav {
@@ -494,15 +501,47 @@ a {
 
 /* ── Responsive ────────────────────────────────────────────────── */
 @media (max-width: 768px) {
+  /* Navbar: hide social links — too many items for small screens.
+     Logo icon + Docs + Projects + About + ThemeToggle fits ~300px. */
   .site-nav {
-    padding: 0.75rem 1rem;
+    padding: 0.65rem 0.75rem;
   }
 
   .nav-logo-text {
     display: none;
   }
 
+  .nav-right {
+    gap: 0.25rem;
+  }
+
+  .nav-link {
+    padding: 0.35rem 0.65rem;
+    font-size: 0.8rem;
+  }
+
+  .social-links {
+    display: none;
+  }
+
+  /* Hero */
   .hero {
-    padding: 3rem 1rem;
+    padding: 2.5rem 1rem;
+  }
+
+  .hero-logo img {
+    width: 80px !important;
+    height: 80px !important;
+  }
+
+  /* Content pages */
+  .content-section {
+    padding: 2.5rem 1rem;
+  }
+
+  /* Project cards: stack links below title on very small screens */
+  .project-card-header {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
