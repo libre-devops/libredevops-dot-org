@@ -1,0 +1,165 @@
+---
+title: Windows Cheatsheet
+description: Windows PowerShell snippets for networking, WSL, Scoop, firewall rules, and system administration.
+---
+
+# Windows Cheat Sheet
+
+PowerShell and Windows administration snippets for common platform engineering tasks.
+
+---
+
+## Networking
+
+### Temporary TCP port listener
+
+Opens a firewall rule, listens on a port for connections, then cleans up the rule on exit. Useful for quickly verifying network connectivity from another host.
+
+```powershell
+$portNumber       = 1433
+$durationSeconds  = 3600
+$ruleName         = "TempRuleForPort$portNumber"
+
+try {
+    Write-Host "Adding firewall rule..." -ForegroundColor Yellow
+    New-NetFirewallRule -DisplayName $ruleName -Direction Inbound `
+        -LocalPort $portNumber -Action Allow -Protocol TCP
+
+    Write-Host "Listening on port $portNumber for $durationSeconds seconds..." -ForegroundColor Yellow
+    $listener = [System.Net.Sockets.TcpListener]$portNumber
+    $listener.Start()
+    $endTime = (Get-Date).AddSeconds($durationSeconds)
+
+    while ((Get-Date) -lt $endTime) {
+        if ($listener.Pending()) {
+            $client = $listener.AcceptTcpClient()
+            Write-Host ("Connection from {0}" -f $client.Client.RemoteEndPoint) -ForegroundColor Green
+            $client.Close()
+        }
+        Start-Sleep -Seconds 1
+    }
+} finally {
+    if ($listener) { $listener.Stop() }
+    Write-Host "Removing firewall rule..." -ForegroundColor Yellow
+    Remove-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue
+}
+```
+
+### Test TCP connectivity (PowerShell equivalent of telnet)
+
+```powershell
+Test-NetConnection -ComputerName myserver.example.com -Port 443
+Test-NetConnection -ComputerName 10.0.0.5 -Port 1433 -InformationLevel Detailed
+```
+
+### Show all listening ports
+
+```powershell
+Get-NetTCPConnection -State Listen | Sort-Object LocalPort | Select-Object LocalPort, OwningProcess, State
+```
+
+---
+
+## Scoop Package Manager
+
+Scoop installs developer tools without requiring admin — ideal for development machines and CI agents.
+
+```powershell
+# Install Scoop
+Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
+irm get.scoop.sh | iex
+
+# Add extras and versions buckets
+scoop bucket add extras
+scoop bucket add versions
+
+# Install common tools
+scoop install git gh terraform packer kubectl helm azure-cli pwsh
+scoop install vscode jetbrains-toolbox starship
+
+# Update everything
+scoop update *
+
+# Search for a package
+scoop search terraform
+```
+
+---
+
+## WSL2
+
+### Set WSL2 resource limits
+
+Creates `~/.wslconfig` to cap memory and CPU used by the WSL2 VM.
+
+```powershell
+@"
+[wsl2]
+memory=8GB
+processors=2
+swap=4GB
+localhostForwarding=true
+"@ | Set-Content -Path "$Env:USERPROFILE\.wslconfig"
+```
+
+### Manage WSL distributions
+
+```powershell
+wsl --list --verbose              # list installed distros and status
+wsl --install -d Ubuntu-22.04    # install a specific distro
+wsl --set-default Ubuntu-22.04   # change default distro
+wsl --set-version Ubuntu-22.04 2 # upgrade to WSL2
+wsl --shutdown                   # stop all running distros
+wsl --unregister Ubuntu-22.04    # remove a distro (destructive)
+```
+
+---
+
+## Firewall
+
+```powershell
+# List all firewall rules
+Get-NetFirewallRule | Where-Object { $_.Enabled -eq 'True' } | Select-Object DisplayName, Direction, Action | Sort-Object Direction
+
+# Allow inbound on a port
+New-NetFirewallRule -DisplayName "Allow 8080 Inbound" -Direction Inbound -LocalPort 8080 -Protocol TCP -Action Allow
+
+# Remove a rule by name
+Remove-NetFirewallRule -DisplayName "Allow 8080 Inbound"
+```
+
+---
+
+## System Information
+
+```powershell
+# System summary
+Get-ComputerInfo | Select-Object CsName, OsName, OsVersion, CsTotalPhysicalMemory
+
+# Disk usage
+Get-PSDrive -PSProvider FileSystem | Select-Object Name, @{n='Used(GB)';e={[math]::Round($_.Used/1GB,2)}}, @{n='Free(GB)';e={[math]::Round($_.Free/1GB,2)}}
+
+# Running processes sorted by CPU
+Get-Process | Sort-Object CPU -Descending | Select-Object -First 20 Name, CPU, WorkingSet
+
+# Services that are stopped but set to auto-start
+Get-Service | Where-Object { $_.StartType -eq 'Automatic' -and $_.Status -ne 'Running' }
+```
+
+---
+
+## Environment Variables
+
+```powershell
+# List all environment variables
+Get-ChildItem Env:
+
+# Set for current session
+$env:MY_VAR = "value"
+
+# Set permanently for current user
+[System.Environment]::SetEnvironmentVariable("MY_VAR", "value", "User")
+
+# Set permanently for all users (requires admin)
+[System.Environment]::SetEnvironmentVariable("MY_VAR", "value", "Machine")
+```

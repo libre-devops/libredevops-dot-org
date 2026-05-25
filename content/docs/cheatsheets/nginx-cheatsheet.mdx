@@ -1,0 +1,142 @@
+---
+title: Nginx Cheatsheet
+description: Nginx reverse proxy configurations for HTTPS termination, WebSocket proxying, and service-specific headers.
+---
+
+# Nginx Cheat Sheet
+
+Production-ready Nginx configurations for running as a reverse proxy in front of containerised or locally-running services.
+
+You can format and validate your Nginx config at [nginxbeautifier.github.io](https://nginxbeautifier.github.io/).
+
+---
+
+## HTTPS Reverse Proxy with Podman endpoints
+
+Nginx running on the host terminates TLS and forwards to services running in Podman containers on localhost. Each service gets its own `server` block — replace the certificate paths and domain names to match your setup.
+
+```nginx
+events
+{
+    worker_connections 4096;
+}
+
+http
+{
+    upstream gitea
+    {
+        server 127.0.0.1:3000 fail_timeout=0;
+    }
+
+    upstream jenkins
+    {
+        server 127.0.0.1:8080 fail_timeout=0;
+    }
+
+    upstream nexus
+    {
+        server 127.0.0.1:8081 fail_timeout=0;
+    }
+
+    server
+    {
+        listen 443 ssl;
+        server_name gitea.libredevops.org;
+
+        ssl_certificate     /etc/nginx/ssl/fullchain.cer;
+        ssl_certificate_key /etc/nginx/ssl/wildcard.libredevops.org.key;
+
+        location /
+        {
+            proxy_pass              http://gitea;
+            proxy_http_version      1.1;
+            proxy_set_header        Host                $host;
+            proxy_set_header        X-Real-IP           $remote_addr;
+            proxy_set_header        X-Forwarded-For     $proxy_add_x_forwarded_for;
+            proxy_set_header        X-Forwarded-Proto   $scheme;
+            proxy_set_header        Upgrade             $http_upgrade;
+            proxy_set_header        Connection          "upgrade";
+            proxy_redirect          http:// https://;
+        }
+    }
+
+    server
+    {
+        listen 443 ssl;
+        server_name jenkins.libredevops.org;
+
+        ssl_certificate     /etc/nginx/ssl/fullchain.cer;
+        ssl_certificate_key /etc/nginx/ssl/wildcard.libredevops.org.key;
+
+        location /
+        {
+            proxy_pass              http://jenkins;
+            proxy_http_version      1.1;
+            proxy_set_header        Host                $host;
+            proxy_set_header        X-Real-IP           $remote_addr;
+            proxy_set_header        X-Forwarded-For     $proxy_add_x_forwarded_for;
+            proxy_set_header        X-Forwarded-Proto   $scheme;
+            proxy_set_header        Upgrade             $http_upgrade;
+            proxy_set_header        Connection          "upgrade";
+            proxy_redirect          http:// https://;
+
+            # Required for the Jenkins CLI over SSL
+            proxy_buffering         off;
+            proxy_request_buffering off;
+
+            # Workaround for JENKINS-45651
+            add_header 'X-SSH-Endpoint' 'jenkins.libredevops.org:50022' always;
+        }
+    }
+
+    server
+    {
+        listen 443 ssl;
+        server_name nexus.libredevops.org;
+
+        ssl_certificate     /etc/nginx/ssl/fullchain.cer;
+        ssl_certificate_key /etc/nginx/ssl/wildcard.libredevops.org.key;
+
+        location /
+        {
+            proxy_pass              http://nexus;
+            proxy_http_version      1.1;
+            proxy_set_header        Host                $host;
+            proxy_set_header        X-Real-IP           $remote_addr;
+            proxy_set_header        X-Forwarded-For     $proxy_add_x_forwarded_for;
+            proxy_set_header        X-Forwarded-Proto   $scheme;
+            proxy_set_header        Upgrade             $http_upgrade;
+            proxy_set_header        Connection          "upgrade";
+            proxy_redirect          http:// https://;
+        }
+    }
+}
+```
+
+---
+
+## HTTP redirect to HTTPS
+
+Force all HTTP traffic to HTTPS with a 301 redirect. Add this server block alongside your SSL blocks.
+
+```nginx
+server
+{
+    listen 80;
+    server_name _;
+    return 301 https://$host$request_uri;
+}
+```
+
+---
+
+## Useful Nginx commands
+
+```bash
+nginx -t                    # test configuration syntax
+nginx -s reload             # reload without downtime
+nginx -s stop               # fast shutdown
+systemctl status nginx      # service status
+tail -f /var/log/nginx/access.log   # stream access log
+tail -f /var/log/nginx/error.log    # stream error log
+```

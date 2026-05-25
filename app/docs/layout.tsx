@@ -16,7 +16,7 @@ export default async function DocsLayout({
             pageMap={pageMap}
             docsRepositoryBase="https://github.com/libre-devops/libredevops-dot-org/tree/main"
             footer={
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
+                <div key="docs-footer" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
                     <span style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
                         Libre DevOps
                     </span>

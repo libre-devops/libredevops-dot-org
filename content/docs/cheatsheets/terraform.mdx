@@ -1,13 +1,19 @@
 ---
 title: Terraform Cheatsheet
-description: Practical Terraform snippets covering number padding, type conversions, dynamic blocks, state management, OS detection, and workflow automation.
+description: Practical Terraform snippets for Azure infrastructure — formatting, type conversions, dynamic blocks, state management, OS detection, and workflow automation.
 ---
 
 # Terraform Cheat Sheet
 
-## Apply number padding
+A practical reference for common Terraform patterns used in Azure infrastructure. Each snippet solves a real problem — not just syntax demos.
 
-Convert `1` to `01`, `2` to `02` etc via `format("%02d", count.index + 1)`.
+---
+
+## Formatting & String Manipulation
+
+### Number padding
+
+Use `format("%02d", count.index + 1)` to produce zero-padded numbers (`01`, `02`, ...) in resource names. This keeps names sortable and visually consistent when you have more than nine instances.
 
 ```hcl
 resource "azurerm_application_security_group" "with_pad" {
@@ -27,7 +33,7 @@ resource "azurerm_application_security_group" "without_pad" {
 }
 ```
 
-### Example output
+#### Output comparison
 
 ```text
 Changes to Outputs:
@@ -46,15 +52,22 @@ Changes to Outputs:
     ]
 ```
 
----
+### Title-case and strip punctuation
 
-## Longhand to shorthand region name lookup
+Combine `title()` and `replace()` to normalise a string — e.g. turning a kebab-case resource name into a PascalCase display name for tags or Azure AD application names.
 
-Convert `uksouth` → `uks`, or perform any other key-value map lookup via `lookup()`.
+```hcl
+replace(replace(title("rg-craig-test"), "-", ""), " ", "")
+# => "RgCraigTest"
+```
+
+### Region name lookup
+
+Keep Azure region names consistent by storing shorthand ↔ longhand mappings in a variable and resolving them with `lookup()`. The third argument is a safe fallback if the key is not found.
 
 ```hcl
 variable "loc" {
-  description = "Shorthand Azure location. Normally passed as TF_VAR in pipeline."
+  description = "Shorthand Azure location — passed as TF_VAR in CI."
   type        = string
   default     = "ukw"
 }
@@ -66,7 +79,7 @@ variable "regions" {
     ukw = "UK West"
     eus = "East US"
   }
-  description = "Converts shorthand name to longhand name via lookup on map list."
+  description = "Converts shorthand name to longhand via map lookup."
 }
 
 locals {
@@ -74,7 +87,7 @@ locals {
 }
 ```
 
-### Example output
+#### Output
 
 ```text
 Changes to Outputs:
@@ -83,15 +96,17 @@ Changes to Outputs:
 
 ---
 
-## Conditional `for_each` using regex
+## Resource Patterns
 
-Only create resources where the map value matches a regex pattern; skip everything else.
+### Conditional `for_each` with regex
+
+Only create resources where a map value matches a pattern — everything else is skipped. This avoids maintaining a separate allow-list of which keys to deploy, and keeps the logic co-located with the data.
 
 ```hcl
 variable "environment" {
   default     = "prd"
   type        = string
-  description = "Used as an alternative to terraform.workspace"
+  description = "Used as an alternative to terraform.workspace."
 }
 
 locals {
@@ -104,7 +119,7 @@ locals {
 }
 
 resource "azurerm_resource_group" "test_rg" {
-  # Creates RGs only for values that contain "prd-" (key1 and key2)
+  # Creates RGs only for values containing "prd-" — key1 and key2
   for_each = {
     for key, value in local.names : key => value
     if length(regexall("${var.environment}-", value)) > 0
@@ -114,7 +129,7 @@ resource "azurerm_resource_group" "test_rg" {
 }
 ```
 
-### Example output
+#### Output — only matching keys are planned
 
 ```text
 # azurerm_resource_group.test_rg["key1"] will be created
@@ -132,17 +147,70 @@ resource "azurerm_resource_group" "test_rg" {
     }
 ```
 
+### Dynamic blocks — multiple identity type conditions
+
+Terraform only allows one `identity` block per resource, but `SystemAssigned`, `UserAssigned`, and `SystemAssigned, UserAssigned` each need different attributes. Dynamic blocks let you express all three cases — only one will actually emit a block per run, depending on the variable values.
+
+```hcl
+dynamic "identity" {
+  for_each = length(var.identity_ids) == 0 && var.identity_type == "SystemAssigned" ? [var.identity_type] : []
+  content {
+    type = var.identity_type
+  }
+}
+
+dynamic "identity" {
+  for_each = length(var.identity_ids) > 0 || var.identity_type == "UserAssigned" ? [var.identity_type] : []
+  content {
+    type         = var.identity_type
+    identity_ids = length(var.identity_ids) > 0 ? var.identity_ids : []
+  }
+}
+
+dynamic "identity" {
+  for_each = length(var.identity_ids) > 0 || var.identity_type == "SystemAssigned, UserAssigned" ? [var.identity_type] : []
+  content {
+    type         = var.identity_type
+    identity_ids = length(var.identity_ids) > 0 ? var.identity_ids : []
+  }
+}
+```
+
+### VMSS — Azure DevOps agent extension
+
+The extension block for attaching a self-hosted Azure Pipelines agent to a Virtual Machine Scale Set. `jsonencode` handles the escaping so the settings block stays readable in HCL.
+
+```hcl
+extension {
+  auto_upgrade_minor_version = false
+  automatic_upgrade_enabled  = false
+  name                       = "Microsoft.Azure.DevOps.Pipelines.Agent"
+  provision_after_extensions = []
+  publisher                  = "Microsoft.VisualStudio.Services"
+  settings = jsonencode({
+    agentDownloadUrl        = "https://vstsagentpackage.azureedge.net/agent/2.209.0/vsts-agent-linux-x64-2.209.0.tar.gz"
+    agentFolder             = "/agent"
+    enableScriptDownloadUrl = "https://vstsagenttools.blob.core.windows.net/tools/ElasticPools/Linux/13/enableagent.sh"
+    isPipelinesAgent        = true
+  })
+  type                 = "TeamServicesAgentLinux"
+  type_handler_version = "1.22"
+}
+```
+
 ---
 
-## Type conversions
+## Type Conversions & Data Structures
 
-### Full example — `for_each` with output as `list(map(object({})))`
+### `for_each` output as `list(map(object({})))`
+
+When resources are created with `for_each`, the result is a `map(object({}))`. This pattern shows how to query and reshape that output for downstream consumption.
 
 ```hcl
 variable "environment" {
   default     = "prd"
   type        = string
-  description = "Used as an alternative to terraform.workspace"
+  description = "Used as an alternative to terraform.workspace."
 }
 
 locals {
@@ -168,7 +236,7 @@ output "rg_name" {
 }
 ```
 
-### Example output — `list(map(object({})))`
+#### Output
 
 ```text
 rg_name = [
@@ -191,7 +259,9 @@ rg_name = [
 ]
 ```
 
-### Get a specific key value from `map(object({}))`
+### Extract a single attribute from `map(object({}))`
+
+Get just the `name` field from each entry in the map using a `for` expression.
 
 ```hcl
 output "rg_name" {
@@ -208,9 +278,9 @@ rg_name = {
 }
 ```
 
-### Fetch a specific attribute from an element of `map(object({}))`
+### Pass a map attribute into another resource
 
-Extract `location` from the first map entry and pass it as input to another resource.
+Extract `location` from the first map entry and pass it as input to a dependent resource. `element(values(...), 0)` picks the first value without needing to know the key name at authoring time.
 
 ```hcl
 locals {
@@ -247,19 +317,15 @@ output "asg_rg_name" {
 + asg_rg_name  = "prd-vm"
 ```
 
-### Access an inner object within a map with multiple elements
+### Access nested identity inside a multi-key `for_each`
+
+When each `for_each` value has its own nested blocks (like `identity`), use `element()` on the splat expression and then index into the nested block list.
 
 ```hcl
 locals {
   fnc_apps = {
-    fnc_app1 = {
-      name = "fnc_app1"
-      # ...
-    }
-    fnc_app2 = {
-      name = "fnc_app2"
-      # ...
-    }
+    fnc_app1 = { name = "fnc_app1" }
+    fnc_app2 = { name = "fnc_app2" }
   }
 }
 
@@ -269,7 +335,6 @@ resource "azurerm_function_app" "fnc" {
   identity {
     type = each.value.identity
   }
-  # ...
 }
 
 output "managed_identity_principal_id" {
@@ -288,9 +353,13 @@ managed_identity_principal_id = {
 
 ---
 
-## Fetch your outbound IP from Terraform
+## Networking & Infrastructure Utilities
 
-Useful for dynamically allowing a runner or local machine IP in firewall rules.
+### Fetch your outbound IP
+
+Useful for dynamically allowing a runner or developer machine IP in firewall rules, so you don't hard-code IPs or open wide CIDR ranges in CI.
+
+`chomp()` strips the trailing newline from the HTTP response body — without it the IP includes a `\n` that breaks string comparisons and CIDR notation.
 
 ```hcl
 data "http" "user_ip" {
@@ -305,7 +374,6 @@ output "my_ip" {
   value = data.http.user_ip.body
 }
 
-# chomp() strips the trailing newline from the HTTP response body
 output "my_ip_chomp" {
   value = chomp(data.http.user_ip.body)
 }
@@ -320,101 +388,20 @@ output "my_ip_chomp" {
 
 ---
 
-## Virtual Machine Scale Set — agent extension block
+## OS & Environment Detection
 
-```hcl
-extension {
-  auto_upgrade_minor_version = false
-  automatic_upgrade_enabled  = false
-  name                       = "Microsoft.Azure.DevOps.Pipelines.Agent"
-  provision_after_extensions = []
-  publisher                  = "Microsoft.VisualStudio.Services"
-  settings = jsonencode({
-    agentDownloadUrl        = "https://vstsagentpackage.azureedge.net/agent/2.209.0/vsts-agent-linux-x64-2.209.0.tar.gz"
-    agentFolder             = "/agent"
-    enableScriptDownloadUrl = "https://vstsagenttools.blob.core.windows.net/tools/ElasticPools/Linux/13/enableagent.sh"
-    isPipelinesAgent        = true
-  })
-  type                 = "TeamServicesAgentLinux"
-  type_handler_version = "1.22"
-}
-```
+### Detect the runner OS
 
----
+Terraform doesn't expose the host OS natively. The trick is a cross-platform `external` data source: on Linux, `printf` outputs JSON inline; on Windows, a `.cmd` wrapper does the same.
 
-## Dynamic blocks — multiple identity type conditions
-
-```hcl
-dynamic "identity" {
-  for_each = length(var.identity_ids) == 0 && var.identity_type == "SystemAssigned" ? [var.identity_type] : []
-  content {
-    type = var.identity_type
-  }
-}
-
-dynamic "identity" {
-  for_each = length(var.identity_ids) > 0 || var.identity_type == "UserAssigned" ? [var.identity_type] : []
-  content {
-    type         = var.identity_type
-    identity_ids = length(var.identity_ids) > 0 ? var.identity_ids : []
-  }
-}
-
-dynamic "identity" {
-  for_each = length(var.identity_ids) > 0 || var.identity_type == "SystemAssigned, UserAssigned" ? [var.identity_type] : []
-  content {
-    type         = var.identity_type
-    identity_ids = length(var.identity_ids) > 0 ? var.identity_ids : []
-  }
-}
-```
-
----
-
-## String manipulation
-
-### Remove dashes and spaces, then title-case
-
-```hcl
-replace(replace(title("rg-craig-test"), "-", ""), " ", "")
-# => "RgCraigTest"
-```
-
----
-
-## `override.tf` for local development
-
-Swap the remote backend for a local run without touching the shared config.
-
-```hcl
-terraform {
-  required_providers {
-    azurerm = {
-      source = "hashicorp/azurerm"
-      # version = "~> 2.68.0"
-    }
-  }
-  backend "azurerm" {
-    subscription_id      = "blah"
-    storage_account_name = "blah"
-    container_name       = "blah"
-    key                  = "blah.terraform.tfstate"
-  }
-}
-```
-
----
-
-## Detect the runner OS
-
-Add `printf.cmd` to the repo root to handle Windows runners:
+Add `printf.cmd` to the repo root for Windows runners:
 
 ```bat
 @echo off
 echo {"os": "Windows"}
 ```
 
-Then in Terraform, call the script via `data "external"`:
+Then call it via `data "external"`:
 
 ```hcl
 data "external" "os" {
@@ -432,11 +419,116 @@ output "os" {
 }
 ```
 
+### Generate timestamp tags without `timestamp()`
+
+`timestamp()` is evaluated at plan time and surfaces as "not known until apply" — this causes every plan/apply cycle to show a diff on tag values. Instead, use an `external` data source to call a small script that returns the current time as a JSON string.
+
+```hcl
+data "external" "detect_os" {
+  working_dir = path.module
+  program     = ["printf", "{\"os\": \"Linux\"}"]
+}
+
+data "external" "generate_timestamp" {
+  program = data.external.detect_os.result.os == "Linux" ? [
+    "${path.module}/timestamp.sh"
+  ] : ["powershell", "${path.module}/timestamp.ps1"]
+}
+
+locals {
+  dynamic_tags = {
+    "LastUpdated" = data.external.generate_timestamp.result["timestamp"]
+    "Environment" = terraform.workspace
+  }
+
+  tags = merge(var.static_tags, local.dynamic_tags)
+}
+
+variable "static_tags" {
+  type        = map(string)
+  description = "Static tags merged with dynamic ones."
+  default = {
+    "CostCentre" = "671888"
+    "ManagedBy"  = "Terraform"
+    "Contact"    = "help@libredevops.org"
+  }
+}
+```
+
+#### `timestamp.sh`
+
+```bash
+#!/usr/bin/env bash
+DATE=$(date '+%d-%m-%Y:%H:%M')
+echo "{\"timestamp\": \"$DATE\"}"
+```
+
+#### `timestamp.ps1`
+
+```powershell
+#!/usr/bin/env pwsh
+$date       = Get-Date -Format "dd-MM-yyyy:HH:mm"
+$jsonOutput = @{ timestamp = $date } | ConvertTo-Json
+Write-Output $jsonOutput
+```
+
+#### `timestamp.py`
+
+```python
+import datetime
+
+now       = datetime.datetime.now()
+timestamp = now.strftime("%d-%m-%Y:%H:%M")
+print("{\"timestamp\": \"" + timestamp + "\"}")
+```
+
 ---
 
-## Local workflow script
+## State Management
 
-Full end-to-end pipeline: init → validate → plan → compliance → tfsec → checkov.
+### Force-unlock a stuck state
+
+When a plan fails mid-run and leaves a lock, grab the lock ID from the error output and immediately release it. The `-force` flag skips the interactive confirmation prompt.
+
+```powershell
+$lockId = (terraform plan 2>&1 |
+  Select-String -Pattern 'ID:\s+([\w-]+)' |
+  ForEach-Object { $_.Matches.Groups[1].Value })
+terraform force-unlock -force $lockId
+```
+
+```bash
+lockId=$(terraform plan 2>&1 | grep -oP 'ID:\s+\K[\w-]+')
+terraform force-unlock -force "$lockId"
+```
+
+### `override.tf` for local development
+
+Swap the remote backend for a local run without touching the shared config. Terraform merges `override.tf` on top of the main config at runtime, so you can change the backend without modifying the file that CI uses. Add `override.tf` to `.gitignore`.
+
+```hcl
+terraform {
+  required_providers {
+    azurerm = {
+      source = "hashicorp/azurerm"
+    }
+  }
+  backend "azurerm" {
+    subscription_id      = "your-subscription-id"
+    storage_account_name = "your-storage-account"
+    container_name       = "tfstate"
+    key                  = "local.terraform.tfstate"
+  }
+}
+```
+
+---
+
+## Workflow Automation
+
+### Full local pipeline — init → validate → plan → compliance → tfsec → checkov
+
+A single shell function that wires up the full local verification pipeline. Run it from the module root to validate, plan, check naming convention compliance, and scan for misconfigurations in one shot.
 
 ```bash
 terraform_run() {
@@ -459,7 +551,6 @@ terraform_run() {
 
   setup_tfenv() {
     if [ -z "${terraform_version}" ]; then
-      echo "terraform_version not set, defaulting to latest"
       export terraform_version="latest"
     fi
     tfenv install "${terraform_version}" && tfenv use "${terraform_version}"
@@ -498,87 +589,4 @@ terraform_run() {
     checkov_check
   cleanup_tfplan
 }
-```
-
----
-
-## State force-unlock one-liner
-
-Grab the lock ID from a failed plan and immediately force-unlock.
-
-```powershell
-$lockId = (terraform plan 2>&1 |
-  Select-String -Pattern 'ID:\s+([\w-]+)' |
-  ForEach-Object { $_.Matches.Groups[1].Value })
-terraform force-unlock -force $lockId
-```
-
-```bash
-lockId=$(terraform plan 2>&1 | grep -oP 'ID:\s+\K[\w-]+')
-terraform force-unlock -force "$lockId"
-```
-
----
-
-## Generate timestamp tags without `timestamp()`
-
-`timestamp()` resolves at plan time and is "not known until apply" — use an external data source instead.
-
-```hcl
-data "external" "detect_os" {
-  working_dir = path.module
-  program     = ["printf", "{\"os\": \"Linux\"}"]
-}
-
-data "external" "generate_timestamp" {
-  program = data.external.detect_os.result.os == "Linux" ? [
-    "${path.module}/timestamp.sh"
-  ] : ["powershell", "${path.module}/timestamp.ps1"]
-}
-
-locals {
-  dynamic_tags = {
-    "LastUpdated" = data.external.generate_timestamp.result["timestamp"]
-    "Environment" = terraform.workspace
-  }
-
-  tags = merge(var.static_tags, local.dynamic_tags)
-}
-
-variable "static_tags" {
-  type        = map(string)
-  description = "Static tags merged with dynamic ones."
-  default = {
-    "CostCentre" = "671888"
-    "ManagedBy"  = "Terraform"
-    "Contact"    = "help@libredevops.org"
-  }
-}
-```
-
-### `timestamp.sh`
-
-```bash
-#!/usr/bin/env bash
-DATE=$(date '+%d-%m-%Y:%H:%M')
-echo "{\"timestamp\": \"$DATE\"}"
-```
-
-### `timestamp.ps1`
-
-```powershell
-#!/usr/bin/env pwsh
-$date       = Get-Date -Format "dd-MM-yyyy:HH:mm"
-$jsonOutput = @{ timestamp = $date } | ConvertTo-Json
-Write-Output $jsonOutput
-```
-
-### `timestamp.py`
-
-```python
-import datetime
-
-now       = datetime.datetime.now()
-timestamp = now.strftime("%d-%m-%Y:%H:%M")
-print("{\"timestamp\": \"" + timestamp + "\"}")
 ```

@@ -1,0 +1,112 @@
+---
+title: Azure Naming Convention
+description: A terraform-compliance policy set implementing the recommended Microsoft Azure resource abbreviations, enforcing consistent naming patterns across all Azure resource types.
+---
+
+import { AzureResourceTable, OtherResourceTable } from '@/components/azure-naming-table'
+import { azurermData, azureAdData, azureDevOpsData } from '@/components/azure-naming-data'
+
+# Azure Naming Convention
+
+Welcome to an example of an Azure naming convention which follows the [Recommended Microsoft abbreviations](https://github.com/MicrosoftDocs/cloud-adoption-framework/blob/main/docs/ready/azure-best-practices/resource-abbreviations.md), fully implemented in terraform-compliance in the `az-terraform-compliance-policy` folder.
+
+This repo hosts the files needed to run a standard name and tagging policy check on your Terraform code.
+
+If you are browsing this on the Libre DevOps website, remember to check out the [master copy](https://github.com/libre-devops/azure-naming-convention) of the naming convention on GitHub.
+
+---
+
+## Why?
+
+You probably found this repo looking to implement something similar for your own company, so please feel free to use this version!
+
+[Microsoft says](https://docs.microsoft.com/en-us/azure/cloud-adoption-framework/ready/azure-best-practices/naming-and-tagging): Accurately representing and naming your resources is essential for security purposes. If you come upon a security incident, it's critical to quickly identify affected systems, what functions those systems support, and the potential business impact. Security services such as Microsoft Defender for Cloud and Microsoft Sentinel reference resources and their associated logging and alert information by resource name.
+
+Azure defines naming rules and restrictions for Azure resources. This guidance provides you with detailed recommendations to support enterprise cloud adoption efforts.
+
+Changing resource names can be difficult. Establish a comprehensive naming convention before you begin any large cloud deployment.
+
+**Why terraform-compliance?**
+
+Terraform-Compliance follows a pattern of [Behavior-driven Development](https://en.wikipedia.org/wiki/Behavior-driven_development), where tests should be written to follow a pattern at the beginning of development. In enterprise cloud, naming your resources in a consistent manner is very important for readability and auditing. This type of policy can be brought in house and tweaked for each organisation, and can be enabled in your CI/CD pipeline for continuous compliance.
+
+This repo:
+
+- Hosts a main copy for the community to collaborate and add services for Azure in terraform-compliance
+- Follows [Microsoft's recommended abbreviations for Azure resource types](https://docs.microsoft.com/en-us/azure/cloud-adoption-framework/ready/azure-best-practices/resource-abbreviations)
+- Is free, open source and can be used by anyone
+
+---
+
+## Things You Will Need
+
+- An Azure subscription
+- [Terraform](https://www.terraform.io/)
+- [terraform-compliance](https://terraform-compliance.com/) — and everything needed to run it
+- [git](https://git-scm.com/)
+
+You should consult the terraform-compliance docs on how you want to deploy these files, but they can be used with remote fetching and ran locally too.
+
+---
+
+## Contributing
+
+This list is non-exhaustive — there are hundreds of resources in Azure and not all will be covered. Some you may disagree with or need changing for your own org, so you are free to use this copy, clone it and change it, or fork it if you need greater customisation.
+
+Another note: this naming convention tries to cover parts of the API which you cannot provision with Terraform, so in those occurrences, terraform-compliance won't have a test for these. To save confusion and for all the ARM/Bicep/Pulumi users, we have added the resource entity API names to the naming convention so it can be clear — even things which can't be controlled with Terraform can have a name assigned.
+
+To contribute to the main copy:
+
+- Create a branch against main or raise an issue on GitHub
+- Raise a pull-request with your resources
+- If it fits the current pattern, it will be merged
+
+---
+
+## Resource Name Construction
+
+As a general rule, all names should try to exclude special characters wherever possible and only use alphanumeric characters.
+
+|     Naming Element     | Description | Example |
+|:----------------------:|:------------|:-------:|
+| `Prefix` | The leftmost part of the name. The prefix should be the resource identifier where assigned as a prefix. Should be lower case. In some occurrences it is appropriate to use the prefix to describe the purpose of a generic resource — for example, a virtual machine can be `vm` for generic, `dc` for domain controller, or `web` for web server. | `rg-`, `sa`, `kv-`, `vm-` |
+| `Infix` | Next part of the name to the right of the prefix. The infix should be a 3 or 4 letter description of the product or service the resource belongs to. Should be lower case. This could be an organisation tag, a project name, or anything similar. | `libredevops = ldo`, `hello-world = hw`, `foobar = foo` |
+| `Outfix` | To the right of the infix and left of the suffix. The outfix should be a 3 letter description of the location of the resources. Should be lower case. When resources are "Global" the resource group's location should be used. | `UK South = uks`, `UK West = ukw`, `West Europe = euw`, `West US = usw` |
+| `Optional Outfix` | Optional — to the right of the other outfix and left of the suffix. Should be a 3 letter description of an arbitrary purpose of the resource, for example `mgt` for management. Only use where appropriate and at the discretion of the naming policy owner. Should be lower case. | `mgt`, `sec`, `net` |
+| `Suffix` | The rightmost part of the name. The suffix should be a 3 letter description of the stage the environment is in. Should be lower case. | `poc`, `mvp`, `dev`, `tst`, `uat`, `ppd`, `prd` |
+| `Numbering` | When making multiple items, apply a zero-padded number at the end of the suffix — e.g. `format("%02d", count.index + 1)`. | `01`, `10`, `67`, `88` |
+| `Random Characters` | Sometimes random characters should be used to make unique names. These should be a random assortment of base64 characters, no more than 4 characters in length, all lower case. | `a1jd`, `zl0k`, `moe0` |
+| `Full Construct` | `${prefix}-${infix}-${outfix}-${suffix}` when numbering is applied: `${prefix}-${infix}-${outfix}-${suffix}-${numbering}`. Some resources omit dashes (e.g. storage accounts): `${prefix}${infix}${outfix}${suffix}${numbering}`. | `rg-ldo-uks-prd`, `kv-foo-eus-dev-01`, `sabarwuspoc01` |
+
+---
+
+## Approved Optional Naming
+
+|                   Other Names                     |        Description        |       Example        |
+|:-------------------------------------------------:|:-------------------------:|:--------------------:|
+| `VM purposes — used when VMs are named by purpose` | `app`, `dbs`, `web`, `vm` | `webldouksprd01` |
+| `VM OS type — used when VMs are named by OS`       | `lnx`, `win`, `rh8`, `deb`, `ubu`, `sus` | `webldouksprd01` |
+| `Environment stages`                              | `poc`, `mvp`, `dev`, `tst`, `stg`, `uat`, `ppd`, `prd` | `appprduksprd01` |
+| `Management outfix — describes a resource belonging to tenant admins` | `mgt` | `rg-crg-ukw-ppd-mgt` |
+
+---
+
+## Azurerm Resource List
+
+The table below sets out naming for all resources listed by Microsoft's guidance to date. Pseudocode is used where names are represented with `${}` describing a value that is not an explicit string. Another note regarding resource limits: we have attempted to migrate all data from [Microsoft's guide](https://github.com/MicrosoftDocs/azure-docs/blob/main/articles/azure-resource-manager/management/resource-name-rules.md) into a single table, but it is worth checking out the Microsoft version too.
+
+<AzureResourceTable rows={azurermData} />
+
+---
+
+## Other Resource List
+
+Resources with a naming convention set outside the Azure Resource Manager API — for example, service principals and Azure DevOps items.
+
+### AzureAD Resource List
+
+<OtherResourceTable rows={azureAdData} />
+
+### Azure DevOps Resource List
+
+<OtherResourceTable rows={azureDevOpsData} />

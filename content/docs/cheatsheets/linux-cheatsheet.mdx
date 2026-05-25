@@ -1,0 +1,288 @@
+---
+title: Linux Cheatsheet
+description: Ubuntu, Fedora/RHEL, and WSL setup scripts — package managers, developer tools, CA certificates, and environment configuration.
+---
+
+# Linux Cheat Sheet
+
+Setup scripts and one-liners for Ubuntu, Fedora/RHEL, and WSL2 environments.
+
+---
+
+## Homebrew
+
+### Install Homebrew on Linux
+
+```bash
+#!/usr/bin/env bash
+echo -en "\n" | /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" && \
+    echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' >> ~/.bashrc && \
+    eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)" && \
+    source ~/.bashrc && \
+    brew install gcc
+```
+
+---
+
+## Ubuntu
+
+### Install Podman
+
+```bash
+#!/usr/bin/env bash
+sudo apt-get update -qq
+sudo apt-get -qq -y install podman
+```
+
+### Install PowerShell Core
+
+```bash
+#!/usr/bin/env bash
+sudo apt-get update && sudo apt-get install -y wget apt-transport-https software-properties-common
+wget -q "https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/packages-microsoft-prod.deb"
+sudo dpkg -i packages-microsoft-prod.deb
+sudo apt-get update && sudo apt-get install -y powershell
+pwsh -Command Set-PSRepository -Name "PSGallery" -InstallationPolicy Trusted
+sudo pwsh -Command Install-Module -Name Az -Force -AllowClobber -Scope AllUsers -Repository PSGallery
+```
+
+### Update CA certificates
+
+```bash
+#!/usr/bin/env bash
+sudo cp *.crt /usr/local/share/ca-certificates/
+sudo cp *.crt /etc/ssl/certs
+mkdir -p ~/.local/share/ca-certificates/ && cp *.crt ~/.local/share/ca-certificates/
+update-ca-certificates
+```
+
+### Configure Python pip to use a custom CA bundle
+
+```bash
+pip config set global.cert ca.crt
+echo 'export REQUESTS_CA_BUNDLE="ca.crt"' >> ~/.bashrc
+```
+
+### Install GitHub CLI
+
+```bash
+#!/usr/bin/env bash
+type -p curl >/dev/null || sudo apt install curl -y
+curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+  | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+  | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+sudo apt update && sudo apt install gh -y
+```
+
+### Install VSCode
+
+```bash
+#!/usr/bin/env bash
+sudo apt-get install wget gpg
+wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > packages.microsoft.gpg
+sudo install -D -o root -g root -m 644 packages.microsoft.gpg /etc/apt/keyrings/packages.microsoft.gpg
+sudo sh -c 'echo "deb [arch=amd64,arm64,armhf signed-by=/etc/apt/keyrings/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main" > /etc/apt/sources.list.d/vscode.list'
+sudo apt-get install -y apt-transport-https
+sudo apt-get update && sudo apt-get install code -y
+```
+
+### Install Azure Functions Core Tools
+
+```bash
+curl https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > microsoft.gpg
+sudo mv microsoft.gpg /etc/apt/trusted.gpg.d/microsoft.gpg
+sudo sh -c 'echo "deb [arch=amd64] https://packages.microsoft.com/repos/microsoft-ubuntu-$(lsb_release -cs)-prod $(lsb_release -cs) main" > /etc/apt/sources.list.d/dotnetdev.list'
+sudo apt-get update && sudo apt-get install azure-functions-core-tools-4 -y
+```
+
+### Install Starship prompt
+
+```bash
+#!/usr/bin/env bash
+# Download DroidSansMono Nerd Font
+FONT_URL=$(curl -s https://api.github.com/repos/ryanoasis/nerd-fonts/releases/latest \
+  | grep -o "https://github.com/ryanoasis/nerd-fonts/releases/download/.*/DroidSansMono.zip")
+curl -L "$FONT_URL" -o DroidSansMono.zip
+unzip DroidSansMono.zip -d ~/.fonts && rm DroidSansMono.zip
+fc-cache -fv
+
+curl -sS https://starship.rs/install.sh | sh
+
+mkdir -p ~/.config
+cat > ~/.config/starship.toml <<'EOF'
+command_timeout = 10000
+"$schema" = "https://starship.rs/config-schema.json"
+add_newline = true
+
+[azure]
+disabled = false
+format = "on [$symbol($subscription)]($style) "
+symbol = "# "
+style = "blue bold"
+
+[character]
+success_symbol = "[➜](bold green)"
+
+[package]
+disabled = true
+EOF
+
+echo 'eval "$(starship init bash)"' >> ~/.bashrc
+```
+
+### Install Pyenv
+
+```bash
+#!/usr/bin/env bash
+sudo apt-get install -y \
+    git build-essential gcc make openssl libssl-dev zlib1g-dev libbz2-dev \
+    libreadline-dev libsqlite3-dev python-is-python3 wget curl \
+    libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev \
+    libffi-dev liblzma-dev python3-pip unzip zip python3-tk
+
+git clone https://github.com/pyenv/pyenv.git ~/.pyenv
+echo 'export PYENV_ROOT="$HOME/.pyenv"' >> ~/.bashrc
+echo 'command -v pyenv >/dev/null || export PATH="$PYENV_ROOT/bin:$PATH"' >> ~/.bashrc
+echo 'eval "$(pyenv init -)"' >> ~/.bashrc
+source ~/.bashrc
+pyenv install 3.12
+pyenv global 3.12
+```
+
+### Install tfenv, pkenv, goenv
+
+```bash
+# tfenv
+git clone --depth=1 https://github.com/tfutils/tfenv.git ~/.tfenv
+echo 'export PATH=$PATH:$HOME/.tfenv/bin' >> ~/.bashrc
+
+# pkenv (Packer)
+git clone https://github.com/iamhsa/pkenv.git ~/.pkenv
+echo 'export PATH="${HOME}/.pkenv/bin:$PATH"' >> ~/.bashrc
+
+# goenv
+git clone https://github.com/syndbg/goenv.git ~/.goenv
+echo 'export GOENV_ROOT="$HOME/.goenv"' >> ~/.bashrc
+echo 'export PATH="$GOENV_ROOT/bin:$PATH"' >> ~/.bashrc
+echo 'eval "$(goenv init -)"' >> ~/.bashrc
+echo 'export PATH="$GOROOT/bin:$PATH"' >> ~/.bashrc
+echo 'export PATH="$PATH:$GOPATH/bin"' >> ~/.bashrc
+```
+
+### Install common DevOps tools via pipx and Homebrew
+
+```bash
+#!/usr/bin/env bash
+source ~/.bashrc
+sudo apt-get update && sudo apt-get install -y zip unzip
+pip3 install pipx && pipx ensurepath && source ~/.bashrc
+
+pipx install podman-compose
+pipx install terraform-compliance
+pipx install checkov
+pipx install azure-cli
+pipx install black
+pipx install pipenv
+pipx install bandit
+pipx install beautysh
+
+tfenv install latest && tfenv use latest
+pkenv install 1.8.6   && pkenv use 1.8.6
+goenv install 1.21.0  && goenv global 1.21.0
+
+brew install terraform-docs
+echo "alias td='terraform-docs markdown . > README.md'" >> ~/.bashrc
+```
+
+### Install JetBrains Toolbox
+
+```bash
+#!/bin/bash
+[ "$(id -u)" != "0" ] && exec sudo "$0" "$@"
+
+sudo apt-get install -y libfuse2
+
+URL=$(curl -s 'https://data.services.jetbrains.com/products/releases?code=TBA&latest=true&type=release' \
+  | grep -Po '"linux":.*?[^\\]",' | awk -F ':' '{print $3":"$4}' | sed 's/[", ]//g')
+
+FILE=$(basename "${URL}")
+wget -cO "/tmp/${FILE}" "${URL}" --read-timeout=5 --tries=0
+
+DIR="/opt/jetbrains-toolbox"
+mkdir -p "${DIR}"
+tar -xzf "/tmp/${FILE}" -C "${DIR}" --strip-components=1
+chmod -R +rwx "${DIR}"
+ln -sf "${DIR}/jetbrains-toolbox" /usr/local/bin/jetbrains-toolbox
+rm "/tmp/${FILE}"
+echo "JetBrains Toolbox installed."
+```
+
+---
+
+## Fedora / RHEL
+
+### Update CA certificates
+
+```bash
+#!/usr/bin/env bash
+sudo dnf install -y ca-certificates
+sudo cp *.crt /etc/pki/ca-trust/source/anchors/
+mkdir -p ~/.pki/nssdb/ && cp *.crt ~/.pki/nssdb/
+update-ca-trust
+```
+
+### Install Pyenv on Fedora
+
+```bash
+#!/usr/bin/env bash
+sudo yum install -y \
+    zlib-devel bzip2-devel ncurses-devel libffi-devel sqlite-devel \
+    make gcc readline-devel python3-pip python3-tkinter xz-devel tk-devel git
+
+git clone https://github.com/pyenv/pyenv.git ~/.pyenv
+echo 'export PYENV_ROOT="$HOME/.pyenv"' >> ~/.bashrc
+echo 'command -v pyenv >/dev/null || export PATH="$PYENV_ROOT/bin:$PATH"' >> ~/.bashrc
+echo 'eval "$(pyenv init -)"' >> ~/.bashrc
+```
+
+---
+
+## WSL2
+
+### Create symlinks to Windows directories
+
+```bash
+ln -s /mnt/c/Users          winusers
+ln -s /mnt/c/Users/craig    winhome
+ln -s /mnt/c/Users/craig/Desktop windesktop
+```
+
+### Run Ubuntu shell from Windows (or as root)
+
+```bash
+wsl.exe -d Ubuntu bash
+wsl.exe -u root -d Ubuntu bash
+```
+
+### Set WSL2 resource limits
+
+Run this in PowerShell — creates `~/.wslconfig` capping memory and CPU.
+
+```powershell
+@"
+[wsl2]
+memory=8GB
+processors=2
+"@ | Set-Content -Path "$Env:USERPROFILE\.wslconfig"
+```
+
+### Install WSL2 VPN toolkit (for corporate VPN compatibility)
+
+```powershell
+Invoke-WebRequest -Uri "https://github.com/sakai135/wsl-vpnkit/releases/latest/download/wsl-vpnkit.tar.gz" -OutFile "wsl-vpnkit.tar.gz"
+wsl --import wsl-vpnkit --version 2 "$env:USERPROFILE\wsl-vpnkit" wsl-vpnkit.tar.gz
+wsl -d wsl-vpnkit
+wsl.exe -d wsl-vpnkit --cd /app service wsl-vpnkit start
+```

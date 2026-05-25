@@ -1,0 +1,226 @@
+---
+title: Bash Cheatsheet
+description: Bash strict mode, colour helpers, argument parsing, PATH management, and common one-liners.
+---
+
+# Bash Cheat Sheet
+
+Practical snippets for writing robust shell scripts and maintaining a productive Bash environment.
+
+---
+
+## Script Boilerplate
+
+### Strict mode
+
+Always start scripts with this. `set -e` exits on error, `set -u` treats unset variables as errors, `set -o pipefail` propagates failures through pipelines, and `set -x` prints each command before running it (useful for debugging — remove for production).
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+# set -x   # uncomment for debug tracing
+```
+
+### Run as root, re-exec with sudo if needed
+
+```bash
+#!/usr/bin/env bash
+[ "$(whoami)" = root ] || { sudo "$0" "$@"; exit $?; }
+```
+
+---
+
+## Colour Output Helpers
+
+Drop these into your script or `.bashrc` for consistent coloured output.
+
+```bash
+print_success() {
+    local lightcyan='\033[1;36m' nocolor='\033[0m'
+    echo -e "${lightcyan}$1${nocolor}"
+}
+
+print_error() {
+    local lightred='\033[1;31m' nocolor='\033[0m'
+    echo -e "${lightred}$1${nocolor}"
+}
+
+print_alert() {
+    local yellow='\033[1;33m' nocolor='\033[0m'
+    echo -e "${yellow}$1${nocolor}"
+}
+```
+
+---
+
+## String Utilities
+
+```bash
+title_case_convert() {
+    sed 's/.*/\L&/; s/[a-z]*/\u&/g' <<<"$1"
+}
+
+upper_case_convert() {
+    sed -e 's/\(.*\)/\U\1/' <<< "$1"
+}
+
+lower_case_convert() {
+    sed -e 's/\(.*\)/\L\1/' <<< "$1"
+}
+```
+
+---
+
+## Argument Parsing
+
+### Positional arguments with defaults
+
+```bash
+#!/usr/bin/env bash
+full_name="${1:-Craig Thacker}"
+email_address="${2:-user@example.com}"
+
+echo "Name:  $full_name"
+echo "Email: $email_address"
+```
+
+### Named flags with `while` / `case`
+
+```bash
+#!/usr/bin/env bash
+name=""
+env="dev"
+debug=false
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --name)    name="$2";  shift 2 ;;
+    --env)     env="$2";   shift 2 ;;
+    --debug)   debug=true; shift   ;;
+    *) echo "Unknown flag: $1"; exit 1 ;;
+  esac
+done
+
+echo "name=$name env=$env debug=$debug"
+```
+
+---
+
+## PATH Management
+
+### Remove duplicate entries from PATH
+
+Keeps the first occurrence of each path and discards any subsequent duplicates.
+
+```bash
+PATH=$(printf %s "$PATH" | awk -vRS=: -vORS= '!a[$0]++ {if (NR>1) printf(":"); printf("%s", $0)}')
+export PATH
+```
+
+---
+
+## Directory Iteration
+
+### Run a script in every subdirectory (1 level deep)
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+START=$(pwd)
+
+for dir in $(find . -maxdepth 2 -mindepth 1 -type d); do
+    cd "$dir"
+    ./my-script.sh || echo "Script not in $dir, skipping"
+    cd "$START"
+done
+```
+
+### Run a command across multiple Terraform module directories
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+back=$(pwd)
+provider="${1:-azurerm}"
+location="${2:-.}"
+
+workspace=$(find "${location}" -maxdepth 1 -name "terraform-${provider}-*" -type d)
+
+for dir in ${workspace}; do
+    cd "${dir}"
+    echo "Processing: ${dir}"
+    terraform fmt -recursive
+    git add --all && git commit -m "Update module" && git push
+    git tag 1.0.0 --force && git push --tags --force
+    cd "${back}"
+done
+```
+
+---
+
+## Terraform Module Release Helper
+
+Appends a reusable `tfrel` function to `.bashrc` that formats, generates docs, and publishes a module in one shot.
+
+```bash
+#!/usr/bin/env bash
+
+function tfrel() {
+    local curdir build_file=""
+
+    if [ -f build.tf ]; then
+        build_file="build.tf"
+    elif [ -f main.tf ]; then
+        build_file="main.tf"
+    else
+        print_alert "Not a build directory — no build.tf or main.tf found"
+        return 1
+    fi
+
+    # Write a README with the build file content + terraform-docs output
+    {
+        echo '```hcl'
+        cat "$build_file"
+        echo '```'
+    } > README.md
+    terraform-docs markdown . >> README.md
+
+    terraform fmt -recursive
+    git add --all
+    git commit -m "Update module"
+    git push
+    git tag 1.0.0 --force
+    git push --tags --force
+}
+
+echo "" >> ~/.bashrc
+echo "# Define tfrel function" >> ~/.bashrc
+declare -f tfrel >> ~/.bashrc
+echo "tfrel appended to ~/.bashrc"
+```
+
+---
+
+## Quick One-Liners
+
+```bash
+# Upgrade all outdated pip packages (Linux)
+pip3 list -o | awk 'NR>2 {print $1}' | xargs -n1 pip3 install -U
+
+# Find all files modified in the last 24 hours
+find . -mtime -1 -type f
+
+# Count lines in all .tf files
+find . -name "*.tf" | xargs wc -l
+
+# Recursively replace a string in all files
+grep -rl 'old-string' . | xargs sed -i 's/old-string/new-string/g'
+
+# Show disk usage, sorted by size
+du -sh */ | sort -rh | head -20
+
+# Watch a command every 2 seconds
+watch -n2 'kubectl get pods'
+```

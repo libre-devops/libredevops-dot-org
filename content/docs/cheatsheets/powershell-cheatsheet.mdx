@@ -1,0 +1,246 @@
+---
+title: PowerShell Cheatsheet
+description: PowerShell strict mode, Azure auth helpers, Terraform tooling functions, module management, and Sentinel watchlist export.
+---
+
+# PowerShell Cheat Sheet
+
+Practical PowerShell snippets for Azure, Terraform, and general scripting. Most examples work cross-platform on PowerShell 7+.
+
+---
+
+## Script Boilerplate
+
+### Strict mode and debug tracing
+
+```powershell
+#!/usr/bin/env pwsh
+Set-StrictMode -Version 2
+$ErrorActionPreference = 'Stop'
+# Set-PSDebug -Trace 2   # uncomment for line-by-line trace
+```
+
+### Version and module constraints
+
+Prevent the script from running if requirements aren't met.
+
+```powershell
+#Requires -Version 7.2
+#Requires -Modules @{ ModuleName="Az"; ModuleVersion="7.5.0" }
+#Requires -Modules @{ ModuleName="Microsoft.Graph"; ModuleVersion="1.9.6" }
+```
+
+---
+
+## Azure Authentication
+
+### Connect with Service Principal (client secret)
+
+```powershell
+function Connect-AzAccountWithServicePrincipal {
+    param (
+        [Parameter(Mandatory)][string]$ApplicationId,
+        [Parameter(Mandatory)][string]$TenantId,
+        [Parameter(Mandatory)][string]$Secret,
+        [string]$SubscriptionId
+    )
+
+    $SecureSecret = $Secret | ConvertTo-SecureString -AsPlainText -Force
+    $Credential   = New-Object System.Management.Automation.PSCredential($ApplicationId, $SecureSecret)
+
+    Connect-AzAccount -ServicePrincipal -Credential $Credential -Tenant $TenantId -ErrorAction Stop
+
+    if (-not [string]::IsNullOrEmpty($SubscriptionId)) {
+        Set-AzContext -SubscriptionId $SubscriptionId
+    }
+
+    Write-Host "Logged in to Azure." -ForegroundColor Cyan
+}
+```
+
+### Register a resource provider if not already registered
+
+Some resource providers aren't registered by default on new subscriptions. This helper blocks until registration completes.
+
+```powershell
+function Register-ResourceProviderIfNecessary {
+    param ([Parameter(Mandatory)][string]$ProviderNamespace)
+
+    $provider = Get-AzResourceProvider -ProviderNamespace $ProviderNamespace
+
+    if ($provider.RegistrationState -ne "Registered") {
+        Write-Host "Registering '$ProviderNamespace'..." -ForegroundColor Yellow
+        Register-AzResourceProvider -ProviderNamespace $ProviderNamespace | Out-Null
+
+        do {
+            Start-Sleep -Seconds 10
+            $provider = Get-AzResourceProvider -ProviderNamespace $ProviderNamespace
+        } while ($provider.RegistrationState -ne "Registered")
+
+        Write-Host "'$ProviderNamespace' registered." -ForegroundColor Green
+    } else {
+        Write-Host "'$ProviderNamespace' already registered." -ForegroundColor Green
+    }
+}
+```
+
+### Convert a string to SecureString
+
+Required when passing secrets to Azure APIs that expect `SecureString`.
+
+```powershell
+$SubId        = $(Get-AzContext | Select-Object -ExpandProperty Subscription)
+$SecureSubId  = ConvertTo-SecureString "$SubId" -AsPlainText -Force
+```
+
+---
+
+## Terraform Helpers
+
+### `tfbuild` and `tfdestroy` profile functions
+
+Add these to your `$PROFILE` to run `Run-AzTerraform.ps1` from any module directory with sensible defaults. Override any parameter at the call site.
+
+```powershell
+function tfbuild {
+    param(
+        [string]$TerraformCodeLocation     = 'examples',
+        [string]$TerraformWorkspace        = 'dev',
+        [string]$TerraformStackToRunJson   = '["module-development"]',
+        [string]$RunTerraformInit          = 'true',
+        [string]$RunTerraformValidate      = 'true',
+        [string]$RunTerraformPlan          = 'true',
+        [string]$RunTerraformPlanDestroy   = 'false',
+        [string]$RunTerraformDestroy       = 'false',
+        [string]$RunTerraformApply         = 'true',
+        [string]$TerraformInitExtraArgsJson = '["-reconfigure","-upgrade"]',
+        [string]$DebugMode                 = 'false',
+        [string]$InstallCheckov            = 'false'
+    )
+    $wd = $(Get-Location).Path
+    & pwsh -File "$wd\Run-AzTerraform.ps1" `
+        -TerraformCodeLocation    $TerraformCodeLocation `
+        -TerraformWorkspace       $TerraformWorkspace `
+        -TerraformStackToRunJson  $TerraformStackToRunJson `
+        -RunTerraformInit         $RunTerraformInit `
+        -RunTerraformValidate     $RunTerraformValidate `
+        -RunTerraformPlan         $RunTerraformPlan `
+        -RunTerraformPlanDestroy  $RunTerraformPlanDestroy `
+        -RunTerraformDestroy      $RunTerraformDestroy `
+        -RunTerraformApply        $RunTerraformApply `
+        -TerraformInitExtraArgsJson $TerraformInitExtraArgsJson `
+        -DebugMode                $DebugMode `
+        -InstallCheckov           $InstallCheckov
+}
+
+function tfdestroy {
+    param(
+        [string]$TerraformCodeLocation     = 'examples',
+        [string]$TerraformWorkspace        = 'dev',
+        [string]$TerraformStackToRunJson   = '["module-development"]',
+        [string]$RunTerraformInit          = 'true',
+        [string]$RunTerraformValidate      = 'true',
+        [string]$RunTerraformPlan          = 'false',
+        [string]$RunTerraformPlanDestroy   = 'true',
+        [string]$RunTerraformDestroy       = 'true',
+        [string]$RunTerraformApply         = 'false',
+        [string]$TerraformInitExtraArgsJson = '["-reconfigure","-upgrade"]',
+        [string]$DebugMode                 = 'false',
+        [string]$InstallCheckov            = 'false'
+    )
+    $wd = $(Get-Location).Path
+    & pwsh -File "$wd\Run-AzTerraform.ps1" `
+        -TerraformCodeLocation    $TerraformCodeLocation `
+        -TerraformWorkspace       $TerraformWorkspace `
+        -TerraformStackToRunJson  $TerraformStackToRunJson `
+        -RunTerraformInit         $RunTerraformInit `
+        -RunTerraformValidate     $RunTerraformValidate `
+        -RunTerraformPlan         $RunTerraformPlan `
+        -RunTerraformPlanDestroy  $RunTerraformPlanDestroy `
+        -RunTerraformDestroy      $RunTerraformDestroy `
+        -RunTerraformApply        $RunTerraformApply `
+        -TerraformInitExtraArgsJson $TerraformInitExtraArgsJson `
+        -DebugMode                $DebugMode `
+        -InstallCheckov           $InstallCheckov
+}
+```
+
+---
+
+## Module Management
+
+### Install a set of modules in one line
+
+```powershell
+Install-Module -Name @(
+    "Microsoft.Graph",
+    "Az",
+    "Pester",
+    "LibreDevOpsHelpers",
+    "Microsoft.PowerShell.PSResourceGet"
+) -Force -AllowClobber -Scope CurrentUser -Repository PSGallery
+```
+
+---
+
+## Starship Prompt (Windows)
+
+```powershell
+choco install -y starship
+
+@"
+command_timeout = 10000
+"`$schema" = "https://starship.rs/config-schema.json"
+
+[azure]
+disabled = false
+format = 'on [``$symbol(``$subscription)](``$style) '
+symbol = '# '
+style = 'blue bold'
+
+add_newline = true
+
+[character]
+success_symbol = '[➜](bold green)'
+
+[package]
+disabled = true
+"@ | Set-Content -Path "$env:APPDATA\starship.toml"
+
+# Add to your $PROFILE:
+# Invoke-Expression (&starship init powershell)
+```
+
+---
+
+## Microsoft Sentinel
+
+### Export a watchlist to CSV
+
+```powershell
+function Export-SentinelWatchlist {
+    [CmdletBinding()]
+    param (
+        [string]$SubscriptionId   = (Get-AzContext).Subscription.Id,
+        [Parameter(Mandatory)][string]$ResourceGroupName,
+        [Parameter(Mandatory)][string]$WorkspaceName,
+        [Parameter(Mandatory)][string]$WatchlistName,
+        [string]$OutputFilePath   = 'watchlist.csv'
+    )
+
+    $uri = "https://management.azure.com/subscriptions/${SubscriptionId}" +
+           "/resourceGroups/${ResourceGroupName}" +
+           "/providers/Microsoft.OperationalInsights/workspaces/${WorkspaceName}" +
+           "/providers/Microsoft.SecurityInsights/watchlists/${WatchlistName}" +
+           "/watchlistItems?api-version=2022-12-01-preview"
+
+    $response = Invoke-AzRestMethod -Method Get -Uri $uri |
+        Select-Object -ExpandProperty Content |
+        ConvertFrom-Json
+
+    $response.value.properties.itemsKeyValue |
+        Export-Csv -Encoding UTF8 -Path $OutputFilePath -QuoteFields:$false
+
+    Write-Host "Watchlist exported to $OutputFilePath" -ForegroundColor Green
+}
+```

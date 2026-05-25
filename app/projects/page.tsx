@@ -24,14 +24,6 @@ const projects: Project[] = [
         docs: '/docs/documents/azure-naming-convention',
     },
     {
-        title: 'Azure DevOps Agent Containers',
-        description:
-            'Pre-built container images for self-hosted Azure DevOps pipeline agents on Linux (RHEL 8 UBI, Ubuntu) and Windows (Server 2019/2022 LTSC). Images are published weekly to GitHub Container Registry. Agent names are auto-generated to avoid pool conflicts. Builds use Podman on Linux and Docker on Windows.',
-        tags: ['Azure DevOps', 'Containers', 'Podman', 'Docker', 'CI/CD'],
-        repo: 'https://github.com/libre-devops/azdo-agent-containers',
-        docs: '/docs/documents/azure-devops-agent-container',
-    },
-    {
         title: 'Terraform Modules',
         description:
             'A collection of opinionated Terraform modules for Azure infrastructure — covering compute, networking, identity, storage, and more. All modules follow the Libre DevOps naming convention and are published to the Terraform Registry.',

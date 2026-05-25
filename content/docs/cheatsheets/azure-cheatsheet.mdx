@@ -1,0 +1,241 @@
+---
+title: Azure Cheatsheet
+description: Azure authentication, policy management, and common CLI and PowerShell operations.
+---
+
+# Azure Cheat Sheet
+
+Quick-reference scripts and commands for working with Microsoft Azure via the Az PowerShell module and Azure CLI.
+
+---
+
+## Authentication
+
+### Login with Az PowerShell module
+
+Reusable auth helper that supports both interactive login and service principal with client secret. Pass `-UseServicePrincipal $true` and supply credentials to use the SPN path; omit for interactive.
+
+```powershell
+param(
+    [Parameter(Mandatory = $false)]
+    [bool]$UseServicePrincipal = $false,
+
+    [Parameter(Mandatory = $false)]
+    [string]$ClientId,
+
+    [Parameter(Mandatory = $false)]
+    [string]$TenantId,
+
+    [Parameter(Mandatory = $false)]
+    [string]$ClientSecret,
+
+    [Parameter(Mandatory = $false)]
+    [string]$SubscriptionId = $null,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$IsDebugMode
+)
+
+$IsDebugMode = $IsDebugMode.IsPresent
+
+function _LogMessage {
+    param([string]$Level, [string]$Message, [string]$InvocationName)
+    $timestamp = Get-Date -Format "HH:mm:ss"
+    if ($Level -eq "DEBUG" -and -not $IsDebugMode) { return }
+    switch ($Level) {
+        "INFO"    { Write-Host "${Level}: $timestamp - [$InvocationName] $Message" -ForegroundColor Cyan }
+        "DEBUG"   { Write-Host "${Level}: $timestamp - [$InvocationName] $Message" -ForegroundColor Yellow }
+        "WARNING" { Write-Host "${Level}: $timestamp - [$InvocationName] $Message" -ForegroundColor DarkYellow }
+        "ERROR"   { Write-Host "${Level}: $timestamp - [$InvocationName] $Message" -ForegroundColor Red }
+        default   { Write-Host "${Level}: $timestamp - [$InvocationName] $Message" }
+    }
+}
+
+function Connect-AzureUser {
+    try {
+        $context = Get-AzContext
+        if ($null -eq $context -or $null -eq $context.Account) {
+            _LogMessage "INFO" "No existing Azure context. Authenticating..." $MyInvocation.MyCommand.Name
+            Connect-AzAccount -ErrorAction Stop
+            if ($SubscriptionId) { Set-AzContext -Subscription $SubscriptionId }
+        } else {
+            _LogMessage "INFO" "Already authenticated as $($context.Account.Id)." $MyInvocation.MyCommand.Name
+        }
+    } catch {
+        _LogMessage "ERROR" "Authentication failed: $($_.Exception.Message)" $MyInvocation.MyCommand.Name
+        throw
+    }
+}
+
+function Connect-ToAzureSpn {
+    param([bool]$UseSPN, [string]$ClientId, [string]$TenantId, [string]$ClientSecret)
+
+    if ($UseSPN) {
+        _LogMessage "INFO" "Connecting via Service Principal..." $MyInvocation.MyCommand.Name
+        $securePassword = ConvertTo-SecureString $ClientSecret -AsPlainText -Force
+        $credential = New-Object System.Management.Automation.PSCredential($ClientId, $securePassword)
+        Connect-AzAccount -ServicePrincipal -Tenant $TenantId -Credential $credential
+        if ($SubscriptionId) { Set-AzContext -Subscription $SubscriptionId }
+    } else {
+        Connect-AzureUser
+    }
+}
+
+try {
+    _LogMessage "INFO" "Starting script..." $MyInvocation.MyCommand.Name
+    Connect-ToAzureSpn -UseSPN $UseServicePrincipal -ClientId $ClientId -TenantId $TenantId -ClientSecret $ClientSecret
+} catch {
+    _LogMessage "ERROR" "Terminating error: $($_.Exception.Message)" $MyInvocation.MyCommand.Name
+    exit 1
+}
+```
+
+### Login with Azure CLI (Bash)
+
+Same interactive / SPN pattern but using `az login`. Suitable for pipelines running on Linux agents.
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+UseServicePrincipal=false
+ClientId=""
+TenantId=""
+ClientSecret=""
+SubscriptionId=""
+IsDebugMode=false
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --use-service-principal) UseServicePrincipal="$2"; shift 2 ;;
+    --client-id)             ClientId="$2"; shift 2 ;;
+    --tenant-id)             TenantId="$2"; shift 2 ;;
+    --client-secret)         ClientSecret="$2"; shift 2 ;;
+    --subscription-id)       SubscriptionId="$2"; shift 2 ;;
+    --debug)                 IsDebugMode="$2"; shift 2 ;;
+    *) echo "Unknown parameter: $1"; exit 1 ;;
+  esac
+done
+
+CYAN='\033[0;36m' YELLOW='\033[0;33m' RED='\033[0;31m' RESET='\033[0m'
+
+_log() {
+  local level="$1" msg="$2" caller="$3"
+  [[ "$level" == "DEBUG" && "$IsDebugMode" != "true" ]] && return
+  local ts; ts="$(date +%H:%M:%S)"
+  case "$level" in
+    INFO)    echo -e "${CYAN}${level}: ${ts} - [${caller}] ${msg}${RESET}" ;;
+    DEBUG|WARNING) echo -e "${YELLOW}${level}: ${ts} - [${caller}] ${msg}${RESET}" ;;
+    ERROR)   echo -e "${RED}${level}: ${ts} - [${caller}] ${msg}${RESET}" ;;
+    *)       echo "${level}: ${ts} - [${caller}] ${msg}" ;;
+  esac
+}
+
+connect_user() {
+  if ! az account show --output json &>/dev/null; then
+    _log INFO "No existing login. Authenticating..." "connect_user"
+    az login || { _log ERROR "Interactive login failed." "connect_user"; return 1; }
+    [[ -n "$SubscriptionId" ]] && az account set --subscription "$SubscriptionId"
+  else
+    local user; user=$(az account show --query user.name -o tsv)
+    _log INFO "Already logged in as $user." "connect_user"
+  fi
+}
+
+connect_spn() {
+  local use_spn="$1"
+  if [[ "$use_spn" == "true" ]]; then
+    _log INFO "Connecting via Service Principal..." "connect_spn"
+    az login --service-principal \
+      --username "$ClientId" --password "$ClientSecret" --tenant "$TenantId" \
+      || { _log ERROR "SPN login failed." "connect_spn"; return 1; }
+    [[ -n "$SubscriptionId" ]] && az account set --subscription "$SubscriptionId"
+  else
+    connect_user
+  fi
+}
+
+_log INFO "Starting..." "main"
+connect_spn "$UseServicePrincipal"
+```
+
+---
+
+## Policy Management
+
+### Get all policy assignments across management groups and subscriptions
+
+Iterates every management group and subscription in the tenant, collects all policy assignments, and returns a structured report.
+
+```powershell
+$TenantId = "01b9e453-84bc-4dc5-88de-a97a1fd42455"
+
+function Get-AllPolicyDefinitionAssignments {
+    param(
+        [Parameter(Mandatory)]
+        [string]$TenantId
+    )
+
+    Set-AzContext -TenantId $TenantId | Out-Null
+
+    $allSubscriptions   = Get-AzSubscription -TenantId $TenantId
+    $allManagementGroups = Get-AzManagementGroup
+
+    $allMgAssignments  = foreach ($mg in $allManagementGroups) {
+        [pscustomobject]@{ Name = $mg.DisplayName; Id = $mg.Id; Assignments = Get-AzPolicyAssignment -Scope $mg.Id -WarningAction SilentlyContinue }
+    }
+
+    $allSubAssignments = foreach ($sub in $allSubscriptions) {
+        Select-AzSubscription $sub | Set-AzContext | Out-Null
+        [pscustomobject]@{ Name = $sub.Name; Id = $sub.Id; Assignments = Get-AzPolicyAssignment -Scope "/subscriptions/$($sub.Id)" -IncludeDescendent -WarningAction SilentlyContinue }
+    }
+
+    return [pscustomobject]@{
+        ManagementGroups = $allMgAssignments
+        Subscriptions    = $allSubAssignments
+    }
+}
+
+Connect-AzAccount
+$result = Get-AllPolicyDefinitionAssignments -TenantId $TenantId
+```
+
+---
+
+## Common Az CLI Quick Commands
+
+```bash
+az account show                                    # current context
+az account list --output table                    # all subscriptions
+az account set --subscription "My Subscription"  # switch subscription
+
+az group list --output table
+az group create --name my-rg --location uksouth
+az group delete --name my-rg --yes
+
+az resource list --resource-group my-rg --output table
+az resource show --ids /subscriptions/.../resourceGroups/my-rg/providers/Microsoft.Compute/virtualMachines/my-vm
+
+az vm list --output table
+az vm start  --name my-vm --resource-group my-rg
+az vm stop   --name my-vm --resource-group my-rg
+az vm deallocate --name my-vm --resource-group my-rg
+
+az keyvault secret list --vault-name my-vault --output table
+az keyvault secret show --vault-name my-vault --name my-secret --query value -o tsv
+```
+
+---
+
+## Set Terraform ARM Environment Variables
+
+Export the variables needed for the `azurerm` Terraform provider from your shell.
+
+```bash
+echo 'export ARM_TENANT_ID=""'        >> ~/.bashrc
+echo 'export ARM_CLIENT_ID=""'        >> ~/.bashrc
+echo 'export ARM_CLIENT_SECRET=""'    >> ~/.bashrc
+echo 'export ARM_SUBSCRIPTION_ID=""'  >> ~/.bashrc
+echo 'export ARM_ACCESS_KEY=""'       >> ~/.bashrc
+source ~/.bashrc
+```

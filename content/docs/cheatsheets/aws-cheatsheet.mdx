@@ -1,0 +1,224 @@
+---
+title: AWS Cheatsheet
+description: AWS CLI setup, S3, EC2, IAM, EKS, and CloudFormation quick-reference for platform engineers.
+---
+
+# AWS Cheat Sheet
+
+A practical reference for common AWS operations using the AWS CLI and SDKs.
+
+---
+
+## Authentication & Credentials
+
+### Configure named profiles
+
+Store credentials for multiple accounts without environment variables. The `--profile` flag selects which profile to use at runtime.
+
+```bash
+aws configure                          # configure the default profile
+aws configure --profile staging        # configure a named profile
+aws configure list                     # show what's configured
+aws configure list --profile staging   # show a specific profile
+```
+
+`aws configure` writes to `~/.aws/credentials` and `~/.aws/config`. You can also edit these directly:
+
+```ini
+# ~/.aws/credentials
+[default]
+aws_access_key_id     = AKIAIOSFODNN7EXAMPLE
+aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+
+[staging]
+aws_access_key_id     = AKIAI44QH8DHBEXAMPLE
+aws_secret_access_key = je7MtGbClwBF/2Zp9Utk/h3yCo8nvbEXAMPLEKEY
+```
+
+```ini
+# ~/.aws/config
+[default]
+region = eu-west-2
+output = json
+
+[profile staging]
+region = us-east-1
+output = table
+```
+
+### Assume a role (cross-account)
+
+```bash
+aws sts assume-role \
+  --role-arn arn:aws:iam::123456789012:role/MyRole \
+  --role-session-name my-session \
+  --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
+  --output text
+```
+
+Export the returned credentials into your shell:
+
+```bash
+eval $(aws sts assume-role \
+  --role-arn arn:aws:iam::123456789012:role/MyRole \
+  --role-session-name my-session \
+  --query 'Credentials' \
+  --output json | jq -r '@sh "export AWS_ACCESS_KEY_ID=\(.AccessKeyId) AWS_SECRET_ACCESS_KEY=\(.SecretAccessKey) AWS_SESSION_TOKEN=\(.SessionToken)"')
+```
+
+### Login to ECR
+
+```bash
+aws ecr get-login-password --region eu-west-2 \
+  | docker login --username AWS --password-stdin 123456789012.dkr.ecr.eu-west-2.amazonaws.com
+```
+
+---
+
+## S3
+
+```bash
+aws s3 ls                              # list all buckets
+aws s3 ls s3://my-bucket               # list bucket contents
+aws s3 ls s3://my-bucket/prefix/ --recursive
+
+aws s3 cp file.txt s3://my-bucket/path/
+aws s3 cp s3://my-bucket/path/file.txt .
+aws s3 sync ./local-dir s3://my-bucket/prefix/
+aws s3 sync s3://my-bucket/prefix/ ./local-dir --delete  # mirror, delete extras
+
+aws s3 rm s3://my-bucket/path/file.txt
+aws s3 rm s3://my-bucket/prefix/ --recursive
+
+aws s3 mb s3://my-new-bucket --region eu-west-2   # make bucket
+aws s3 rb s3://my-bucket --force                   # remove bucket (must be empty, or use --force)
+```
+
+### Presigned URLs
+
+Generate a time-limited URL for sharing an object without granting public access.
+
+```bash
+aws s3 presign s3://my-bucket/my-file.zip --expires-in 3600   # 1 hour
+```
+
+---
+
+## EC2
+
+```bash
+aws ec2 describe-instances --output table
+aws ec2 describe-instances --filters "Name=tag:Name,Values=my-server" \
+  --query 'Reservations[*].Instances[*].[InstanceId,State.Name,PublicIpAddress]' \
+  --output table
+
+aws ec2 start-instances --instance-ids i-1234567890abcdef0
+aws ec2 stop-instances --instance-ids i-1234567890abcdef0
+aws ec2 reboot-instances --instance-ids i-1234567890abcdef0
+aws ec2 terminate-instances --instance-ids i-1234567890abcdef0
+```
+
+### Connect via SSM Session Manager (no SSH required)
+
+```bash
+aws ssm start-session --target i-1234567890abcdef0
+```
+
+### Get latest Amazon Linux 2 AMI ID
+
+```bash
+aws ssm get-parameter \
+  --name /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2 \
+  --query 'Parameter.Value' \
+  --output text
+```
+
+---
+
+## IAM
+
+```bash
+aws iam list-users --output table
+aws iam list-roles --output table
+aws iam list-policies --scope Local --output table   # custom policies only
+
+aws iam get-user --user-name myuser
+aws iam list-attached-user-policies --user-name myuser
+aws iam list-groups-for-user --user-name myuser
+
+aws iam create-user --user-name newuser
+aws iam delete-user --user-name olduser
+
+aws iam create-role --role-name MyRole --assume-role-policy-document file://trust-policy.json
+aws iam attach-role-policy --role-name MyRole --policy-arn arn:aws:iam::aws:policy/ReadOnlyAccess
+aws iam detach-role-policy --role-name MyRole --policy-arn arn:aws:iam::aws:policy/ReadOnlyAccess
+```
+
+### Inline trust policy for EC2
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": { "Service": "ec2.amazonaws.com" },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+```
+
+---
+
+## EKS
+
+```bash
+aws eks list-clusters
+aws eks describe-cluster --name my-cluster
+
+# Update kubeconfig to connect kubectl to a cluster
+aws eks update-kubeconfig --name my-cluster --region eu-west-2
+aws eks update-kubeconfig --name my-cluster --region eu-west-2 --profile staging
+
+kubectl get nodes   # verify connection
+```
+
+---
+
+## CloudFormation
+
+```bash
+aws cloudformation list-stacks --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE
+aws cloudformation describe-stacks --stack-name my-stack
+
+aws cloudformation deploy \
+  --template-file template.yaml \
+  --stack-name my-stack \
+  --capabilities CAPABILITY_IAM \
+  --parameter-overrides Env=prod Region=eu-west-2
+
+aws cloudformation delete-stack --stack-name my-stack
+
+# Validate a template without deploying
+aws cloudformation validate-template --template-body file://template.yaml
+```
+
+---
+
+## Useful Globals
+
+```bash
+# Get caller identity (who am I right now?)
+aws sts get-caller-identity
+
+# Set output format and region for a single command
+aws ec2 describe-instances --output table --region us-east-1
+
+# Filter JSON output with jq
+aws ec2 describe-instances | jq '.Reservations[].Instances[] | {id: .InstanceId, state: .State.Name}'
+
+# Set environment variables for a session
+export AWS_DEFAULT_REGION=eu-west-2
+export AWS_PROFILE=staging
+```

