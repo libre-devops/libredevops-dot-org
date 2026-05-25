@@ -520,8 +520,17 @@ a {
     font-size: 0.8rem;
   }
 
+  /* Show only priority social links on mobile */
   .social-links {
+    gap: 0.25rem;
+  }
+
+  .social-link {
     display: none;
+  }
+
+  .social-link--mobile {
+    display: flex;
   }
 
   /* Hero */

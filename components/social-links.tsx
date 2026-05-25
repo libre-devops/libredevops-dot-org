@@ -1,8 +1,8 @@
 import { Github, Key, Linkedin, Mail, Shield } from 'lucide-react';
+import type { ReactNode } from 'react';
 
-import { siteConfig } from '@/lib/site';
+import { socialLinks } from '@/lib/site';
 
-// Terraform Registry has no Lucide icon — use their official logo mark
 function TerraformIcon() {
     return (
         <svg
@@ -20,66 +20,29 @@ function TerraformIcon() {
     );
 }
 
+const iconMap: Record<string, ReactNode> = {
+    github: <Github size={16} />,
+    linkedin: <Linkedin size={16} />,
+    terraform: <TerraformIcon />,
+    key: <Key size={16} />,
+    mail: <Mail size={16} />,
+    shield: <Shield size={16} />,
+};
+
 export function SocialLinks() {
     return (
         <div className="social-links">
-            <a
-                href={siteConfig.github}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label="GitHub"
-                className="social-link"
-            >
-                <Github size={16} />
-            </a>
-
-            <a
-                href={siteConfig.linkedin}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label="LinkedIn"
-                className="social-link"
-            >
-                <Linkedin size={16} />
-            </a>
-
-            <a
-                href={siteConfig.terraform}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label="Terraform Registry"
-                className="social-link"
-            >
-                <TerraformIcon />
-            </a>
-
-            <a
-                href={siteConfig.keybase}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label="Keybase"
-                className="social-link"
-            >
-                <Key size={16} />
-            </a>
-
-            <a
-                href={`mailto:${siteConfig.email}`}
-                aria-label="Email"
-                className="social-link"
-            >
-                <Mail size={16} />
-            </a>
-
-            <a
-                href={siteConfig.securityNews}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label="Security News"
-                className="social-link"
-            >
-                <Shield size={16} />
-            </a>
+            {socialLinks.map((link) => (
+                <a
+                    key={link.label}
+                    href={link.mailto ? `mailto:${link.href}` : link.href}
+                    {...(!link.mailto && { target: '_blank', rel: 'noopener noreferrer' })}
+                    aria-label={link.label}
+                    className={`social-link${link.mobileVisible ? ' social-link--mobile' : ''}`}
+                >
+                    {iconMap[link.icon]}
+                </a>
+            ))}
         </div>
     );
 }
