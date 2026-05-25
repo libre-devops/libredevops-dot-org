@@ -29,6 +29,7 @@ export const socialLinks: SocialLink[] = [
         href: siteConfig.github,
         label: 'GitHub',
         icon: 'github',
+        mobileVisible: true,
     },
     {
         href: siteConfig.linkedin,
