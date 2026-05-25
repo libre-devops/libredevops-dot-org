@@ -18,8 +18,6 @@ export interface SocialLink {
     href: string;
     label: string;
     icon: string; // key into the icon map in social-links.tsx
-    /** Show on mobile navbar. Keep to 3 max to avoid overflow. */
-    mobileVisible?: boolean;
     /** Use mailto: prefix for email links */
     mailto?: boolean;
 }
@@ -29,19 +27,16 @@ export const socialLinks: SocialLink[] = [
         href: siteConfig.github,
         label: 'GitHub',
         icon: 'github',
-        mobileVisible: true,
     },
     {
         href: siteConfig.linkedin,
         label: 'LinkedIn',
         icon: 'linkedin',
-        mobileVisible: true,
     },
     {
         href: siteConfig.terraform,
         label: 'Terraform Registry',
         icon: 'terraform',
-        mobileVisible: true,
     },
     {
         href: siteConfig.keybase,
@@ -58,6 +53,5 @@ export const socialLinks: SocialLink[] = [
         href: siteConfig.securityNews,
         label: 'Security News',
         icon: 'shield',
-        mobileVisible: true,
     },
 ];

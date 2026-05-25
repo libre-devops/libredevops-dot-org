@@ -38,7 +38,7 @@ export function SocialLinks() {
                     href={link.mailto ? `mailto:${link.href}` : link.href}
                     {...(!link.mailto && { target: '_blank', rel: 'noopener noreferrer' })}
                     aria-label={link.label}
-                    className={`social-link${link.mobileVisible ? ' social-link--mobile' : ''}`}
+                    className="social-link"
                 >
                     {iconMap[link.icon]}
                 </a>
