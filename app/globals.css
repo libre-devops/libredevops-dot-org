@@ -627,16 +627,18 @@ a {
   border-radius: 999px;
 }
 
-/* Mobile: ensure the wrapper never breaks out of the page */
+/* Mobile: wrap long lines instead of scrolling */
 @media (max-width: 768px) {
   .cb-wrapper {
-    /* Prevent the block from stretching the page width */
     max-width: 100%;
     overflow: hidden;
   }
 
   .cb-pre {
     font-size: 0.8rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-x: hidden;
   }
 }
 
