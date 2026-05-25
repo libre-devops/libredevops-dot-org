@@ -13,17 +13,40 @@ interface Contributor {
     contributions: number;
 }
 
+function isSafeGitHubUrl(url: string): boolean {
+    try {
+        const { hostname } = new URL(url);
+        return hostname === 'avatars.githubusercontent.com' || hostname === 'github.com';
+    } catch {
+        return false;
+    }
+}
+
 async function getContributors(): Promise<Contributor[]> {
     try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+
         const res = await fetch(
             'https://api.github.com/repos/libre-devops/libredevops-dot-org/contributors',
             {
                 headers: { Accept: 'application/vnd.github+json' },
                 next: { revalidate: false },
+                signal: controller.signal,
             }
         );
+        clearTimeout(timeout);
+
         if (!res.ok) return [];
-        return res.json();
+
+        const data: Contributor[] = await res.json();
+        return data.filter(
+            (c) =>
+                typeof c.login === 'string' &&
+                typeof c.contributions === 'number' &&
+                isSafeGitHubUrl(c.avatar_url) &&
+                isSafeGitHubUrl(c.html_url)
+        );
     } catch {
         return [];
     }
