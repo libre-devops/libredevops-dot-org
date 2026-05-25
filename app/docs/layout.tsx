@@ -1,0 +1,35 @@
+import { Layout } from 'nextra-theme-docs'
+import { getPageMap } from 'nextra/page-map'
+
+import 'nextra-theme-docs/style.css'
+
+import { DocsChangeButton } from '@/components/docs-change-button'
+
+export default async function DocsLayout({
+    children
+}: {
+    children: React.ReactNode
+}) {
+    const pageMap = await getPageMap('/docs')
+    return (
+        <Layout
+            pageMap={pageMap}
+            docsRepositoryBase="https://github.com/libre-devops/libredevops-dot-org/tree/main"
+            footer={
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
+                    <span style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
+                        Libre DevOps
+                    </span>
+                    <DocsChangeButton />
+                </div>
+            }
+            nextThemes={{
+                attribute: 'class',
+                defaultTheme: 'dark',
+                disableTransitionOnChange: false
+            }}
+        >
+            {children}
+        </Layout>
+    )
+}
