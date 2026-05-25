@@ -529,6 +529,117 @@ a {
   color: var(--text-tertiary);
 }
 
+/* ── Code blocks ───────────────────────────────────────────────── */
+.cb-wrapper {
+  margin: 1.25rem 0;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  overflow: hidden;
+  box-shadow: var(--shadow-md);
+  background: #0d1117;
+}
+
+.cb-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.85rem;
+  background: #161b22;
+  border-bottom: 1px solid var(--border-color);
+  min-height: 36px;
+}
+
+.cb-dots {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.cb-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+}
+
+.cb-dot--red    { background: #ff5f57; }
+.cb-dot--yellow { background: #ffbd2e; }
+.cb-dot--green  { background: #28ca41; }
+
+.cb-lang {
+  flex: 1;
+  text-align: center;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  user-select: none;
+}
+
+.cb-copy {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 0.72rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.cb-copy:hover {
+  background: rgba(139, 92, 246, 0.12);
+  color: var(--brand-accent);
+  border-color: rgba(139, 92, 246, 0.35);
+}
+
+.cb-pre {
+  margin: 0 !important;
+  border-radius: 0 !important;
+  border: none !important;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 1rem 1.1rem !important;
+  font-size: 0.85rem;
+  line-height: 1.65;
+  background: #0d1117 !important;
+  /* Always show horizontal scrollbar track on mobile so users know it scrolls */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-color) transparent;
+}
+
+.cb-pre::-webkit-scrollbar {
+  height: 5px;
+}
+
+.cb-pre::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.cb-pre::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 999px;
+}
+
+/* Mobile: ensure the wrapper never breaks out of the page */
+@media (max-width: 768px) {
+  .cb-wrapper {
+    /* Prevent the block from stretching the page width */
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  .cb-pre {
+    font-size: 0.8rem;
+  }
+}
+
 /* ── Responsive ────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   /* Navbar: logo pinned left, right side scrolls horizontally.
