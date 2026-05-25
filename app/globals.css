@@ -100,7 +100,16 @@ a {
 .nav-right {
   display: flex;
   align-items: center;
+  min-width: 0;
+  flex: 1;
+}
+
+.nav-scroll {
+  display: flex;
+  align-items: center;
   gap: 0.4rem;
+  justify-content: flex-end;
+  width: 100%;
 }
 
 .nav-link {
@@ -539,19 +548,22 @@ a {
     display: none;
   }
 
-  /* Scrollable strip */
+  /* nav-right constrains width; nav-scroll is the actual scroll container */
   .nav-right {
-    flex: 1;
-    min-width: 0;
-    gap: 0.3rem;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-    flex-wrap: nowrap;
-    justify-content: flex-end;
+    overflow: hidden;
   }
 
-  .nav-right::-webkit-scrollbar {
+  .nav-scroll {
+    justify-content: flex-start;
+    flex-wrap: nowrap;
+    gap: 0.3rem;
+    overflow-x: auto;
+    overflow-y: visible;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .nav-scroll::-webkit-scrollbar {
     display: none;
   }
 

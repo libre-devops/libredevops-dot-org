@@ -20,11 +20,13 @@ export function Navbar() {
                 </Link>
 
                 <div className="nav-right">
-                    <Link href="/docs" className="nav-link">Docs</Link>
-                    <Link href="/projects" className="nav-link">Projects</Link>
-                    <Link href="/about" className="nav-link">About</Link>
-                    <SocialLinks />
-                    <ThemeToggle />
+                    <div className="nav-scroll">
+                        <Link href="/docs" className="nav-link">Docs</Link>
+                        <Link href="/projects" className="nav-link">Projects</Link>
+                        <Link href="/about" className="nav-link">About</Link>
+                        <SocialLinks />
+                        <ThemeToggle />
+                    </div>
                 </div>
             </nav>
         </header>
