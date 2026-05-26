@@ -642,6 +642,97 @@ a {
   }
 }
 
+/* ── Hero terminal ─────────────────────────────────────────────── */
+.hero-terminal {
+  margin-top: 2.5rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: #0d1117;
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.85rem;
+}
+
+.hero-terminal-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.85rem;
+  background: #161b22;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.hero-terminal-dots {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.hero-terminal-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.hero-terminal-dot--red    { background: #ff5f57; }
+.hero-terminal-dot--yellow { background: #ffbd2e; }
+.hero-terminal-dot--green  { background: #28ca41; }
+
+.hero-terminal-title {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+  user-select: none;
+  margin-left: 0.5rem;
+}
+
+.hero-terminal-body {
+  padding: 0.85rem 1rem;
+  min-height: 5.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.hero-terminal-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+}
+
+.hero-terminal-prompt {
+  color: #8b5cf6;
+  font-weight: 700;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.hero-terminal-cmd {
+  color: #f0f6fc;
+  word-break: break-all;
+}
+
+.hero-terminal-cursor {
+  display: inline-block;
+  width: 8px;
+  height: 1em;
+  background: #8b5cf6;
+  vertical-align: text-bottom;
+  margin-left: 2px;
+  border-radius: 1px;
+}
+
+.hero-terminal-output {
+  color: #7d8590;
+  font-size: 0.8rem;
+  padding-left: 1.4rem;
+  line-height: 1.6;
+}
+
 /* ── Responsive ────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   /* Navbar: logo pinned left, right side scrolls horizontally.

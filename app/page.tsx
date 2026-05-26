@@ -1,4 +1,5 @@
 import { HeroLogo } from '@/components/hero-logo';
+import { Terminal } from '@/components/terminal';
 
 export default function HomePage() {
     return (
@@ -26,6 +27,7 @@ export default function HomePage() {
                             Security News
                         </a>
                     </div>
+                    <Terminal />
                 </div>
             </section>
         </main>
