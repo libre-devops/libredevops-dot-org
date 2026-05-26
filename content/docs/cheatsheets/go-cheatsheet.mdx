@@ -189,6 +189,76 @@ m   := make(map[string]int) // initialised map (nil map panics on write)
 
 ---
 
+## Pointers
+
+```go
+// & takes the address of a value; * dereferences it
+x := 42
+p := &x      // p is *int — holds the memory address of x
+*p = 99      // write through the pointer
+fmt.Println(x)  // 99
+
+// Pointer to a struct — fields accessed with . (auto-deref)
+type Point struct{ X, Y int }
+pt := &Point{X: 1, Y: 2}
+pt.X = 10    // equivalent to (*pt).X = 10
+
+// new allocates a zeroed value and returns a pointer
+p2 := new(int)   // *int pointing to 0
+*p2 = 7
+
+// nil pointer — always check before dereferencing
+var p3 *int
+if p3 != nil {
+    fmt.Println(*p3)
+}
+
+// Pointer receivers — mutate the receiver in place
+type Counter struct{ n int }
+
+func (c *Counter) Inc()   { c.n++ }
+func (c Counter) Value() int { return c.n }  // value receiver — read-only copy
+
+c := Counter{}
+c.Inc()
+c.Inc()
+fmt.Println(c.Value())  // 2
+
+// Use a pointer receiver when:
+//   1. the method mutates the receiver
+//   2. the struct is large (avoids copying)
+//   3. consistency — if any method has a pointer receiver, prefer all do
+
+// Passing pointers to functions — avoids copying, enables mutation
+func double(n *int) { *n *= 2 }
+
+v := 5
+double(&v)
+fmt.Println(v)  // 10
+
+// Returning a pointer — safe; Go heap-allocates when the address escapes
+func newUser(name string) *User {
+    return &User{Name: name}   // NOT dangling — compiler handles escape analysis
+}
+
+// Slices and maps are already reference types — do NOT pass *[]T or *map[K]V
+// unless you need to replace the slice/map itself (e.g. append that grows it)
+nums := []int{1, 2, 3}
+addFour(&nums)           // only needed if addFour does nums = append(nums, 4)
+
+func addFour(s *[]int) { *s = append(*s, 4) }
+
+// Pointer comparison — two pointers are equal only if they point to the same address
+a, b := 1, 1
+pa, pb := &a, &b
+fmt.Println(pa == pb)   // false (different variables)
+fmt.Println(pa == &a)   // true
+
+// unsafe.Pointer — only for interop with C or low-level tricks; avoid in normal code
+```
+
+---
+
 ## Functions
 
 ```go
