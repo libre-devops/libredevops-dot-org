@@ -14,8 +14,8 @@ TypeScript setup, language fundamentals, and Next.js App Router patterns. Target
 ### nvm — Node Version Manager
 
 ```bash
-# Install nvm (Linux/macOS)
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+# Install nvm (Linux/macOS) — always fetches the latest release
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/$(curl -s https://api.github.com/repos/nvm-sh/nvm/releases/latest | grep '"tag_name"' | cut -d'"' -f4)/install.sh | bash
 source ~/.bashrc
 
 # Install and use a Node version
@@ -30,9 +30,10 @@ nvm ls
 echo "22" > .nvmrc
 nvm use          # reads .nvmrc automatically
 
-# Install nvm on Windows (nvm-windows)
-# winget install CoreyButler.NVMforWindows
-# nvm install 22 && nvm use 22
+# Install nvm on Windows (nvm-windows) — always fetches the latest release
+$nvmVersion = (Invoke-RestMethod https://api.github.com/repos/coreybutler/nvm-windows/releases/latest).tag_name
+winget install --id CoreyButler.NVMforWindows --version $nvmVersion
+nvm install 22 && nvm use 22
 ```
 
 ### Project bootstrap

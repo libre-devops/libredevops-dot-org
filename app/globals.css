@@ -632,6 +632,53 @@ a {
   border-radius: 999px;
 }
 
+/* ── Print / Export PDF ────────────────────────────────────────── */
+@media print {
+  /* Hide chrome that has no place in a printed doc */
+  .site-header,
+  .print-btn-wrapper {
+    display: none !important;
+  }
+
+  /* Reset page background */
+  html, body {
+    background: #fff !important;
+    color: #111 !important;
+  }
+
+  /* Code blocks: white background, visible border, no shadow */
+  .cb-wrapper {
+    border: 1px solid #ccc !important;
+    box-shadow: none !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .cb-header {
+    background: #f6f8fa !important;
+    border-bottom-color: #ccc !important;
+  }
+
+  .cb-pre {
+    background: #fff !important;
+    color: #111 !important;
+    white-space: pre-wrap !important;
+    word-break: break-word !important;
+    overflow: visible !important;
+  }
+
+  /* Shiki token colors are too dark on white; reset to near-black */
+  .cb-pre span {
+    color: #111 !important;
+  }
+
+  /* Avoid page break immediately after a heading */
+  h1, h2, h3, h4 {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+}
+
 /* Mobile: wrap long lines instead of scrolling */
 @media (max-width: 768px) {
   .cb-wrapper {

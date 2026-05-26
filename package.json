@@ -6,7 +6,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "next dev",
+    "dev": "NODE_OPTIONS=--max-old-space-size=8192 next dev",
     "build": "next build",
     "lint": "next lint",
     "postinstall": "patch-package"

@@ -4,6 +4,7 @@ import { getPageMap } from 'nextra/page-map'
 import 'nextra-theme-docs/style.css'
 
 import { DocsChangeButton } from '@/components/docs-change-button'
+import { PrintButton } from '@/components/print-button'
 
 export default async function DocsLayout({
     children
@@ -20,7 +21,10 @@ export default async function DocsLayout({
                     <span style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
                         Libre DevOps
                     </span>
-                    <DocsChangeButton />
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                        <PrintButton />
+                        <DocsChangeButton />
+                    </div>
                 </div>
             }
             nextThemes={{
