@@ -13,7 +13,7 @@ A practical reference covering day-to-day Git usage, config templates, and bulk 
 
 ### Linux / WSL `.gitconfig`
 
-Place this at `~/.gitconfig`. The credential helper paths assume `gh` CLI is installed at `/usr/bin/gh` — adjust if your install location differs.
+Place this at `~/.gitconfig`. The credential helper paths assume `gh` CLI is installed at `/usr/bin/gh` - adjust if your install location differs.
 
 ```ini
 [alias]
@@ -51,7 +51,7 @@ Place this at `~/.gitconfig`. The credential helper paths assume `gh` CLI is ins
 
 ### Windows `.gitconfig`
 
-Place this at `%USERPROFILE%\.gitconfig`. The `gh.exe` path assumes Scoop — adjust to your package manager.
+Place this at `%USERPROFILE%\.gitconfig`. The `gh.exe` path assumes Scoop - adjust to your package manager.
 
 ```ini
 [alias]
@@ -172,7 +172,7 @@ git fetch origin                    # download without merging
 git fetch --all                     # fetch all remotes
 git pull origin main
 git push origin main
-git push --force-with-lease         # safer force push — fails if remote has moved
+git push --force-with-lease         # safer force push - fails if remote has moved
 ```
 
 ---
@@ -322,7 +322,7 @@ terraform.rc
 
 ### Clone all repos in a GitHub org
 
-Uses the `gh` CLI — run `gh auth login` first.
+Uses the `gh` CLI - run `gh auth login` first.
 
 ```bash
 #!/usr/bin/env bash
@@ -375,7 +375,7 @@ foreach ($Repo in $Repos) {
 
 ### Reset git history to a single initial commit
 
-Rewrites the entire branch history to a single commit. Useful for sanitising a repo before making it public. **This is destructive and rewrites remote history** — only use it on repos where you control all forks or there are none.
+Rewrites the entire branch history to a single commit. Useful for sanitising a repo before making it public. **This is destructive and rewrites remote history** - only use it on repos where you control all forks or there are none.
 
 ```bash
 git checkout --orphan temp_branch \

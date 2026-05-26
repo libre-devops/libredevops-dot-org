@@ -1,6 +1,6 @@
 ---
 title: AWS Cheatsheet
-description: Comprehensive AWS reference — CLI mastery, IAM, S3, EC2, VPC, Lambda, EKS, RDS, Secrets Manager, CloudWatch, CloudFormation, and CDK.
+description: Comprehensive AWS reference - CLI mastery, IAM, S3, EC2, VPC, Lambda, EKS, RDS, Secrets Manager, CloudWatch, CloudFormation, and CDK.
 ---
 
 # AWS Cheat Sheet
@@ -61,7 +61,7 @@ aws configure sso
 # sso_role_name  = AdministratorAccess
 # region         = eu-west-2
 
-# Log in — opens browser, caches token for 8 hours
+# Log in - opens browser, caches token for 8 hours
 aws sso login --profile my-sso
 
 # Log out
@@ -125,7 +125,7 @@ aws sts get-caller-identity
 
 ## CLI Essentials
 
-### `--query` — JMESPath filtering
+### `--query` - JMESPath filtering
 
 ```bash
 # Extract specific fields from a list
@@ -133,7 +133,7 @@ aws ec2 describe-instances \
   --query 'Reservations[*].Instances[*].[InstanceId,State.Name,PrivateIpAddress,Tags[?Key==`Name`].Value|[0]]' \
   --output table
 
-# Single scalar value — use --output text to strip quotes
+# Single scalar value - use --output text to strip quotes
 aws ssm get-parameter \
   --name /myapp/prod/db-url \
   --with-decryption \
@@ -159,7 +159,7 @@ aws s3api get-bucket-tagging --bucket my-bucket \
 ### Output formats
 
 ```bash
---output json     # default — machine-readable
+--output json     # default - machine-readable
 --output table    # human-readable aligned table
 --output text     # tab-delimited, good for scripting
 --output yaml     # YAML (v2 only)
@@ -178,7 +178,7 @@ AWS CLI v2 auto-paginates. Override with:
 aws s3api list-objects-v2 --bucket my-bucket --max-keys 100 --starting-token <token>
 ```
 
-### Wait — block until a condition is met
+### Wait - block until a condition is met
 
 ```bash
 aws ec2 wait instance-running   --instance-ids i-1234567890abcdef0
@@ -198,7 +198,7 @@ aws elbv2 wait load-balancer-available --load-balancer-arns arn:aws:elasticloadb
 ### Useful global patterns
 
 ```bash
-# Dry run (EC2 supports this natively — checks permissions without acting)
+# Dry run (EC2 supports this natively - checks permissions without acting)
 aws ec2 run-instances ... --dry-run
 
 # Debug mode
@@ -222,7 +222,7 @@ aws resourcegroupstaggingapi get-resources \
 
 ## IAM
 
-### Policies — view and manage
+### Policies - view and manage
 
 ```bash
 aws iam list-policies --scope Local --output table   # custom policies only
@@ -321,7 +321,7 @@ aws iam list-attached-role-policies --role-name MyRole
 aws iam list-role-policies --role-name MyRole   # inline
 ```
 
-### Trust policies — who can assume the role
+### Trust policies - who can assume the role
 
 #### EC2 instance profile
 
@@ -365,7 +365,7 @@ aws iam list-role-policies --role-name MyRole   # inline
 }
 ```
 
-#### GitHub Actions — OIDC federated identity (no long-lived secrets)
+#### GitHub Actions - OIDC federated identity (no long-lived secrets)
 
 ```bash
 # 1. Create the OIDC provider (once per account)
@@ -421,7 +421,7 @@ jobs:
 
 ### Permission boundaries
 
-Limits the maximum effective permissions of an identity — useful for delegating IAM management without granting privilege escalation:
+Limits the maximum effective permissions of an identity - useful for delegating IAM management without granting privilege escalation:
 
 ```bash
 aws iam put-role-permissions-boundary \
@@ -473,7 +473,7 @@ aws s3 rm s3://my-bucket/file.txt
 aws s3 rm s3://my-bucket/prefix/ --recursive
 ```
 
-### Bucket API (`s3api`) — fine-grained control
+### Bucket API (`s3api`) - fine-grained control
 
 ```bash
 # Versioning
@@ -487,7 +487,7 @@ aws s3api list-object-versions --bucket my-bucket --prefix path/to/file.txt
 # Get a specific version
 aws s3api get-object --bucket my-bucket --key file.txt --version-id "VERSION_ID" output.txt
 
-# Server-side encryption — enforce AES-256
+# Server-side encryption - enforce AES-256
 aws s3api put-bucket-encryption --bucket my-bucket --server-side-encryption-configuration '{
   "Rules": [{
     "ApplyServerSideEncryptionByDefault": { "SSEAlgorithm": "AES256" },
@@ -505,7 +505,7 @@ aws s3api get-bucket-policy --bucket my-bucket
 aws s3api delete-bucket-policy --bucket my-bucket
 ```
 
-### Bucket policy — enforce TLS only
+### Bucket policy - enforce TLS only
 
 ```json
 {
@@ -529,13 +529,13 @@ aws s3api delete-bucket-policy --bucket my-bucket
 ### Presigned URLs
 
 ```bash
-# Read — share an object for 1 hour without making it public
+# Read - share an object for 1 hour without making it public
 aws s3 presign s3://my-bucket/my-file.zip --expires-in 3600
 # Note: aws s3 presign only generates GET URLs; presigned PUT URLs require the SDK
 # (e.g. boto3: s3.generate_presigned_url('put_object', Params={...}, ExpiresIn=900))
 ```
 
-### S3 Select — query object contents with SQL
+### S3 Select - query object contents with SQL
 
 ```bash
 aws s3api select-object-content \
@@ -909,7 +909,7 @@ aws eks create-fargate-profile \
   --pod-execution-role-arn arn:aws:iam::123456789012:role/FargatePodRole \
   --selectors 'namespace=kube-system' 'namespace=default'
 
-# Access entries (EKS RBAC for IAM — replaces aws-auth ConfigMap)
+# Access entries (EKS RBAC for IAM - replaces aws-auth ConfigMap)
 aws eks create-access-entry \
   --cluster-name my-cluster \
   --principal-arn arn:aws:iam::123456789012:role/DevRole \
@@ -958,7 +958,7 @@ aws ecr list-images --repository-name my-app \
   --query 'imageIds[*]' \
   | xargs -I{} aws ecr batch-delete-image --repository-name my-app --image-ids {}
 
-# Lifecycle policy — keep last 10 tagged images
+# Lifecycle policy - keep last 10 tagged images
 aws ecr put-lifecycle-policy \
   --repository-name my-app \
   --lifecycle-policy-text '{
@@ -1231,7 +1231,7 @@ aws cloudformation describe-stacks \
   --query 'Stacks[0].Outputs[*].[OutputKey,OutputValue]' \
   --output table
 
-# Change sets — preview before applying
+# Change sets - preview before applying
 aws cloudformation create-change-set \
   --stack-name my-stack \
   --change-set-name my-change-$(date +%s) \
@@ -1267,7 +1267,7 @@ aws cloudformation wait stack-delete-complete --stack-name my-stack
 # Install CDK globally
 npm install -g aws-cdk
 
-# Bootstrap — provision CDK assets bucket and roles in account/region (once per account/region pair)
+# Bootstrap - provision CDK assets bucket and roles in account/region (once per account/region pair)
 cdk bootstrap aws://123456789012/eu-west-2
 cdk bootstrap --profile prod aws://123456789012/eu-west-2
 
@@ -1276,7 +1276,7 @@ cdk synth
 cdk synth --profile prod
 cdk synth MyStack > template.yaml
 
-# Diff — show what would change
+# Diff - show what would change
 cdk diff
 cdk diff MyStack
 
@@ -1295,10 +1295,10 @@ cdk destroy --all --force
 cdk list
 cdk list --long
 
-# Hotswap (fast deploy for Lambda/ECS — skips CloudFormation for supported changes)
+# Hotswap (fast deploy for Lambda/ECS - skips CloudFormation for supported changes)
 cdk deploy --hotswap
 
-# Watch mode — auto-deploy on file change
+# Watch mode - auto-deploy on file change
 cdk watch
 ```
 
@@ -1437,7 +1437,7 @@ assume_role() {
   "$@"
 }
 
-# Usage — run any command as a different role
+# Usage - run any command as a different role
 assume_role arn:aws:iam::123456789012:role/ReadOnlyRole \
   aws s3 ls s3://prod-bucket/
 ```

@@ -11,10 +11,10 @@ TypeScript setup, language fundamentals, and Next.js App Router patterns. Target
 
 ## Tooling & Setup
 
-### nvm — Node Version Manager
+### nvm - Node Version Manager
 
 ```bash
-# Install nvm (Linux/macOS) — always fetches the latest release
+# Install nvm (Linux/macOS) - always fetches the latest release
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/$(curl -s https://api.github.com/repos/nvm-sh/nvm/releases/latest | grep '"tag_name"' | cut -d'"' -f4)/install.sh | bash
 source ~/.bashrc
 
@@ -30,7 +30,7 @@ nvm ls
 echo "22" > .nvmrc
 nvm use          # reads .nvmrc automatically
 
-# Install nvm on Windows (nvm-windows) — always fetches the latest release
+# Install nvm on Windows (nvm-windows) - always fetches the latest release
 $nvmVersion = (Invoke-RestMethod https://api.github.com/repos/coreybutler/nvm-windows/releases/latest).tag_name
 winget install --id CoreyButler.NVMforWindows --version $nvmVersion
 nvm install 22 && nvm use 22
@@ -59,7 +59,7 @@ npx tsc --noEmit
 npx tsc --watch
 ```
 
-### tsconfig.json — recommended base
+### tsconfig.json - recommended base
 
 ```json
 {
@@ -186,7 +186,7 @@ type Env = Record<string, string | undefined>
 ### Unknown, never, any
 
 ```typescript
-// unknown — safe alternative to any; must narrow before use
+// unknown - safe alternative to any; must narrow before use
 function parse(raw: unknown): User {
   if (typeof raw !== 'object' || raw === null) throw new Error('Not an object')
   const obj = raw as Record<string, unknown>
@@ -194,7 +194,7 @@ function parse(raw: unknown): User {
   return raw as User
 }
 
-// never — exhaustive checks
+// never - exhaustive checks
 type Shape = { kind: 'circle'; r: number } | { kind: 'rect'; w: number; h: number }
 
 function area(s: Shape): number {
@@ -382,7 +382,7 @@ class Config implements Serializable {
 ## Enums & Discriminated Unions
 
 ```typescript
-// Const enum (inlined at compile time — no runtime object)
+// Const enum (inlined at compile time - no runtime object)
 const enum Direction {
   Up    = 'UP',
   Down  = 'DOWN',
@@ -412,7 +412,7 @@ function render<T>(state: AsyncState<T>): string {
 ## Async & Error Handling
 
 ```typescript
-// Result type — avoids throwing across boundaries
+// Result type - avoids throwing across boundaries
 type Result<T, E = Error> =
   | { ok: true;  value: T }
   | { ok: false; error: E }
@@ -495,12 +495,12 @@ declare module 'express' {
 
 ---
 
-## Next.js — App Router
+## Next.js - App Router
 
 ### Layouts and pages
 
 ```typescript
-// app/layout.tsx — root layout (server component)
+// app/layout.tsx - root layout (server component)
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
@@ -518,7 +518,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 ```
 
 ```typescript
-// app/users/[id]/page.tsx — dynamic page (server component)
+// app/users/[id]/page.tsx - dynamic page (server component)
 import { notFound } from 'next/navigation'
 
 interface Props {
@@ -577,7 +577,7 @@ export async function createUser(
 ```
 
 ```typescript
-// app/users/create/page.tsx — form using useFormState
+// app/users/create/page.tsx - form using useFormState
 'use client'
 
 import { useFormState, useFormStatus } from 'react-dom'
@@ -667,7 +667,7 @@ export const config = {
 ### Data fetching patterns
 
 ```typescript
-// Server component — fetch with cache control
+// Server component - fetch with cache control
 async function getPosts(): Promise<Post[]> {
   const res = await fetch('https://api.example.com/posts', {
     next: { revalidate: 60 },   // ISR: revalidate every 60s
@@ -678,7 +678,7 @@ async function getPosts(): Promise<Post[]> {
   return res.json()
 }
 
-// Client component — SWR
+// Client component - SWR
 'use client'
 import useSWR from 'swr'
 
@@ -697,7 +697,7 @@ export function PostList() {
 ## Environment Variables
 
 ```typescript
-// next.config.ts — validate at build time
+// next.config.ts - validate at build time
 import { z } from 'zod'
 
 const envSchema = z.object({

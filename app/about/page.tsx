@@ -3,7 +3,7 @@ import Image from 'next/image';
 
 export const metadata: Metadata = {
     title: 'About – Libre DevOps',
-    description: 'About Libre DevOps — platform engineering, DevOps, and security engineering in the open.',
+    description: 'About Libre DevOps - platform engineering, DevOps, and security engineering in the open.',
 };
 
 interface Contributor {
@@ -79,7 +79,7 @@ export default async function AboutPage() {
 
                         <p>
                             The work here spans Terraform modules, Azure platform patterns, CI/CD
-                            automation, container builds, and security tooling — most of it
+                            automation, container builds, and security tooling - most of it
                             published under open-source licenses and available on{' '}
                             <a
                                 href="https://github.com/libre-devops"
@@ -103,15 +103,15 @@ export default async function AboutPage() {
 
                         <ul className="content-list">
                             <li>
-                                <strong>Docs &amp; cheatsheets</strong> — reference material for
+                                <strong>Docs &amp; cheatsheets</strong> - reference material for
                                 Terraform, Azure, Linux, PowerShell, containers, and more.
                             </li>
                             <li>
-                                <strong>Projects</strong> — open-source tools and modules built
+                                <strong>Projects</strong> - open-source tools and modules built
                                 for real-world platform and infrastructure use cases.
                             </li>
                             <li>
-                                <strong>Security news</strong> — a separate feed at{' '}
+                                <strong>Security news</strong> - a separate feed at{' '}
                                 <a
                                     href="https://security.libredevops.org"
                                     target="_blank"
@@ -156,7 +156,7 @@ export default async function AboutPage() {
                                         target="_blank"
                                         rel="noopener noreferrer"
                                         className="contributor-card"
-                                        title={`${c.login} — ${c.contributions} commit${c.contributions !== 1 ? 's' : ''}`}
+                                        title={`${c.login} - ${c.contributions} commit${c.contributions !== 1 ? 's' : ''}`}
                                     >
                                         <Image
                                             src={c.avatar_url}

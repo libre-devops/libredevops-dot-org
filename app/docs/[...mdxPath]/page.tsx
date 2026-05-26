@@ -10,7 +10,7 @@ type PageMapItem = {
 function collectSegments(items: PageMapItem[], out: string[][] = []): string[][] {
     for (const item of items) {
         if (item.route) {
-            // Strip /docs/ prefix — params are relative to the catch-all base
+            // Strip /docs/ prefix - params are relative to the catch-all base
             const rel = item.route.replace(/^\/docs\/?/, '').split('/').filter(Boolean)
             if (rel.length > 0) out.push(rel)
         }

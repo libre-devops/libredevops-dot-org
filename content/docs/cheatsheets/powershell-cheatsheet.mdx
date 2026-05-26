@@ -74,7 +74,7 @@ $name    = 'World'
 $count   = 42
 $pi      = 3.14159
 
-# f-string style (PowerShell 7+, not real f-strings — just expression interpolation)
+# f-string style (PowerShell 7+, not real f-strings - just expression interpolation)
 "Hello, $name! Count: $count"
 "Pi is $($pi.ToString('F2'))"
 
@@ -458,7 +458,7 @@ function Get-AllPages {
 ### Invoke-AzRestMethod (Azure Resource Manager)
 
 ```powershell
-# Direct ARM call — useful for preview APIs or operations without cmdlets
+# Direct ARM call - useful for preview APIs or operations without cmdlets
 function Invoke-ArmApi {
     param (
         [string]$Method = 'GET',
@@ -633,13 +633,13 @@ Get-AzResource | Where-Object { -not $_.Tags.ContainsKey('Environment') } |
 $secretValue = ConvertTo-SecureString 'my-super-secret' -AsPlainText -Force
 Set-AzKeyVaultSecret -VaultName 'kv-myapp-prod' -Name 'db-password' -SecretValue $secretValue
 
-# Get secret (as plain text — only in memory)
+# Get secret (as plain text - only in memory)
 $secret = (Get-AzKeyVaultSecret -VaultName 'kv-myapp-prod' -Name 'db-password' -AsPlainText)
 
 # List secrets
 Get-AzKeyVaultSecret -VaultName 'kv-myapp-prod' | Select-Object Name, Enabled, Expires
 
-# Rotate — create new version
+# Rotate - create new version
 $newVal = ConvertTo-SecureString (New-Guid).Guid -AsPlainText -Force
 Set-AzKeyVaultSecret -VaultName 'kv-myapp-prod' -Name 'api-key' -SecretValue $newVal
 
@@ -677,7 +677,7 @@ Remove-AzRoleAssignment `
 ```powershell
 function Register-AzProviderWithWait {
     param ([Parameter(Mandatory)][string]$ProviderNamespace)
-    # Get-AzResourceProvider returns one object per resource type — use [0] for a scalar state
+    # Get-AzResourceProvider returns one object per resource type - use [0] for a scalar state
     $state = (Get-AzResourceProvider -ProviderNamespace $ProviderNamespace)[0].RegistrationState
     if ($state -eq 'Registered') {
         Write-Verbose "$ProviderNamespace already registered."
@@ -739,7 +739,7 @@ $sp = New-AzADServicePrincipal -ApplicationId $app.AppId
 
 # Add client secret (auto-generated)
 $cred = New-AzADAppCredential -ApplicationId $app.AppId -EndDate (Get-Date).AddYears(1)
-# $cred.SecretText contains the secret — capture immediately, not retrievable again
+# $cred.SecretText contains the secret - capture immediately, not retrievable again
 
 # Add federated credential (for GitHub Actions OIDC)
 $fedCred = @{
@@ -863,7 +863,7 @@ foreach ($rg in $items) {
     $i++
     Write-Progress `
         -Activity        'Auditing resource groups' `
-        -Status          "$i of $total — $($rg.ResourceGroupName)" `
+        -Status          "$i of $total - $($rg.ResourceGroupName)" `
         -PercentComplete (($i / $total) * 100)
 
     # ... do work ...
@@ -959,7 +959,7 @@ if ($inPipeline) {
 ```powershell
 $ErrorActionPreference = 'Stop'
 
-# Native commands — check $LASTEXITCODE
+# Native commands - check $LASTEXITCODE
 function Invoke-Native {
     param ([scriptblock]$Command)
     & $Command

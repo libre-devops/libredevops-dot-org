@@ -13,7 +13,7 @@ Practical snippets for writing robust shell scripts and maintaining a productive
 
 ### Strict mode
 
-Always start scripts with this. `set -e` exits on error, `set -u` treats unset variables as errors, `set -o pipefail` propagates failures through pipelines, and `set -x` prints each command before running it (useful for debugging — remove for production).
+Always start scripts with this. `set -e` exits on error, `set -u` treats unset variables as errors, `set -o pipefail` propagates failures through pipelines, and `set -x` prints each command before running it (useful for debugging - remove for production).
 
 ```bash
 #!/usr/bin/env bash
@@ -176,7 +176,7 @@ function tfrel() {
     elif [ -f main.tf ]; then
         build_file="main.tf"
     else
-        print_alert "Not a build directory — no build.tf or main.tf found"
+        print_alert "Not a build directory - no build.tf or main.tf found"
         return 1
     fi
 

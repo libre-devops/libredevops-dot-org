@@ -14,7 +14,7 @@ Go toolchain, language patterns, and standard library. Targets Go 1.22+ and C# d
 ### Installation
 
 ```bash
-# Linux — fetch latest from go.dev
+# Linux - fetch latest from go.dev
 GO_VERSION=$(curl -s https://go.dev/VERSION?m=text | head -1)
 wget "https://go.dev/dl/${GO_VERSION}.linux-amd64.tar.gz"
 sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf "${GO_VERSION}.linux-amd64.tar.gz"
@@ -30,7 +30,7 @@ go version
 go env GOPATH GOROOT
 ```
 
-### goenv — Go Version Manager
+### goenv - Go Version Manager
 
 ```bash
 # Install goenv (Linux/macOS)
@@ -57,7 +57,7 @@ goenv version           # show active version
 # List installed versions
 goenv versions
 
-# Install goenv on Windows (g — simpler alternative)
+# Install goenv on Windows (g - simpler alternative)
 # PowerShell (run as Admin):
 winget install GoLang.Go   # baseline install
 # then use 'g' for switching: https://github.com/stefanmaric/g
@@ -86,7 +86,7 @@ go install golang.org/x/vuln/cmd/govulncheck@latest
 govulncheck ./...
 ```
 
-### go.mod — key directives
+### go.mod - key directives
 
 ```go
 module github.com/org/myapp
@@ -152,7 +152,7 @@ const (
     StatusNotFound = 404
 )
 
-// iota — auto-incrementing constant
+// iota - auto-incrementing constant
 type Direction int
 const (
     North Direction = iota  // 0
@@ -172,7 +172,7 @@ var (
     by  byte    = 0xFF         // alias for uint8
 )
 
-// Type conversion (always explicit — no implicit casting)
+// Type conversion (always explicit - no implicit casting)
 f := float64(i64)
 u := uint(f)
 
@@ -194,11 +194,11 @@ m   := make(map[string]int) // initialised map (nil map panics on write)
 ```go
 // & takes the address of a value; * dereferences it
 x := 42
-p := &x      // p is *int — holds the memory address of x
+p := &x      // p is *int - holds the memory address of x
 *p = 99      // write through the pointer
 fmt.Println(x)  // 99
 
-// Pointer to a struct — fields accessed with . (auto-deref)
+// Pointer to a struct - fields accessed with . (auto-deref)
 type Point struct{ X, Y int }
 pt := &Point{X: 1, Y: 2}
 pt.X = 10    // equivalent to (*pt).X = 10
@@ -207,17 +207,17 @@ pt.X = 10    // equivalent to (*pt).X = 10
 p2 := new(int)   // *int pointing to 0
 *p2 = 7
 
-// nil pointer — always check before dereferencing
+// nil pointer - always check before dereferencing
 var p3 *int
 if p3 != nil {
     fmt.Println(*p3)
 }
 
-// Pointer receivers — mutate the receiver in place
+// Pointer receivers - mutate the receiver in place
 type Counter struct{ n int }
 
 func (c *Counter) Inc()   { c.n++ }
-func (c Counter) Value() int { return c.n }  // value receiver — read-only copy
+func (c Counter) Value() int { return c.n }  // value receiver - read-only copy
 
 c := Counter{}
 c.Inc()
@@ -227,34 +227,34 @@ fmt.Println(c.Value())  // 2
 // Use a pointer receiver when:
 //   1. the method mutates the receiver
 //   2. the struct is large (avoids copying)
-//   3. consistency — if any method has a pointer receiver, prefer all do
+//   3. consistency - if any method has a pointer receiver, prefer all do
 
-// Passing pointers to functions — avoids copying, enables mutation
+// Passing pointers to functions - avoids copying, enables mutation
 func double(n *int) { *n *= 2 }
 
 v := 5
 double(&v)
 fmt.Println(v)  // 10
 
-// Returning a pointer — safe; Go heap-allocates when the address escapes
+// Returning a pointer - safe; Go heap-allocates when the address escapes
 func newUser(name string) *User {
-    return &User{Name: name}   // NOT dangling — compiler handles escape analysis
+    return &User{Name: name}   // NOT dangling - compiler handles escape analysis
 }
 
-// Slices and maps are already reference types — do NOT pass *[]T or *map[K]V
+// Slices and maps are already reference types - do NOT pass *[]T or *map[K]V
 // unless you need to replace the slice/map itself (e.g. append that grows it)
 nums := []int{1, 2, 3}
 addFour(&nums)           // only needed if addFour does nums = append(nums, 4)
 
 func addFour(s *[]int) { *s = append(*s, 4) }
 
-// Pointer comparison — two pointers are equal only if they point to the same address
+// Pointer comparison - two pointers are equal only if they point to the same address
 a, b := 1, 1
 pa, pb := &a, &b
 fmt.Println(pa == pb)   // false (different variables)
 fmt.Println(pa == &a)   // true
 
-// unsafe.Pointer — only for interop with C or low-level tricks; avoid in normal code
+// unsafe.Pointer - only for interop with C or low-level tricks; avoid in normal code
 ```
 
 ---
@@ -299,7 +299,7 @@ func Multiplier(factor int) func(int) int {
 double := Multiplier(2)
 fmt.Println(double(5))  // 10
 
-// defer — runs LIFO when function returns (including panic)
+// defer - runs LIFO when function returns (including panic)
 func ReadFile(path string) error {
     f, err := os.Open(path)
     if err != nil { return err }
@@ -320,7 +320,7 @@ type User struct {
     Name      string
     Email     string
     CreatedAt time.Time
-    role      string    // unexported — package-private
+    role      string    // unexported - package-private
 }
 
 // Constructor (New* convention)
@@ -334,15 +334,15 @@ func NewUser(name, email string) *User {
     }
 }
 
-// Value receiver — read-only, receives a copy
+// Value receiver - read-only, receives a copy
 func (u User) String() string {
     return fmt.Sprintf("%s <%s>", u.Name, u.Email)
 }
 
-// Pointer receiver — can mutate, avoids copying large structs
+// Pointer receiver - can mutate, avoids copying large structs
 func (u *User) Promote() { u.role = "admin" }
 
-// Embedding — composition over inheritance
+// Embedding - composition over inheritance
 type Admin struct {
     User                  // all User fields and methods promoted
     Permissions []string
@@ -377,7 +377,7 @@ type Repository[T any] interface {
     List(ctx context.Context) ([]T, error)
 }
 
-// Compile-time satisfaction check — catches drift at build time
+// Compile-time satisfaction check - catches drift at build time
 var _ Repository[User] = (*userRepository)(nil)
 
 // Implementation
@@ -411,7 +411,7 @@ default:     fmt.Printf("unknown: %T\n", t)
 ## Error Handling
 
 ```go
-// Wrapping — preserves the original error for errors.Is / errors.As
+// Wrapping - preserves the original error for errors.Is / errors.As
 func GetUser(ctx context.Context, id string) (User, error) {
     u, err := db.FindByID(ctx, id)
     if err != nil {
@@ -420,7 +420,7 @@ func GetUser(ctx context.Context, id string) (User, error) {
     return u, nil
 }
 
-// errors.Is — sentinel comparison through the chain
+// errors.Is - sentinel comparison through the chain
 if errors.Is(err, sql.ErrNoRows) { /* not found */ }
 
 // Custom error type
@@ -432,7 +432,7 @@ func (e *NotFoundError) Error() string {
     return fmt.Sprintf("%s %q not found", e.Resource, e.ID)
 }
 
-// errors.As — unwrap to concrete type
+// errors.As - unwrap to concrete type
 var nfe *NotFoundError
 if errors.As(err, &nfe) {
     fmt.Printf("missing: %s/%s\n", nfe.Resource, nfe.ID)
@@ -561,8 +561,8 @@ go func() {
 }()
 
 // Channels
-ch  := make(chan int)     // unbuffered — send blocks until received
-buf := make(chan int, 10) // buffered  — send blocks only when full
+ch  := make(chan int)     // unbuffered - send blocks until received
+buf := make(chan int, 10) // buffered  - send blocks only when full
 
 go func() { ch <- 42 }()
 v := <-ch
@@ -582,7 +582,7 @@ for _, url := range urls {
 }
 wg.Wait()
 
-// errgroup (golang.org/x/sync) — WaitGroup with error propagation
+// errgroup (golang.org/x/sync) - WaitGroup with error propagation
 g, ctx := errgroup.WithContext(ctx)
 for _, url := range urls {
     url := url
@@ -590,7 +590,7 @@ for _, url := range urls {
 }
 if err := g.Wait(); err != nil { log.Fatal(err) }
 
-// Select — multiplex channels
+// Select - multiplex channels
 select {
 case msg := <-ch1:
     fmt.Println("ch1:", msg)
@@ -635,17 +635,17 @@ func WorkerPool[T, R any](ctx context.Context, jobs []T, workers int, fn func(T)
 ## sync Package
 
 ```go
-// Mutex — exclusive lock
+// Mutex - exclusive lock
 var mu sync.Mutex
 mu.Lock()
 defer mu.Unlock()
 
-// RWMutex — multiple concurrent readers, one writer
+// RWMutex - multiple concurrent readers, one writer
 var rw sync.RWMutex
 rw.RLock(); defer rw.RUnlock()   // read path
 rw.Lock();  defer rw.Unlock()    // write path
 
-// Once — run exactly once regardless of concurrent callers
+// Once - run exactly once regardless of concurrent callers
 var (
     once sync.Once
     db   *Database
@@ -655,12 +655,12 @@ func GetDB() *Database {
     return db
 }
 
-// atomic.Int64 — lock-free counter
+// atomic.Int64 - lock-free counter
 var counter atomic.Int64
 counter.Add(1)
 fmt.Println(counter.Load())
 
-// atomic.Value — arbitrary type, lock-free reads
+// atomic.Value - arbitrary type, lock-free reads
 var cfg atomic.Value
 cfg.Store(Config{MaxRetries: 3})
 current := cfg.Load().(Config)
@@ -683,13 +683,13 @@ func ProcessRequest(ctx context.Context, id string) error {
 
 // Timeout
 ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-defer cancel()   // always cancel — releases timer resources
+defer cancel()   // always cancel - releases timer resources
 
 // Cancellation
 ctx, cancel = context.WithCancel(context.Background())
 go func() { time.Sleep(2 * time.Second); cancel() }()
 
-// Values (request-scoped only — trace IDs, auth tokens, etc.)
+// Values (request-scoped only - trace IDs, auth tokens, etc.)
 type ctxKey string
 const requestIDKey ctxKey = "requestID"
 
@@ -809,7 +809,7 @@ func (d *Duration) UnmarshalJSON(b []byte) error {
 ## Structured Logging (slog)
 
 ```go
-// slog — built-in structured logging (Go 1.21+)
+// slog - built-in structured logging (Go 1.21+)
 import "log/slog"
 
 slog.Info("server starting", "addr", ":8080")
@@ -919,7 +919,7 @@ go get github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azsecrets
 ```go
 import "github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 
-// DefaultAzureCredential — env vars → workload identity → managed identity → CLI
+// DefaultAzureCredential - env vars → workload identity → managed identity → CLI
 cred, err := azidentity.NewDefaultAzureCredential(nil)
 
 // Managed identity (user-assigned)
@@ -1000,7 +1000,7 @@ for listPager.More() {
 
 ## Azure Functions Custom Handler
 
-Go runs in Azure Functions as a **custom handler** — the Functions runtime forwards triggers to a plain HTTP server you write. No SDK required; just `net/http` and `encoding/json`.
+Go runs in Azure Functions as a **custom handler** - the Functions runtime forwards triggers to a plain HTTP server you write. No SDK required; just `net/http` and `encoding/json`.
 
 ### Project structure
 
@@ -1036,9 +1036,9 @@ myfunction/
 }
 ```
 
-`enableForwardingHttpRequest: true` passes the raw HTTP request directly to your server — use this for HTTP triggers. Set it to `false` for non-HTTP triggers (queue, timer, Service Bus) which use the JSON envelope protocol instead.
+`enableForwardingHttpRequest: true` passes the raw HTTP request directly to your server - use this for HTTP triggers. Set it to `false` for non-HTTP triggers (queue, timer, Service Bus) which use the JSON envelope protocol instead.
 
-### function.json — HTTP trigger
+### function.json - HTTP trigger
 
 ```json
 {
@@ -1060,7 +1060,7 @@ myfunction/
 }
 ```
 
-### function.json — Queue trigger
+### function.json - Queue trigger
 
 ```json
 {

@@ -5,7 +5,7 @@ description: Kusto Query Language fundamentals plus threat hunting queries for M
 
 # KQL / Microsoft Defender Cheat Sheet
 
-Kusto Query Language (KQL) is used across Microsoft Sentinel, Defender XDR, Azure Monitor, and Azure Data Explorer (ADX). Queries pipe data through operators left-to-right — each `|` feeds the result of the previous step into the next.
+Kusto Query Language (KQL) is used across Microsoft Sentinel, Defender XDR, Azure Monitor, and Azure Data Explorer (ADX). Queries pipe data through operators left-to-right - each `|` feeds the result of the previous step into the next.
 
 ---
 
@@ -238,7 +238,7 @@ DeviceNetworkEvents
     Count    = count()
   by DeviceName, RemoteIP
 | where StdDev > 0
-| extend CoV = StdDev / AvgBytes  // coefficient of variation — high = erratic, low = regular
+| extend CoV = StdDev / AvgBytes  // coefficient of variation - high = erratic, low = regular
 ```
 
 ### Count distinct (approximate for large datasets)
@@ -252,7 +252,7 @@ SigninLogs
 
 ## Joins & Lookups
 
-### Inner join — match rows in both tables
+### Inner join - match rows in both tables
 
 ```kql
 let SuspiciousIPs = externaldata(IP: string)
@@ -261,7 +261,7 @@ DeviceNetworkEvents
 | join kind=inner SuspiciousIPs on $left.RemoteIP == $right.IP
 ```
 
-### Left outer join — keep all left rows, enrich where match found
+### Left outer join - keep all left rows, enrich where match found
 
 ```kql
 SecurityEvent
@@ -273,7 +273,7 @@ SecurityEvent
   ) on Account
 ```
 
-### Semi join — "where a matching row exists in another table"
+### Semi join - "where a matching row exists in another table"
 
 ```kql
 DeviceProcessEvents
@@ -284,7 +284,7 @@ DeviceProcessEvents
   ) on DeviceId
 ```
 
-### lookup — enrich with a reference dataset
+### lookup - enrich with a reference dataset
 
 ```kql
 let RiskScores = datatable(FileName: string, RiskScore: int)
@@ -376,9 +376,9 @@ GetFailedLogons(1d, 20)
 
 ---
 
-## Threat Hunting — Processes
+## Threat Hunting - Processes
 
-### Suspicious PowerShell — encoded commands or download cradles
+### Suspicious PowerShell - encoded commands or download cradles
 
 ```kql
 DeviceProcessEvents
@@ -389,7 +389,7 @@ DeviceProcessEvents
 | sort by Timestamp desc
 ```
 
-### LOLBins — living-off-the-land binaries used to run code
+### LOLBins - living-off-the-land binaries used to run code
 
 ```kql
 DeviceProcessEvents
@@ -432,7 +432,7 @@ DeviceEvents
 | project Timestamp, DeviceName, AccountName, ActionType, AdditionalFields
 ```
 
-### Credential dumping indicators — LSASS access
+### Credential dumping indicators - LSASS access
 
 ```kql
 DeviceEvents
@@ -444,7 +444,7 @@ DeviceEvents
 
 ---
 
-## Threat Hunting — Network
+## Threat Hunting - Network
 
 ### Connections to uncommon ports (potential C2 or exfiltration)
 
@@ -458,7 +458,7 @@ DeviceNetworkEvents
 | sort by Count asc
 ```
 
-### Beaconing detection — regular periodic outbound connections
+### Beaconing detection - regular periodic outbound connections
 
 ```kql
 DeviceNetworkEvents
@@ -495,7 +495,7 @@ DeviceNetworkEvents
 | where BytesSent > 10000000  // >10 MB sent to a single IP
 ```
 
-### Lateral movement — SMB/RDP/WinRM to internal hosts
+### Lateral movement - SMB/RDP/WinRM to internal hosts
 
 ```kql
 DeviceNetworkEvents
@@ -521,9 +521,9 @@ ThreatIntelligenceIndicator
 
 ---
 
-## Threat Hunting — Identity & Authentication
+## Threat Hunting - Identity & Authentication
 
-### Failed logins — brute-force or password spray
+### Failed logins - brute-force or password spray
 
 ```kql
 SigninLogs
@@ -538,7 +538,7 @@ SigninLogs
 | sort by Failures desc
 ```
 
-### Password spray pattern — one IP, many users, few attempts each
+### Password spray pattern - one IP, many users, few attempts each
 
 ```kql
 SigninLogs
@@ -551,7 +551,7 @@ SigninLogs
 | where FailedUsers > 20 and TotalAttempts < FailedUsers * 3
 ```
 
-### Impossible travel — same user, two locations within short window
+### Impossible travel - same user, two locations within short window
 
 ```kql
 SigninLogs
@@ -565,7 +565,7 @@ SigninLogs
 | where array_length(Locations) > 1
 ```
 
-### MFA fatigue — many MFA prompts in a short period
+### MFA fatigue - many MFA prompts in a short period
 
 ```kql
 SigninLogs
@@ -586,7 +586,7 @@ SigninLogs
 | sort by Count desc
 ```
 
-### Windows failed logons (EventID 4625) — workstation
+### Windows failed logons (EventID 4625) - workstation
 
 ```kql
 SecurityEvent
@@ -622,7 +622,7 @@ AuditLogs
 
 ---
 
-## Threat Hunting — Email
+## Threat Hunting - Email
 
 ### Emails with malicious verdicts delivered to inbox
 
@@ -644,7 +644,7 @@ UrlClickEvents
 | project Timestamp, AccountUpn, Url, IsClickedThrough, IPAddress
 ```
 
-### Malicious attachments — by file type
+### Malicious attachments - by file type
 
 ```kql
 EmailAttachmentInfo
@@ -740,7 +740,7 @@ AlertEvidence
 
 ## Useful Patterns
 
-### `mv-expand` — expand an array column into individual rows
+### `mv-expand` - expand an array column into individual rows
 
 ```kql
 SecurityIncident
@@ -750,7 +750,7 @@ SecurityIncident
 | project IncidentTitle = Title, AlertName, Severity
 ```
 
-### `parse_json` — read dynamic/JSON columns
+### `parse_json` - read dynamic/JSON columns
 
 ```kql
 DeviceEvents
@@ -761,7 +761,7 @@ DeviceEvents
 | project Timestamp, DeviceName, TaskName, TaskAction
 ```
 
-### `bag_keys` — discover all keys in a dynamic field
+### `bag_keys` - discover all keys in a dynamic field
 
 ```kql
 SigninLogs
@@ -769,7 +769,7 @@ SigninLogs
 | extend Keys = bag_keys(todynamic(DeviceDetail))
 ```
 
-### `parse_url` — extract parts of a URL
+### `parse_url` - extract parts of a URL
 
 ```kql
 DeviceNetworkEvents
@@ -779,7 +779,7 @@ DeviceNetworkEvents
 | extend Scheme   = tostring(Parsed.Scheme)
 ```
 
-### `ipv4_is_private` — filter public vs private IPs
+### `ipv4_is_private` - filter public vs private IPs
 
 ```kql
 DeviceNetworkEvents
@@ -787,7 +787,7 @@ DeviceNetworkEvents
 | where RemoteIP != "127.0.0.1"
 ```
 
-### `geo_info_from_ip_address` — enrich with GeoIP (Sentinel)
+### `geo_info_from_ip_address` - enrich with GeoIP (Sentinel)
 
 ```kql
 SigninLogs
@@ -797,7 +797,7 @@ SigninLogs
 | where Country !in ("United Kingdom", "United States")
 ```
 
-### `externaldata` — load a blocklist from blob storage
+### `externaldata` - load a blocklist from blob storage
 
 ```kql
 let BlockedDomains = externaldata(Domain: string)

@@ -106,7 +106,7 @@ docker run -d --name db    --network app-net postgres:16
 docker run -d --name api   --network app-net -e DB_HOST=db my-api:latest
 # api container resolves "db" via Docker DNS
 
-# Host networking (no NAT — Linux only)
+# Host networking (no NAT - Linux only)
 docker run --network host nginx
 ```
 
@@ -339,7 +339,7 @@ target "worker" {
 ### Production-grade compose file
 
 ```yaml
-# compose.yaml (v2 format — no top-level "version" key needed)
+# compose.yaml (v2 format - no top-level "version" key needed)
 services:
   api:
     image: myregistry.io/api:${IMAGE_TAG:-latest}
@@ -433,7 +433,7 @@ docker compose exec db psql -U app -d app
 # Environment override files
 docker compose -f compose.yaml -f compose.override.prod.yaml up -d
 
-# Watch (auto-rebuild on file changes — compose 2.22+)
+# Watch (auto-rebuild on file changes - compose 2.22+)
 docker compose watch
 
 # Run one-off command
@@ -452,7 +452,7 @@ docker compose pull
 services:
   api:
     image: myregistry.io/api:latest
-    # no profiles key — service always starts regardless of --profile flag
+    # no profiles key - service always starts regardless of --profile flag
 
   docs:
     image: myregistry.io/docs:latest
@@ -475,7 +475,7 @@ docker compose --profile dev  up -d
 ### Key differences from Docker
 
 ```bash
-# Rootless by default — no daemon
+# Rootless by default - no daemon
 podman run -d nginx
 
 # Pods (shared network namespace)
@@ -567,7 +567,7 @@ kubens my-namespace
 kubectx aks-prod
 ```
 
-### Core resources — get, describe, delete
+### Core resources - get, describe, delete
 
 ```bash
 kubectl get pods          -n my-namespace -o wide
@@ -922,7 +922,7 @@ spec:
 ```
 
 ```yaml
-# NetworkPolicy — default deny all ingress, allow only from same namespace
+# NetworkPolicy - default deny all ingress, allow only from same namespace
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -1169,7 +1169,7 @@ syft myregistry.io/my-app:latest -o cyclonedx-json > sbom.cyclonedx.json
 ### OPA / Gatekeeper policies
 
 ```yaml
-# Constraint template — deny latest tag
+# Constraint template - deny latest tag
 apiVersion: templates.gatekeeper.sh/v1
 kind: ConstraintTemplate
 metadata:
@@ -1239,7 +1239,7 @@ spec:
                   fieldPath: metadata.annotations['azure.workload.identity/client-id']
 ```
 
-### Cluster access entries (replaces aws-auth ConfigMap — AKS equivalent: Azure RBAC)
+### Cluster access entries (replaces aws-auth ConfigMap - AKS equivalent: Azure RBAC)
 
 ```bash
 # Enable Azure RBAC for Kubernetes
@@ -1291,7 +1291,7 @@ kubectl get pods -A --field-selector=status.phase!=Running
 kubectl drain my-node --ignore-daemonsets --delete-emptydir-data --force
 kubectl uncordon my-node
 
-# Top (resource usage — requires metrics-server)
+# Top (resource usage - requires metrics-server)
 kubectl top pods  -n my-namespace --sort-by=memory
 kubectl top nodes
 

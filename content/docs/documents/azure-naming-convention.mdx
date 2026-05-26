@@ -42,7 +42,7 @@ This repo:
 
 - An Azure subscription
 - [Terraform](https://www.terraform.io/)
-- [terraform-compliance](https://terraform-compliance.com/) — and everything needed to run it
+- [terraform-compliance](https://terraform-compliance.com/) - and everything needed to run it
 - [git](https://git-scm.com/)
 
 You should consult the terraform-compliance docs on how you want to deploy these files, but they can be used with remote fetching and ran locally too.
@@ -51,9 +51,9 @@ You should consult the terraform-compliance docs on how you want to deploy these
 
 ## Contributing
 
-This list is non-exhaustive — there are hundreds of resources in Azure and not all will be covered. Some you may disagree with or need changing for your own org, so you are free to use this copy, clone it and change it, or fork it if you need greater customisation.
+This list is non-exhaustive - there are hundreds of resources in Azure and not all will be covered. Some you may disagree with or need changing for your own org, so you are free to use this copy, clone it and change it, or fork it if you need greater customisation.
 
-Another note: this naming convention tries to cover parts of the API which you cannot provision with Terraform, so in those occurrences, terraform-compliance won't have a test for these. To save confusion and for all the ARM/Bicep/Pulumi users, we have added the resource entity API names to the naming convention so it can be clear — even things which can't be controlled with Terraform can have a name assigned.
+Another note: this naming convention tries to cover parts of the API which you cannot provision with Terraform, so in those occurrences, terraform-compliance won't have a test for these. To save confusion and for all the ARM/Bicep/Pulumi users, we have added the resource entity API names to the naming convention so it can be clear - even things which can't be controlled with Terraform can have a name assigned.
 
 To contribute to the main copy:
 
@@ -69,12 +69,12 @@ As a general rule, all names should try to exclude special characters wherever p
 
 |     Naming Element     | Description | Example |
 |:----------------------:|:------------|:-------:|
-| `Prefix` | The leftmost part of the name. The prefix should be the resource identifier where assigned as a prefix. Should be lower case. In some occurrences it is appropriate to use the prefix to describe the purpose of a generic resource — for example, a virtual machine can be `vm` for generic, `dc` for domain controller, or `web` for web server. | `rg-`, `sa`, `kv-`, `vm-` |
+| `Prefix` | The leftmost part of the name. The prefix should be the resource identifier where assigned as a prefix. Should be lower case. In some occurrences it is appropriate to use the prefix to describe the purpose of a generic resource - for example, a virtual machine can be `vm` for generic, `dc` for domain controller, or `web` for web server. | `rg-`, `sa`, `kv-`, `vm-` |
 | `Infix` | Next part of the name to the right of the prefix. The infix should be a 3 or 4 letter description of the product or service the resource belongs to. Should be lower case. This could be an organisation tag, a project name, or anything similar. | `libredevops = ldo`, `hello-world = hw`, `foobar = foo` |
 | `Outfix` | To the right of the infix and left of the suffix. The outfix should be a 3 letter description of the location of the resources. Should be lower case. When resources are "Global" the resource group's location should be used. | `UK South = uks`, `UK West = ukw`, `West Europe = euw`, `West US = usw` |
-| `Optional Outfix` | Optional — to the right of the other outfix and left of the suffix. Should be a 3 letter description of an arbitrary purpose of the resource, for example `mgt` for management. Only use where appropriate and at the discretion of the naming policy owner. Should be lower case. | `mgt`, `sec`, `net` |
+| `Optional Outfix` | Optional - to the right of the other outfix and left of the suffix. Should be a 3 letter description of an arbitrary purpose of the resource, for example `mgt` for management. Only use where appropriate and at the discretion of the naming policy owner. Should be lower case. | `mgt`, `sec`, `net` |
 | `Suffix` | The rightmost part of the name. The suffix should be a 3 letter description of the stage the environment is in. Should be lower case. | `poc`, `mvp`, `dev`, `tst`, `uat`, `ppd`, `prd` |
-| `Numbering` | When making multiple items, apply a zero-padded number at the end of the suffix — e.g. `format("%02d", count.index + 1)`. | `01`, `10`, `67`, `88` |
+| `Numbering` | When making multiple items, apply a zero-padded number at the end of the suffix - e.g. `format("%02d", count.index + 1)`. | `01`, `10`, `67`, `88` |
 | `Random Characters` | Sometimes random characters should be used to make unique names. These should be a random assortment of base64 characters, no more than 4 characters in length, all lower case. | `a1jd`, `zl0k`, `moe0` |
 | `Full Construct` | `${prefix}-${infix}-${outfix}-${suffix}` when numbering is applied: `${prefix}-${infix}-${outfix}-${suffix}-${numbering}`. Some resources omit dashes (e.g. storage accounts): `${prefix}${infix}${outfix}${suffix}${numbering}`. | `rg-ldo-uks-prd`, `kv-foo-eus-dev-01`, `sabarwuspoc01` |
 
@@ -84,10 +84,10 @@ As a general rule, all names should try to exclude special characters wherever p
 
 |                   Other Names                     |        Description        |       Example        |
 |:-------------------------------------------------:|:-------------------------:|:--------------------:|
-| `VM purposes — used when VMs are named by purpose` | `app`, `dbs`, `web`, `vm` | `webldouksprd01` |
-| `VM OS type — used when VMs are named by OS`       | `lnx`, `win`, `rh8`, `deb`, `ubu`, `sus` | `webldouksprd01` |
+| `VM purposes - used when VMs are named by purpose` | `app`, `dbs`, `web`, `vm` | `webldouksprd01` |
+| `VM OS type - used when VMs are named by OS`       | `lnx`, `win`, `rh8`, `deb`, `ubu`, `sus` | `webldouksprd01` |
 | `Environment stages`                              | `poc`, `mvp`, `dev`, `tst`, `stg`, `uat`, `ppd`, `prd` | `appprduksprd01` |
-| `Management outfix — describes a resource belonging to tenant admins` | `mgt` | `rg-crg-ukw-ppd-mgt` |
+| `Management outfix - describes a resource belonging to tenant admins` | `mgt` | `rg-crg-ukw-ppd-mgt` |
 
 ---
 
@@ -101,7 +101,7 @@ The table below sets out naming for all resources listed by Microsoft's guidance
 
 ## Other Resource List
 
-Resources with a naming convention set outside the Azure Resource Manager API — for example, service principals and Azure DevOps items.
+Resources with a naming convention set outside the Azure Resource Manager API - for example, service principals and Azure DevOps items.
 
 ### AzureAD Resource List
 

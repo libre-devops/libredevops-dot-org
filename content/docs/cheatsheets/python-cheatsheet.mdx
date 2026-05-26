@@ -1,6 +1,6 @@
 ---
 title: Python Cheatsheet
-description: Comprehensive Python reference — modern tooling, core language, data structures, concurrency, testing, Azure SDK, and DevOps patterns.
+description: Comprehensive Python reference - modern tooling, core language, data structures, concurrency, testing, Azure SDK, and DevOps patterns.
 ---
 
 # Python Cheat Sheet
@@ -11,7 +11,7 @@ Modern Python (3.10+) reference for DevOps and platform engineers. Covers the la
 
 ## Virtual Environments & Tooling
 
-### `uv` — the modern Python package manager
+### `uv` - the modern Python package manager
 
 `uv` is a drop-in replacement for `pip`, `venv`, `pip-tools`, and `pyenv` combined. Significantly faster than pip.
 
@@ -46,7 +46,7 @@ uv run pytest
 uv pip compile pyproject.toml -o requirements.txt
 ```
 
-### `venv` — standard library
+### `venv` - standard library
 
 ```bash
 python3 -m venv .venv
@@ -55,7 +55,7 @@ pip install -r requirements.txt
 deactivate
 ```
 
-### `pyproject.toml` — modern project config
+### `pyproject.toml` - modern project config
 
 ```toml
 [project]
@@ -100,7 +100,7 @@ strict = true
 asyncio_mode = "auto"
 ```
 
-### Shell helpers — `mkvenv` / `avenv`
+### Shell helpers - `mkvenv` / `avenv`
 
 ```bash
 function mkvenv() {
@@ -132,8 +132,8 @@ ratio = 1 / 3
 f"Hello, {name}!"                   # "Hello, world!"
 f"{count:04d}"                      # "0042"
 f"{ratio:.2%}"                      # "33.33%"
-f"{name!r}"                         # "'world'"  — repr()
-f"{name!s}"                         # "world"    — str()
+f"{name!r}"                         # "'world'"  - repr()
+f"{name!s}"                         # "world"    - str()
 
 # Debug shorthand (3.8+)
 f"{name=}"                          # "name='world'"
@@ -162,7 +162,7 @@ word_lengths = {word: len(word) for word in ["apple", "banana", "cherry"]}
 # Set
 unique_domains = {email.split("@")[1] for email in emails}
 
-# Generator (lazy — use when you don't need to store all values)
+# Generator (lazy - use when you don't need to store all values)
 total = sum(x**2 for x in range(1_000_000))
 
 # Nested
@@ -183,7 +183,7 @@ if m := re.search(r"(\d+)", line):
 while chunk := file.read(8192):
     process(chunk)
 
-# In a comprehension — keep the value without extra filtering pass
+# In a comprehension - keep the value without extra filtering pass
 results = [y for x in data if (y := transform(x)) is not None]
 ```
 
@@ -221,14 +221,14 @@ def describe(value):
 ### Type hints (modern style)
 
 ```python
-from __future__ import annotations  # defer evaluation — use in 3.10 and earlier
+from __future__ import annotations  # defer evaluation - use in 3.10 and earlier
 from typing import Any, Callable, TypeVar, Generic, Protocol
 
-# Built-in generics (3.9+ — no need to import from typing)
+# Built-in generics (3.9+ - no need to import from typing)
 def process(items: list[str]) -> dict[str, int]:
     return {item: len(item) for item in items}
 
-# Union — prefer X | Y over Optional[X] (3.10+)
+# Union - prefer X | Y over Optional[X] (3.10+)
 def find(key: str) -> str | None: ...
 
 # TypeVar for generic functions
@@ -240,7 +240,7 @@ def first(items: list[T]) -> T | None:
 Predicate = Callable[[str], bool]
 Handler   = Callable[[dict[str, Any]], None]
 
-# TypedDict — typed dictionary shape
+# TypedDict - typed dictionary shape
 from typing import TypedDict
 from typing_extensions import NotRequired  # built-in typing.NotRequired requires Python 3.11+
 
@@ -250,7 +250,7 @@ class VMConfig(TypedDict):
     location: str
     tags: NotRequired[dict[str, str]]   # optional key
 
-# Protocol — structural subtyping (duck typing with types)
+# Protocol - structural subtyping (duck typing with types)
 class Closeable(Protocol):
     def close(self) -> None: ...
 
@@ -308,7 +308,7 @@ class AzureResource:
         return self._id or f"(pending) {self.name}"
 
 
-@dataclass(frozen=True)   # immutable, hashable — good for dict keys and sets
+@dataclass(frozen=True)   # immutable, hashable - good for dict keys and sets
 class Region:
     shorthand: str
     display_name: str
@@ -352,7 +352,7 @@ class Severity(Enum):
 
 # Usage
 env = Environment("prod")        # Environment.PROD
-env == "prod"                    # True  — because StrEnum
+env == "prod"                    # True  - because StrEnum
 f"Deploying to {env}"            # "Deploying to prod"
 
 for sev in Severity:             # iterate all members
@@ -374,24 +374,24 @@ app_subnet.name        # "app"
 app_subnet._asdict()   # {"name": "app", "cidr": "10.0.1.0/24", ...}
 ```
 
-### `collections` — Counter, defaultdict, deque
+### `collections` - Counter, defaultdict, deque
 
 ```python
 from collections import Counter, defaultdict, deque
 
-# Counter — frequency map
+# Counter - frequency map
 words    = ["a", "b", "a", "c", "b", "a"]
 counts   = Counter(words)        # Counter({"a": 3, "b": 2, "c": 1})
 counts.most_common(2)            # [("a", 3), ("b", 2)]
 counts["a"]                      # 3
 counts["z"]                      # 0 (no KeyError)
 
-# defaultdict — missing key creates a default
+# defaultdict - missing key creates a default
 groups: defaultdict[str, list[str]] = defaultdict(list)
 for resource in resources:
     groups[resource.resource_group].append(resource.name)
 
-# deque — efficient queue / stack
+# deque - efficient queue / stack
 queue: deque[str] = deque(maxlen=100)  # fixed-size ring buffer
 queue.appendleft("new")                # O(1) prepend
 queue.popleft()                        # O(1) remove from front
@@ -401,7 +401,7 @@ queue.popleft()                        # O(1) remove from front
 
 ## Pathlib & File I/O
 
-### `pathlib` — path operations
+### `pathlib` - path operations
 
 ```python
 from pathlib import Path
@@ -465,7 +465,7 @@ json.dumps({"ts": datetime.now()}, default=str)   # str() fallback
 import yaml
 from pathlib import Path
 
-# Load — always use safe_load, never load() (arbitrary code execution risk)
+# Load - always use safe_load, never load() (arbitrary code execution risk)
 data = yaml.safe_load(Path("config.yaml").read_text())
 docs = list(yaml.safe_load_all(text))   # multiple documents in one file
 
@@ -486,12 +486,12 @@ with open("config.yaml", "w") as f:
 ### TOML
 
 ```python
-# Python 3.11+ — tomllib is in the standard library (read-only)
+# Python 3.11+ - tomllib is in the standard library (read-only)
 import tomllib
 with open("pyproject.toml", "rb") as f:
     config = tomllib.load(f)
 
-# Write TOML — use tomli-w (pip install tomli-w)
+# Write TOML - use tomli-w (pip install tomli-w)
 import tomli_w
 Path("output.toml").write_bytes(tomli_w.dumps(config).encode())
 ```
@@ -530,13 +530,13 @@ config = Config()
 
 ## Subprocess & Shell
 
-### `subprocess.run` — execute commands
+### `subprocess.run` - execute commands
 
 ```python
 import subprocess
 import shlex
 
-# Simple — raises on non-zero exit, captures output
+# Simple - raises on non-zero exit, captures output
 result = subprocess.run(
     ["terraform", "plan", "-out", "tfplan.plan"],
     capture_output=True,
@@ -548,14 +548,14 @@ result = subprocess.run(
 )
 print(result.stdout)
 
-# Accept a string — shlex.split handles quoting correctly
+# Accept a string - shlex.split handles quoting correctly
 def run(cmd: str, **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(shlex.split(cmd), text=True, check=True, **kwargs)
 
 # Suppress output
 subprocess.run(["az", "login"], check=True, capture_output=True)
 
-# Allow failure — check=False
+# Allow failure - check=False
 result = subprocess.run(["git", "diff", "--exit-code"], capture_output=True)
 has_changes = result.returncode != 0
 ```
@@ -633,7 +633,7 @@ r.raise_for_status()
 data = r.json()
 ```
 
-### `httpx` — async and sync, modern API
+### `httpx` - async and sync, modern API
 
 ```python
 import httpx
@@ -644,7 +644,7 @@ with httpx.Client(timeout=30, follow_redirects=True) as client:
     r.raise_for_status()
     data = r.json()
 
-# Async — concurrent requests
+# Async - concurrent requests
 import asyncio
 
 async def fetch_all(urls: list[str]) -> list[dict]:
@@ -669,7 +669,7 @@ data = asyncio.run(fetch_all(["https://api.example.com/a", "https://api.example.
 
 ## Concurrency
 
-### `asyncio` — event loop and tasks
+### `asyncio` - event loop and tasks
 
 ```python
 import asyncio
@@ -681,7 +681,7 @@ async def fetch(url: str) -> dict:
         return r.json()
 
 async def main() -> None:
-    # Run concurrently — all start immediately
+    # Run concurrently - all start immediately
     results = await asyncio.gather(
         fetch("https://api.example.com/a"),
         fetch("https://api.example.com/b"),
@@ -694,7 +694,7 @@ async def main() -> None:
     except asyncio.TimeoutError:
         print("Timed out")
 
-    # Semaphore — limit concurrency (e.g., avoid rate-limit errors)
+    # Semaphore - limit concurrency (e.g., avoid rate-limit errors)
     sem = asyncio.Semaphore(10)
     async def bounded_fetch(url: str) -> dict:
         async with sem:
@@ -706,7 +706,7 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-### `ThreadPoolExecutor` — I/O-bound parallelism
+### `ThreadPoolExecutor` - I/O-bound parallelism
 
 ```python
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -726,7 +726,7 @@ with ThreadPoolExecutor(max_workers=8) as pool:
             print(f"Failed {endpoint}: {e}")
 ```
 
-### `ProcessPoolExecutor` — CPU-bound parallelism
+### `ProcessPoolExecutor` - CPU-bound parallelism
 
 ```python
 from concurrent.futures import ProcessPoolExecutor
@@ -778,7 +778,7 @@ except Exception:
 ```python
 from contextlib import contextmanager, suppress, nullcontext
 
-# Simple — suppress specific exceptions
+# Simple - suppress specific exceptions
 with suppress(FileNotFoundError):
     Path("temp.json").unlink()
 
@@ -804,7 +804,7 @@ with get_lock(use_locking):
     do_work()
 ```
 
-### `ExceptionGroup` — multiple errors at once (3.11+)
+### `ExceptionGroup` - multiple errors at once (3.11+)
 
 ```python
 # Collect errors from concurrent operations
@@ -837,7 +837,7 @@ except* TimeoutError as eg:
 ```python
 from functools import lru_cache, cache, partial, reduce
 
-# Memoisation — cache pure function results
+# Memoisation - cache pure function results
 @lru_cache(maxsize=128)
 def get_region_display_name(shorthand: str) -> str:
     return REGION_MAP[shorthand]      # expensive lookup cached after first call
@@ -846,16 +846,16 @@ def get_region_display_name(shorthand: str) -> str:
 def fibonacci(n: int) -> int:
     return n if n < 2 else fibonacci(n - 1) + fibonacci(n - 2)
 
-# partial — fix some arguments of a function
+# partial - fix some arguments of a function
 from azure.mgmt.resource import ResourceManagementClient
 list_in_rg = partial(client.resources.list_by_resource_group, resource_group_name="rg-prod")
 all_resources = list(list_in_rg())
 
-# reduce — fold a sequence
+# reduce - fold a sequence
 from functools import reduce
 total_size = reduce(lambda acc, blob: acc + blob.size, blobs, 0)
 
-# Cache with instance methods — use cached_property
+# Cache with instance methods - use cached_property
 from functools import cached_property
 
 class AzureClient:
@@ -869,27 +869,27 @@ class AzureClient:
 ```python
 import itertools
 
-# chain — flatten iterables
+# chain - flatten iterables
 all_nics = list(itertools.chain(nic_list_a, nic_list_b, nic_list_c))
 
-# chain.from_iterable — flatten one level
+# chain.from_iterable - flatten one level
 flat = list(itertools.chain.from_iterable(nested_list))
 
-# islice — first N items from any iterable without materialising all
+# islice - first N items from any iterable without materialising all
 first_10 = list(itertools.islice(large_generator, 10))
 
-# groupby — requires sorted input
+# groupby - requires sorted input
 sorted_resources = sorted(resources, key=lambda r: r.resource_group)
 for rg, group in itertools.groupby(sorted_resources, key=lambda r: r.resource_group):
     print(f"{rg}: {list(group)}")
 
-# product — cartesian product (same as Terraform's setproduct)
+# product - cartesian product (same as Terraform's setproduct)
 regions = ["UK South", "West Europe"]
 envs    = ["prod", "staging"]
 pairs   = list(itertools.product(regions, envs))
 # [("UK South", "prod"), ("UK South", "staging"), ("West Europe", "prod"), ...]
 
-# batched — process in chunks (3.12+)
+# batched - process in chunks (3.12+)
 for batch in itertools.batched(all_vms, 50):
     process_batch(batch)
 
@@ -953,7 +953,7 @@ handler.setFormatter(ColouredFormatter())
 logging.getLogger().addHandler(handler)
 ```
 
-### `rich` — structured terminal output
+### `rich` - structured terminal output
 
 ```python
 from rich.console import Console
@@ -1003,7 +1003,7 @@ tests/
   test_config.py
 ```
 
-### `conftest.py` — shared fixtures
+### `conftest.py` - shared fixtures
 
 ```python
 import pytest
@@ -1031,7 +1031,7 @@ def mock_resource_client(mock_credential):
         yield client
 ```
 
-### Parametrize — data-driven tests
+### Parametrize - data-driven tests
 
 ```python
 import pytest
@@ -1094,7 +1094,7 @@ def test_key_vault_secret(config):
         MockKV.return_value.get_secret.assert_called_once_with("db-password")
 ```
 
-### `monkeypatch` — modify environment and imports
+### `monkeypatch` - modify environment and imports
 
 ```python
 def test_config_from_env(monkeypatch):
@@ -1112,7 +1112,7 @@ def test_missing_env_var_raises(monkeypatch):
         Config()
 ```
 
-### Async tests — `pytest-asyncio`
+### Async tests - `pytest-asyncio`
 
 ```python
 import pytest
@@ -1166,17 +1166,17 @@ from azure.identity import (
     EnvironmentCredential,
 )
 
-# DefaultAzureCredential — tries: env vars → workload identity → managed identity → CLI → ...
+# DefaultAzureCredential - tries: env vars → workload identity → managed identity → CLI → ...
 # Best choice for code that must run in both CI and locally
 credential = DefaultAzureCredential()
 
 # System-assigned managed identity (no config needed on the VM/Function)
 credential = ManagedIdentityCredential()
 
-# User-assigned managed identity — must specify client_id
+# User-assigned managed identity - must specify client_id
 credential = ManagedIdentityCredential(client_id="your-uami-client-id")
 
-# OIDC / Workload Identity Federation — GitHub Actions, Azure DevOps, etc.
+# OIDC / Workload Identity Federation - GitHub Actions, Azure DevOps, etc.
 # Reads AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_FEDERATED_TOKEN_FILE from environment
 credential = WorkloadIdentityCredential()
 
@@ -1187,14 +1187,14 @@ credential = ClientSecretCredential(
     client_secret=os.environ["AZURE_CLIENT_SECRET"],
 )
 
-# Explicit chain — try managed identity, fall back to CLI
+# Explicit chain - try managed identity, fall back to CLI
 credential = ChainedTokenCredential(
     ManagedIdentityCredential(),
     AzureCliCredential(),
 )
 ```
 
-### Credential factory — pick based on environment
+### Credential factory - pick based on environment
 
 ```python
 import os
@@ -1261,7 +1261,7 @@ resources = list(client.resources.list_by_resource_group("rg-app-prod"))
 vms = [r for r in resources if r.type == "Microsoft.Compute/virtualMachines"]
 ```
 
-### Key Vault — secrets
+### Key Vault - secrets
 
 ```python
 from azure.keyvault.secrets import SecretClient
@@ -1347,7 +1347,7 @@ def sas_url(account_name: str, account_key: str, container: str, blob: str, hour
     return f"https://{account_name}.blob.core.windows.net/{container}/{blob}?{token}"
 ```
 
-### Azure Monitor — query metrics
+### Azure Monitor - query metrics
 
 ```python
 from azure.monitor.query import MetricsQueryClient, MetricAggregationType
@@ -1389,7 +1389,7 @@ print(f"Location: {compute['location']}")
 print(f"VM size: {compute['vmSize']}")
 ```
 
-### Azure Function — timer trigger with managed identity
+### Azure Function - timer trigger with managed identity
 
 ```python
 import azure.functions as func
@@ -1429,7 +1429,7 @@ def resource_audit(timer: func.TimerRequest) -> None:
 
 ## CLI Tools
 
-### `argparse` — standard library
+### `argparse` - standard library
 
 ```python
 import argparse
@@ -1458,7 +1458,7 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-### `typer` — modern CLI with type hints (recommended)
+### `typer` - modern CLI with type hints (recommended)
 
 ```python
 import typer
@@ -1551,7 +1551,7 @@ if __name__ == "__main__":
     main()
 ```
 
-### Config loader — layered config (file + env overrides)
+### Config loader - layered config (file + env overrides)
 
 ```python
 import os

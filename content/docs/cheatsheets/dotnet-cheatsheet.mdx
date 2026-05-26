@@ -102,7 +102,7 @@ dotnet tool update -g dotnet-ef
 
 ## Project Structure
 
-### .csproj — key properties
+### .csproj - key properties
 
 ```xml
 <Project Sdk="Microsoft.NET.Sdk">
@@ -226,7 +226,7 @@ public record UserProfile(string Id, string Name, string Email) : IEquatable<Use
     public UserProfile WithName(string name) => this with { Name = name };
 }
 
-// Record struct (stack-allocated, value type — C# 10+)
+// Record struct (stack-allocated, value type - C# 10+)
 public readonly record struct Point(double X, double Y)
 {
     public double DistanceTo(Point other) =>
@@ -237,7 +237,7 @@ public readonly record struct Point(double X, double Y)
 var u1 = new User("1", "Alice", "alice@example.com", DateTime.UtcNow);
 var u2 = u1 with { Name = "Bob" };   // new record, different Name
 Console.WriteLine(u1 == u2);         // false
-Console.WriteLine(u1 with { } == u1); // true — structural equality
+Console.WriteLine(u1 with { } == u1); // true - structural equality
 ```
 
 ---
@@ -277,7 +277,7 @@ string Describe(int[] arr) => arr switch
 
 // Deconstruct in patterns
 if (GetUser() is { Name: var name, Email: var email })
-    Console.WriteLine($"{name} — {email}");
+    Console.WriteLine($"{name} - {email}");
 ```
 
 ---
@@ -340,7 +340,7 @@ public async Task<Result<User>> GetUserSafeAsync(string id, CancellationToken ct
 {
     try
     {
-        // ConfigureAwait(false) in library code (not in ASP.NET Core — sync context absent)
+        // ConfigureAwait(false) in library code (not in ASP.NET Core - sync context absent)
         var user = await repo.GetByIdAsync(id, ct).ConfigureAwait(false);
         return user is not null
             ? Result<User>.Success(user)
@@ -367,21 +367,21 @@ var tasks = ids.Select(async id =>
 });
 var results = await Task.WhenAll(tasks);
 
-// Task.WhenEach (.NET 9+) — process results as each task completes
+// Task.WhenEach (.NET 9+) - process results as each task completes
 await foreach (var completed in Task.WhenEach(tasks))
 {
     var result = await completed;
     Console.WriteLine(result.IsSuccess ? result.Value!.Name : result.Error);
 }
 
-// ValueTask — avoid heap allocation for hot paths that usually complete synchronously
+// ValueTask - avoid heap allocation for hot paths that usually complete synchronously
 public ValueTask<int> GetCountAsync()
 {
     if (_cache.TryGetValue("count", out var cached)) return new ValueTask<int>(cached);
     return new ValueTask<int>(FetchCountFromDbAsync());
 }
 
-// IAsyncEnumerable — streaming
+// IAsyncEnumerable - streaming
 public async IAsyncEnumerable<User> StreamUsersAsync(
     [EnumeratorCancellation] CancellationToken ct = default)
 {
@@ -422,7 +422,7 @@ public class Result<T>
 ## Dependency Injection
 
 ```csharp
-// Program.cs — .NET 10 minimal hosting
+// Program.cs - .NET 10 minimal hosting
 using Azure.Identity;
 using Azure.Security.KeyVault.Secrets;
 using Microsoft.Extensions.Azure;
@@ -492,7 +492,7 @@ public class DatabaseService(IOptions<DatabaseOptions> opts)
 using Azure.Identity;
 using Azure.Core;
 
-// DefaultAzureCredential — tries: env vars → workload identity → managed identity → CLI → VS
+// DefaultAzureCredential - tries: env vars → workload identity → managed identity → CLI → VS
 var credential = new DefaultAzureCredential();
 
 // Managed identity (system-assigned)
@@ -501,7 +501,7 @@ var credential = new ManagedIdentityCredential();
 // Managed identity (user-assigned)
 var credential = new ManagedIdentityCredential(clientId: "YOUR-UAMI-CLIENT-ID");
 
-// Service principal (client secret — prefer federated in production)
+// Service principal (client secret - prefer federated in production)
 var credential = new ClientSecretCredential(
     tenantId:     Environment.GetEnvironmentVariable("AZURE_TENANT_ID")!,
     clientId:     Environment.GetEnvironmentVariable("AZURE_CLIENT_ID")!,
@@ -535,7 +535,7 @@ await client.SetSecretAsync("my-secret", "new-value");
 await foreach (var props in client.GetPropertiesOfSecretsAsync())
     Console.WriteLine($"{props.Name}  expires: {props.ExpiresOn}");
 
-// Delete (soft-delete — must purge to fully remove)
+// Delete (soft-delete - must purge to fully remove)
 await client.StartDeleteSecretAsync("my-secret");
 
 // Inject via IConfiguration (recommended for ASP.NET Core)
@@ -572,7 +572,7 @@ string content = download.Value.Content.ToString();
 await foreach (var blob in containerClient.GetBlobsAsync(prefix: "data/2026/"))
     Console.WriteLine($"{blob.Name}  {blob.Properties.ContentLength} bytes");
 
-// Generate SAS (requires StorageSharedKeyCredential — not managed identity)
+// Generate SAS (requires StorageSharedKeyCredential - not managed identity)
 var sasBuilder = new BlobSasBuilder
 {
     BlobContainerName = "my-container",
@@ -694,10 +694,10 @@ public static async Task<List<T>> QueryAsync<T>(
 
 ### Validate KQL queries locally
 
-The `Kusto.Language` package provides an offline KQL parser — no cluster connection required. Use it in CI pipelines, editors, or pre-flight checks before sending queries to ADX/Sentinel.
+The `Kusto.Language` package provides an offline KQL parser - no cluster connection required. Use it in CI pipelines, editors, or pre-flight checks before sending queries to ADX/Sentinel.
 
 ```bash
-# Offline KQL parser — separate from the query/ingest packages
+# Offline KQL parser - separate from the query/ingest packages
 dotnet add package Kusto.Language
 ```
 
@@ -739,8 +739,8 @@ foreach (var d in analyzed.GetDiagnostics())
 string[] queries =
 [
     "MyTable | count",
-    "MyTable | where NonExistentCol == 1",  // semantic error — unknown column
-    "MyTable | where Timestamp >",          // syntax error — incomplete expression
+    "MyTable | where NonExistentCol == 1",  // semantic error - unknown column
+    "MyTable | where Timestamp >",          // syntax error - incomplete expression
     "MyTable | where EventType == 'login' | summarize count() by UserId",
 ];
 
@@ -797,7 +797,7 @@ foreach (var tableEntry in doc.RootElement.GetProperty("Tables").EnumerateObject
 GlobalState liveGlobals = GlobalState.Default.WithDatabase(
     new DatabaseSymbol(databaseName, [.. tables]));
 
-// Now validate any KQL query against the real schema — offline
+// Now validate any KQL query against the real schema - offline
 var check = KustoCode.ParseAndAnalyze("MyTable | where Timestamp > ago(1d)", liveGlobals);
 Console.WriteLine(check.GetDiagnostics().Count == 0 ? "Valid" : "Invalid");
 ```
@@ -805,7 +805,7 @@ Console.WriteLine(check.GetDiagnostics().Count == 0 ? "Valid" : "Invalid");
 ```csharp
 // ── 5. Server-side dry run via set noexec (requires cluster) ────────────────
 // Compiles the query against the real schema but skips execution entirely.
-// No RU cost, no results returned — useful when you don't have the schema locally.
+// No RU cost, no results returned - useful when you don't have the schema locally.
 string noExecKql = $"set noexec;\n{kql}";
 try
 {
@@ -961,7 +961,7 @@ reportgenerator -reports:"**/coverage.cobertura.xml" -targetdir:"coverage" -repo
 ### System.Threading.Lock (.NET 9+)
 
 ```csharp
-// Prefer Lock over lock(object) — lower overhead, no boxing, non-reentrant
+// Prefer Lock over lock(object) - lower overhead, no boxing, non-reentrant
 private readonly Lock _gate = new();
 
 public void UpdateCache(string key, string value)

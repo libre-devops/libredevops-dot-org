@@ -26,7 +26,7 @@ const projects: Project[] = [
     {
         title: 'Terraform Modules',
         description:
-            'A collection of opinionated Terraform modules for Azure infrastructure — covering compute, networking, identity, storage, and more. All modules follow the Libre DevOps naming convention and are published to the Terraform Registry.',
+            'A collection of opinionated Terraform modules for Azure infrastructure - covering compute, networking, identity, storage, and more. All modules follow the Libre DevOps naming convention and are published to the Terraform Registry.',
         tags: ['Terraform', 'Azure', 'IaC', 'Modules'],
         repo: 'https://github.com/libre-devops',
         docs: 'https://registry.terraform.io/namespaces/libre-devops',

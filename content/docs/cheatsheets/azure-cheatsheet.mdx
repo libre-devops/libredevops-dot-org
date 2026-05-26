@@ -33,7 +33,7 @@ az login --service-principal \
 az login --identity
 az login --identity --username "<client-id-of-uami>"
 
-# Federated (OIDC) — GitHub Actions
+# Federated (OIDC) - GitHub Actions
 az login \
   --service-principal \
   --username     "$AZURE_CLIENT_ID" \
@@ -118,7 +118,7 @@ az vm list --query 'length([])' -o tsv
 ### Pagination and large results
 
 ```bash
-# Most list commands paginate automatically — use these flags to control
+# Most list commands paginate automatically - use these flags to control
 az resource list --resource-group rg-myapp-prod-uksouth   # auto-paginates
 
 # Explicit next link pattern (REST / az rest)
@@ -146,7 +146,7 @@ az rest --method PUT \
 --output / -o       # json | table | tsv | yaml | jsonc | none
 --query             # JMESPath expression
 --only-show-errors  # suppress warnings
---no-wait           # async — don't block for long operations
+--no-wait           # async - don't block for long operations
 --verbose           # show HTTP requests
 --debug             # full wire-level logging
 ```
@@ -167,7 +167,7 @@ az group list --query "[?location=='uksouth']" -o table
 # Show
 az group show -n rg-myapp-prod-uksouth -o json
 
-# Update tags (replace — use ARM API or Bicep for merge)
+# Update tags (replace - use ARM API or Bicep for merge)
 az group update -n rg-myapp-prod-uksouth --tags Environment=prod Owner=platform-team
 
 # Lock (prevent accidental deletion)
@@ -293,7 +293,7 @@ az ad app credential reset \
   --id      "$APP_ID" \
   --years   1 \
   --display-name "ci-secret"
-# Output contains clientSecret — capture immediately
+# Output contains clientSecret - capture immediately
 
 # Add federated credential (GitHub Actions OIDC)
 az ad app federated-credential create --id "$APP_ID" --parameters '{
@@ -401,7 +401,7 @@ az keyvault certificate list   --vault-name kv-myapp-prod -o table
 az keyvault certificate show   --vault-name kv-myapp-prod --name my-cert
 az keyvault certificate download --vault-name kv-myapp-prod --name my-cert --file cert.pem
 
-# Diagnostics — enable audit logging to Log Analytics
+# Diagnostics - enable audit logging to Log Analytics
 az monitor diagnostic-settings create \
   --name              kv-diag \
   --resource          "/subscriptions/$SUB/resourceGroups/rg-myapp-prod-uksouth/providers/Microsoft.KeyVault/vaults/kv-myapp-prod" \
@@ -629,7 +629,7 @@ az aks create \
 # Get credentials
 az aks get-credentials -n aks-myapp-prod -g rg-myapp-prod-uksouth --overwrite-existing
 
-# Admin credentials (bypass RBAC — emergency only)
+# Admin credentials (bypass RBAC - emergency only)
 az aks get-credentials -n aks-myapp-prod -g rg-myapp-prod-uksouth --admin
 
 # Add node pool
@@ -951,7 +951,7 @@ az monitor diagnostic-settings create \
 ### Alerts
 
 ```bash
-# Metric alert — CPU > 85% for 5 min
+# Metric alert - CPU > 85% for 5 min
 az monitor metrics alert create \
   --name              cpu-alert \
   --resource-group    rg-myapp-prod-uksouth \
@@ -983,7 +983,7 @@ az monitor scheduled-query create \
   --severity       2 \
   --action-groups  "$ACTION_GROUP_ID"
 
-# Activity log alert — resource group deletions
+# Activity log alert - resource group deletions
 az monitor activity-log alert create \
   --name              rg-delete-alert \
   --resource-group    rg-monitoring \
@@ -998,7 +998,7 @@ az monitor activity-log alert create \
 # List workbooks
 az monitor app-insights workbook list --resource-group rg-monitoring -o table
 
-# Export dashboard definition (az portal is not a built-in command — use az rest)
+# Export dashboard definition (az portal is not a built-in command - use az rest)
 az rest --method GET \
   --url "https://management.azure.com/subscriptions/$SUB/resourceGroups/rg-monitoring/providers/Microsoft.Portal/dashboards/MyDashboard?api-version=2020-09-01-preview" \
   -o json > dashboard.json
@@ -1175,7 +1175,7 @@ az deployment group cancel -g rg-myapp-prod-uksouth -n my-deployment
 ### Deployment Stacks
 
 ```bash
-# Create stack (replaces ad-hoc RG deployments — manages lifecycle)
+# Create stack (replaces ad-hoc RG deployments - manages lifecycle)
 az stack group create \
   --name              stack-myapp-prod \
   --resource-group    rg-myapp-prod-uksouth \
@@ -1362,12 +1362,12 @@ done | jq -s 'flatten' | jq -r '.[] | [.Sub, .RG, .Name, .Size] | @tsv' | column
 ### Azure CLI in CI (non-interactive)
 
 ```bash
-# GitHub Actions — use azure/login action, then:
+# GitHub Actions - use azure/login action, then:
 az account show          # verify context
 az group list -o table   # confirm access
 
 # Azure Pipelines (service connection sets environment automatically)
-# ARM_* variables auto-set — no az login needed with AzureCLI@2 task
+# ARM_* variables auto-set - no az login needed with AzureCLI@2 task
 ```
 
 ### Useful aliases for $PROFILE / .bashrc

