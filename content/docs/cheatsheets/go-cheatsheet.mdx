@@ -1,0 +1,1214 @@
+---
+title: Go Cheatsheet
+description: Go toolchain, modules, types, concurrency, interfaces, error handling, HTTP, and Azure SDK. Targets Go 1.22+.
+---
+
+# Go Cheat Sheet
+
+Go toolchain, language patterns, and standard library. Targets Go 1.22+ and C# developers moving to Go.
+
+---
+
+## Toolchain & Modules
+
+### Installation
+
+```bash
+# Linux — fetch latest from go.dev
+GO_VERSION=$(curl -s https://go.dev/VERSION?m=text | head -1)
+wget "https://go.dev/dl/${GO_VERSION}.linux-amd64.tar.gz"
+sudo rm -rf /usr/local/go && sudo tar -C /usr/local -xzf "${GO_VERSION}.linux-amd64.tar.gz"
+echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc && source ~/.bashrc
+
+# macOS
+brew install go
+
+# Windows
+winget install GoLang.Go
+
+go version
+go env GOPATH GOROOT
+```
+
+### goenv — Go Version Manager
+
+```bash
+# Install goenv (Linux/macOS)
+git clone https://github.com/syndbg/goenv.git ~/.goenv
+
+# Add to ~/.bashrc / ~/.zshrc
+export GOENV_ROOT="$HOME/.goenv"
+export PATH="$GOENV_ROOT/bin:$PATH"
+eval "$(goenv init -)"
+export PATH="$GOROOT/bin:$PATH"
+export PATH="$GOPATH/bin:$PATH"
+
+source ~/.bashrc
+
+# List available Go versions
+goenv install --list
+
+# Install and activate a version
+goenv install 1.24.0
+goenv global  1.24.0    # default for the machine
+goenv local   1.24.0    # writes .go-version in the current directory
+goenv version           # show active version
+
+# List installed versions
+goenv versions
+
+# Install goenv on Windows (g — simpler alternative)
+# PowerShell (run as Admin):
+winget install GoLang.Go   # baseline install
+# then use 'g' for switching: https://github.com/stefanmaric/g
+```
+
+### Modules
+
+```bash
+# Initialise a new module
+go mod init github.com/org/myapp
+
+# Add / tidy dependencies
+go get github.com/some/package@latest
+go mod tidy       # prune unused, add missing
+go mod download   # pre-fetch to local cache
+
+# Upgrade all direct dependencies
+go get -u ./...
+
+# Vendor (reproducible offline builds)
+go mod vendor
+go build -mod=vendor ./...
+
+# Check for vulnerabilities
+go install golang.org/x/vuln/cmd/govulncheck@latest
+govulncheck ./...
+```
+
+### go.mod — key directives
+
+```go
+module github.com/org/myapp
+
+go 1.22
+
+require (
+    github.com/Azure/azure-sdk-for-go/sdk/azidentity                          v1.7.0
+    github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources v1.2.0
+    golang.org/x/sync                                                          v0.7.0
+)
+
+// Replace a module with a local fork
+replace github.com/some/pkg => ../local-fork
+```
+
+### Build, run, test
+
+```bash
+# Build
+go build ./...                           # all packages
+go build -o bin/app ./cmd/app            # named binary
+go build -ldflags="-s -w" -o app ./...  # stripped (smaller binary)
+
+# Cross-compile
+GOOS=linux   GOARCH=amd64 go build -o app-linux   ./cmd/app
+GOOS=darwin  GOARCH=arm64 go build -o app-mac     ./cmd/app
+GOOS=windows GOARCH=amd64 go build -o app.exe     ./cmd/app
+
+# Run
+go run ./cmd/app -- --flag value
+
+# Test
+go test ./...
+go test -v -run TestMyFunc ./pkg/...
+go test -race ./...                      # data race detector
+go test -cover ./...
+go test -coverprofile=cov.out ./... && go tool cover -html=cov.out
+
+# Benchmarks
+go test -bench=. -benchmem ./...
+
+# Static analysis
+go vet ./...
+go install honnef.co/go/tools/cmd/staticcheck@latest && staticcheck ./...
+```
+
+---
+
+## Variables, Types & Constants
+
+```go
+// Variable declarations
+var name string = "Alice"
+var count int                    // zero value: 0
+x := 42                          // short declaration (functions only)
+a, b := 1, "hello"
+
+// Constants
+const Pi = 3.14159
+const (
+    StatusOK       = 200
+    StatusNotFound = 404
+)
+
+// iota — auto-incrementing constant
+type Direction int
+const (
+    North Direction = iota  // 0
+    East                    // 1
+    South                   // 2
+    West                    // 3
+)
+
+// Basic types
+var (
+    b   bool    = true
+    i   int     = -42          // platform-sized (32 or 64-bit)
+    i64 int64   = 9223372036854775807
+    f64 float64 = 3.14
+    s   string  = "hello"
+    r   rune    = 'A'          // alias for int32 (Unicode code point)
+    by  byte    = 0xFF         // alias for uint8
+)
+
+// Type conversion (always explicit — no implicit casting)
+f := float64(i64)
+u := uint(f)
+
+// Pointers
+p := &i    // address of i
+*p = 99    // dereference to set
+fmt.Println(*p, i)  // 99 99
+
+// new vs make
+ptr := new(int)             // allocates zeroed int, returns *int
+sl  := make([]int, 0, 10)  // slice: len=0, cap=10
+m   := make(map[string]int) // initialised map (nil map panics on write)
+```
+
+---
+
+## Functions
+
+```go
+// Multiple return values
+func Divide(a, b float64) (float64, error) {
+    if b == 0 {
+        return 0, fmt.Errorf("divide by zero")
+    }
+    return a / b, nil
+}
+
+result, err := Divide(10, 3)
+if err != nil { log.Fatal(err) }
+
+// Named return values
+func MinMax(nums []int) (min, max int) {
+    min, max = nums[0], nums[0]
+    for _, n := range nums[1:] {
+        if n < min { min = n }
+        if n > max { max = n }
+    }
+    return  // naked return
+}
+
+// Variadic
+func Sum(nums ...int) int {
+    total := 0
+    for _, n := range nums { total += n }
+    return total
+}
+Sum(1, 2, 3)
+Sum(nums...)  // spread a slice
+
+// First-class functions & closures
+func Multiplier(factor int) func(int) int {
+    return func(n int) int { return n * factor }
+}
+double := Multiplier(2)
+fmt.Println(double(5))  // 10
+
+// defer — runs LIFO when function returns (including panic)
+func ReadFile(path string) error {
+    f, err := os.Open(path)
+    if err != nil { return err }
+    defer f.Close()  // guaranteed cleanup
+    // ... read
+    return nil
+}
+```
+
+---
+
+## Structs & Methods
+
+```go
+// Struct definition
+type User struct {
+    ID        string
+    Name      string
+    Email     string
+    CreatedAt time.Time
+    role      string    // unexported — package-private
+}
+
+// Constructor (New* convention)
+func NewUser(name, email string) *User {
+    return &User{
+        ID:        uuid.New().String(),
+        Name:      name,
+        Email:     email,
+        CreatedAt: time.Now().UTC(),
+        role:      "member",
+    }
+}
+
+// Value receiver — read-only, receives a copy
+func (u User) String() string {
+    return fmt.Sprintf("%s <%s>", u.Name, u.Email)
+}
+
+// Pointer receiver — can mutate, avoids copying large structs
+func (u *User) Promote() { u.role = "admin" }
+
+// Embedding — composition over inheritance
+type Admin struct {
+    User                  // all User fields and methods promoted
+    Permissions []string
+}
+
+admin := Admin{
+    User:        *NewUser("Alice", "alice@example.com"),
+    Permissions: []string{"read", "write", "delete"},
+}
+fmt.Println(admin.Name)  // promoted from User
+admin.Promote()          // promoted method
+
+// Struct tags (JSON, DB, validation)
+type APIResponse struct {
+    ID      string    `json:"id"`
+    Message string    `json:"message,omitempty"`
+    Error   string    `json:"error,omitempty"`
+    At      time.Time `json:"timestamp"`
+}
+```
+
+---
+
+## Interfaces
+
+```go
+// Interface definition
+type Repository[T any] interface {
+    FindByID(ctx context.Context, id string) (T, error)
+    Save(ctx context.Context, entity T) error
+    Delete(ctx context.Context, id string) error
+    List(ctx context.Context) ([]T, error)
+}
+
+// Compile-time satisfaction check — catches drift at build time
+var _ Repository[User] = (*userRepository)(nil)
+
+// Implementation
+type userRepository struct{ db *sql.DB }
+
+func (r *userRepository) FindByID(ctx context.Context, id string) (User, error) {
+    var u User
+    err := r.db.QueryRowContext(ctx,
+        "SELECT id, name, email FROM users WHERE id = $1", id).
+        Scan(&u.ID, &u.Name, &u.Email)
+    return u, err
+}
+
+// Type assertion
+var v any = "hello"
+if s, ok := v.(string); ok {
+    fmt.Println("string:", s)
+}
+
+// Type switch
+switch t := v.(type) {
+case int:    fmt.Println("int:", t)
+case string: fmt.Println("string:", t)
+case []byte: fmt.Println("bytes:", len(t))
+default:     fmt.Printf("unknown: %T\n", t)
+}
+```
+
+---
+
+## Error Handling
+
+```go
+// Wrapping — preserves the original error for errors.Is / errors.As
+func GetUser(ctx context.Context, id string) (User, error) {
+    u, err := db.FindByID(ctx, id)
+    if err != nil {
+        return User{}, fmt.Errorf("GetUser %s: %w", id, err)
+    }
+    return u, nil
+}
+
+// errors.Is — sentinel comparison through the chain
+if errors.Is(err, sql.ErrNoRows) { /* not found */ }
+
+// Custom error type
+type NotFoundError struct {
+    Resource string
+    ID       string
+}
+func (e *NotFoundError) Error() string {
+    return fmt.Sprintf("%s %q not found", e.Resource, e.ID)
+}
+
+// errors.As — unwrap to concrete type
+var nfe *NotFoundError
+if errors.As(err, &nfe) {
+    fmt.Printf("missing: %s/%s\n", nfe.Resource, nfe.ID)
+}
+
+// Sentinel errors
+var (
+    ErrNotFound    = errors.New("not found")
+    ErrUnauthorized = errors.New("unauthorized")
+)
+
+// Multi-error (Go 1.20+)
+err1, err2 := errors.New("first"), errors.New("second")
+combined := errors.Join(err1, err2)
+fmt.Println(errors.Is(combined, err1))  // true
+```
+
+---
+
+## Collections
+
+```go
+// Slices
+s := []int{1, 2, 3}
+s = append(s, 4, 5)
+s[1:3]   // [2 3]
+s[:2]    // [1 2]
+s[2:]    // [3 4 5]
+
+dst := make([]int, len(s))
+copy(dst, s)
+
+// slices package (Go 1.21+)
+import "slices"
+slices.Sort(s)
+slices.Contains(s, 3)
+slices.Index(s, 3)
+_, found := slices.BinarySearch(s, 3)
+
+// Range over integer (Go 1.22+)
+for i := range 5 {   // 0 1 2 3 4
+    fmt.Println(i)
+}
+
+// Maps
+m := map[string]int{"alice": 30, "bob": 25}
+m["carol"] = 28
+delete(m, "bob")
+count, ok := m["alice"]  // ok is false if absent
+
+for k, v := range m {
+    fmt.Printf("%s: %d\n", k, v)
+}
+
+// maps package (Go 1.21+)
+import "maps"
+cloned := maps.Clone(m)
+keys   := slices.Collect(maps.Keys(m))   // unordered []string
+```
+
+---
+
+## Generics
+
+```go
+// Generic function
+func Map[T, U any](s []T, fn func(T) U) []U {
+    out := make([]U, len(s))
+    for i, v := range s { out[i] = fn(v) }
+    return out
+}
+names := Map(users, func(u User) string { return u.Name })
+
+// Type constraint with tilde (underlying type)
+type Number interface {
+    ~int | ~int32 | ~int64 | ~float32 | ~float64
+}
+
+func Sum[T Number](nums []T) T {
+    var total T
+    for _, n := range nums { total += n }
+    return total
+}
+
+// Generic Result type
+type Result[T any] struct {
+    Value T
+    Err   error
+}
+
+func OK[T any](v T) Result[T]       { return Result[T]{Value: v} }
+func Fail[T any](err error) Result[T] { return Result[T]{Err: err} }
+
+// Generic thread-safe cache
+type Cache[K comparable, V any] struct {
+    mu    sync.RWMutex
+    items map[K]V
+}
+
+func NewCache[K comparable, V any]() *Cache[K, V] {
+    return &Cache[K, V]{items: make(map[K]V)}
+}
+
+func (c *Cache[K, V]) Set(key K, val V) {
+    c.mu.Lock()
+    defer c.mu.Unlock()
+    c.items[key] = val
+}
+
+func (c *Cache[K, V]) Get(key K) (V, bool) {
+    c.mu.RLock()
+    defer c.mu.RUnlock()
+    v, ok := c.items[key]
+    return v, ok
+}
+```
+
+---
+
+## Goroutines & Channels
+
+```go
+// Goroutine
+go func() {
+    fmt.Println("running concurrently")
+}()
+
+// Channels
+ch  := make(chan int)     // unbuffered — send blocks until received
+buf := make(chan int, 10) // buffered  — send blocks only when full
+
+go func() { ch <- 42 }()
+v := <-ch
+
+// Close signals completion; range drains until closed
+close(ch)
+for v := range ch { fmt.Println(v) }
+
+// WaitGroup
+var wg sync.WaitGroup
+for _, url := range urls {
+    wg.Add(1)
+    go func(u string) {
+        defer wg.Done()
+        fetch(u)
+    }(url)
+}
+wg.Wait()
+
+// errgroup (golang.org/x/sync) — WaitGroup with error propagation
+g, ctx := errgroup.WithContext(ctx)
+for _, url := range urls {
+    url := url
+    g.Go(func() error { return fetch(ctx, url) })
+}
+if err := g.Wait(); err != nil { log.Fatal(err) }
+
+// Select — multiplex channels
+select {
+case msg := <-ch1:
+    fmt.Println("ch1:", msg)
+case msg := <-ch2:
+    fmt.Println("ch2:", msg)
+case <-ctx.Done():
+    return ctx.Err()
+case <-time.After(5 * time.Second):
+    return errors.New("timeout")
+default:
+    // non-blocking: no channel ready
+}
+
+// Worker pool
+func WorkerPool[T, R any](ctx context.Context, jobs []T, workers int, fn func(T) R) []R {
+    jobCh := make(chan T, len(jobs))
+    resCh := make(chan R, len(jobs))
+
+    var wg sync.WaitGroup
+    for range workers {
+        wg.Add(1)
+        go func() {
+            defer wg.Done()
+            for job := range jobCh {
+                resCh <- fn(job)
+            }
+        }()
+    }
+
+    for _, j := range jobs { jobCh <- j }
+    close(jobCh)
+    go func() { wg.Wait(); close(resCh) }()
+
+    var results []R
+    for r := range resCh { results = append(results, r) }
+    return results
+}
+```
+
+---
+
+## sync Package
+
+```go
+// Mutex — exclusive lock
+var mu sync.Mutex
+mu.Lock()
+defer mu.Unlock()
+
+// RWMutex — multiple concurrent readers, one writer
+var rw sync.RWMutex
+rw.RLock(); defer rw.RUnlock()   // read path
+rw.Lock();  defer rw.Unlock()    // write path
+
+// Once — run exactly once regardless of concurrent callers
+var (
+    once sync.Once
+    db   *Database
+)
+func GetDB() *Database {
+    once.Do(func() { db = connect() })
+    return db
+}
+
+// atomic.Int64 — lock-free counter
+var counter atomic.Int64
+counter.Add(1)
+fmt.Println(counter.Load())
+
+// atomic.Value — arbitrary type, lock-free reads
+var cfg atomic.Value
+cfg.Store(Config{MaxRetries: 3})
+current := cfg.Load().(Config)
+```
+
+---
+
+## Context
+
+```go
+// Always pass context as the first parameter
+func ProcessRequest(ctx context.Context, id string) error {
+    select {
+    case <-ctx.Done():
+        return ctx.Err()
+    default:
+    }
+    return db.QueryContext(ctx, id)
+}
+
+// Timeout
+ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+defer cancel()   // always cancel — releases timer resources
+
+// Cancellation
+ctx, cancel = context.WithCancel(context.Background())
+go func() { time.Sleep(2 * time.Second); cancel() }()
+
+// Values (request-scoped only — trace IDs, auth tokens, etc.)
+type ctxKey string
+const requestIDKey ctxKey = "requestID"
+
+ctx = context.WithValue(ctx, requestIDKey, "req-abc123")
+rid := ctx.Value(requestIDKey).(string)
+```
+
+---
+
+## HTTP Server
+
+```go
+// Method-based routing (Go 1.22+)
+mux := http.NewServeMux()
+
+mux.HandleFunc("GET /users/{id}", func(w http.ResponseWriter, r *http.Request) {
+    id := r.PathValue("id")     // extracts {id} from path
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(map[string]string{"id": id})
+})
+
+mux.HandleFunc("POST /users",      createUserHandler)
+mux.HandleFunc("DELETE /users/{id}", deleteUserHandler)
+
+// Middleware
+func Logging(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        start := time.Now()
+        next.ServeHTTP(w, r)
+        slog.Info("request", "method", r.Method, "path", r.URL.Path, "dur", time.Since(start))
+    })
+}
+
+func RequireAuth(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        if !validateToken(r.Header.Get("Authorization")) {
+            http.Error(w, "unauthorized", http.StatusUnauthorized)
+            return
+        }
+        next.ServeHTTP(w, r)
+    })
+}
+
+// Chain middleware
+handler := Logging(RequireAuth(mux))
+
+srv := &http.Server{
+    Addr:         ":8080",
+    Handler:      handler,
+    ReadTimeout:  10 * time.Second,
+    WriteTimeout: 30 * time.Second,
+    IdleTimeout:  120 * time.Second,
+}
+
+// Graceful shutdown
+go func() {
+    if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+        log.Fatal(err)
+    }
+}()
+
+quit := make(chan os.Signal, 1)
+signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+<-quit
+
+ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+defer cancel()
+srv.Shutdown(ctx)
+```
+
+---
+
+## JSON
+
+```go
+// Marshal (Go → JSON)
+data, err  := json.Marshal(user)
+pretty, err := json.MarshalIndent(user, "", "  ")
+
+// Unmarshal (JSON → Go)
+var u User
+if err := json.Unmarshal(data, &u); err != nil {
+    return fmt.Errorf("unmarshal: %w", err)
+}
+
+// Streaming encoder/decoder (preferred for HTTP handlers)
+func writeJSON(w http.ResponseWriter, status int, v any) {
+    w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(status)
+    json.NewEncoder(w).Encode(v)
+}
+
+func readJSON(r *http.Request, dst any) error {
+    dec := json.NewDecoder(r.Body)
+    dec.DisallowUnknownFields()
+    return dec.Decode(dst)
+}
+
+// Custom marshaling
+type Duration struct{ time.Duration }
+
+func (d Duration) MarshalJSON() ([]byte, error) {
+    return json.Marshal(d.String())
+}
+
+func (d *Duration) UnmarshalJSON(b []byte) error {
+    var s string
+    if err := json.Unmarshal(b, &s); err != nil { return err }
+    dur, err := time.ParseDuration(s)
+    d.Duration = dur
+    return err
+}
+```
+
+---
+
+## Structured Logging (slog)
+
+```go
+// slog — built-in structured logging (Go 1.21+)
+import "log/slog"
+
+slog.Info("server starting", "addr", ":8080")
+slog.Error("request failed", "err", err, "path", r.URL.Path)
+
+// JSON logger
+logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+    Level: slog.LevelDebug,
+}))
+slog.SetDefault(logger)
+
+// Logger with persistent fields
+log := logger.With("service", "api", "version", "1.0")
+log.Info("connected", "db", "postgres")
+
+// Grouped attributes
+log.LogAttrs(ctx, slog.LevelInfo, "request",
+    slog.Group("http",
+        slog.String("method", r.Method),
+        slog.String("path",   r.URL.Path),
+        slog.Int("status",    200),
+    ),
+)
+```
+
+---
+
+## Testing
+
+```go
+// Table-driven tests (idiomatic Go)
+func TestDivide(t *testing.T) {
+    tests := []struct {
+        name    string
+        a, b    float64
+        want    float64
+        wantErr bool
+    }{
+        {"normal",      10, 2, 5.0, false},
+        {"float result", 7, 2, 3.5, false},
+        {"div by zero",  5, 0, 0,   true},
+    }
+
+    for _, tc := range tests {
+        t.Run(tc.name, func(t *testing.T) {
+            got, err := Divide(tc.a, tc.b)
+            if (err != nil) != tc.wantErr {
+                t.Fatalf("err = %v; wantErr %v", err, tc.wantErr)
+            }
+            if !tc.wantErr && got != tc.want {
+                t.Errorf("got %v; want %v", got, tc.want)
+            }
+        })
+    }
+}
+
+// Parallel subtests
+func TestFetch(t *testing.T) {
+    t.Parallel()
+    t.Run("success", func(t *testing.T) {
+        t.Parallel()
+        // ...
+    })
+}
+
+// Benchmark
+func BenchmarkSum(b *testing.B) {
+    data := make([]int, 10_000)
+    b.ResetTimer()
+    for range b.N {
+        Sum(data...)
+    }
+}
+
+// Fuzz testing (Go 1.18+)
+func FuzzParse(f *testing.F) {
+    f.Add("valid-input")
+    f.Fuzz(func(t *testing.T, input string) {
+        _, _ = Parse(input)  // must not panic
+    })
+}
+```
+
+```bash
+go test ./...
+go test -v -run TestDivide ./...
+go test -race ./...                         # race detector
+go test -fuzz=FuzzParse -fuzztime=30s       # fuzz for 30s
+go test -bench=. -benchmem ./...
+go test -coverprofile=cov.out ./... && go tool cover -html=cov.out
+```
+
+---
+
+## Azure SDK for Go
+
+```bash
+go get github.com/Azure/azure-sdk-for-go/sdk/azidentity
+go get github.com/Azure/azure-sdk-for-go/sdk/azcore
+go get github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources
+go get github.com/Azure/azure-sdk-for-go/sdk/storage/azblob
+go get github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azsecrets
+```
+
+### Authentication
+
+```go
+import "github.com/Azure/azure-sdk-for-go/sdk/azidentity"
+
+// DefaultAzureCredential — env vars → workload identity → managed identity → CLI
+cred, err := azidentity.NewDefaultAzureCredential(nil)
+
+// Managed identity (user-assigned)
+cred, err = azidentity.NewManagedIdentityCredential(&azidentity.ManagedIdentityCredentialOptions{
+    ID: azidentity.ClientID("YOUR-UAMI-CLIENT-ID"),
+})
+
+// Service principal (client secret)
+cred, err = azidentity.NewClientSecretCredential(
+    os.Getenv("AZURE_TENANT_ID"),
+    os.Getenv("AZURE_CLIENT_ID"),
+    os.Getenv("AZURE_CLIENT_SECRET"),
+    nil,
+)
+
+// Workload identity (GitHub Actions / AKS pod)
+cred, err = azidentity.NewWorkloadIdentityCredential(nil)
+```
+
+### Resource groups & Blob Storage
+
+```go
+import (
+    "github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
+    "github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
+    "github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
+    "github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azsecrets"
+)
+
+// List resource groups
+rgClient, err := armresources.NewResourceGroupsClient(subscriptionID, cred, nil)
+pager := rgClient.NewListPager(nil)
+for pager.More() {
+    page, err := pager.NextPage(ctx)
+    if err != nil { return err }
+    for _, rg := range page.Value {
+        fmt.Printf("%s  %s\n", *rg.Name, *rg.Location)
+    }
+}
+
+// Create resource group
+_, err = rgClient.CreateOrUpdate(ctx, "rg-myapp-prod",
+    armresources.ResourceGroup{Location: to.Ptr("uksouth")}, nil)
+
+// Key Vault secrets
+kvClient, err := azsecrets.NewClient("https://my-vault.vault.azure.net", cred, nil)
+
+secret, err := kvClient.GetSecret(ctx, "my-secret", "", nil)
+fmt.Println(*secret.Value)
+
+_, err = kvClient.SetSecret(ctx, "my-secret",
+    azsecrets.SetSecretParameters{Value: to.Ptr("new-value")}, nil)
+
+// Blob storage
+blobClient, err := azblob.NewClient(
+    "https://myaccount.blob.core.windows.net", cred, nil)
+
+// Upload
+_, err = blobClient.UploadBuffer(ctx, "my-container", "path/file.json",
+    []byte(`{"key":"value"}`), nil)
+
+// Download
+stream, err := blobClient.DownloadStream(ctx, "my-container", "path/file.json", nil)
+data, err := io.ReadAll(stream.Body)
+defer stream.Body.Close()
+
+// List blobs
+listPager := blobClient.NewListBlobsFlatPager("my-container", nil)
+for listPager.More() {
+    page, _ := listPager.NextPage(ctx)
+    for _, item := range page.Segment.BlobItems {
+        fmt.Println(*item.Name)
+    }
+}
+```
+
+---
+
+## Azure Functions Custom Handler
+
+Go runs in Azure Functions as a **custom handler** — the Functions runtime forwards triggers to a plain HTTP server you write. No SDK required; just `net/http` and `encoding/json`.
+
+### Project structure
+
+```
+myfunction/
+├── host.json
+├── local.settings.json
+├── HttpTrigger/
+│   └── function.json
+├── QueueTrigger/
+│   └── function.json
+├── main.go
+└── go.mod
+```
+
+### host.json
+
+```json
+{
+  "version": "2.0",
+  "extensionBundle": {
+    "id": "Microsoft.Azure.Functions.ExtensionBundle",
+    "version": "[4.*, 5.0.0)"
+  },
+  "customHandler": {
+    "description": {
+      "defaultExecutablePath": "handler",
+      "workingDirectory": "",
+      "arguments": []
+    },
+    "enableForwardingHttpRequest": true
+  }
+}
+```
+
+`enableForwardingHttpRequest: true` passes the raw HTTP request directly to your server — use this for HTTP triggers. Set it to `false` for non-HTTP triggers (queue, timer, Service Bus) which use the JSON envelope protocol instead.
+
+### function.json — HTTP trigger
+
+```json
+{
+  "bindings": [
+    {
+      "type": "httpTrigger",
+      "direction": "in",
+      "name": "req",
+      "methods": ["get", "post"],
+      "authLevel": "anonymous",
+      "route": "users/{id}"
+    },
+    {
+      "type": "http",
+      "direction": "out",
+      "name": "res"
+    }
+  ]
+}
+```
+
+### function.json — Queue trigger
+
+```json
+{
+  "bindings": [
+    {
+      "type": "queueTrigger",
+      "direction": "in",
+      "name": "queueItem",
+      "queueName": "my-queue",
+      "connection": "AzureWebJobsStorage"
+    }
+  ]
+}
+```
+
+### main.go
+
+```go
+package main
+
+import (
+    "encoding/json"
+    "fmt"
+    "log/slog"
+    "net/http"
+    "os"
+)
+
+// ── HTTP trigger (enableForwardingHttpRequest: true) ─────────────────────────
+// The runtime forwards the raw request; respond as you would any HTTP handler.
+func httpTrigger(w http.ResponseWriter, r *http.Request) {
+    id := r.PathValue("id")   // route parameter defined in function.json
+
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(map[string]string{
+        "id":      id,
+        "message": fmt.Sprintf("Hello, %s!", id),
+    })
+}
+
+// ── Non-HTTP trigger envelope (enableForwardingHttpRequest: false) ────────────
+// The runtime wraps the trigger payload in a JSON envelope; you must respond
+// with an Outputs map so the runtime can bind output bindings.
+
+type InvokeRequest struct {
+    Data     map[string]json.RawMessage `json:"Data"`
+    Metadata map[string]json.RawMessage `json:"Metadata"`
+}
+
+type InvokeResponse struct {
+    Outputs     map[string]any `json:"Outputs"`
+    Logs        []string       `json:"Logs"`
+    ReturnValue any            `json:"ReturnValue,omitempty"`
+}
+
+func queueTrigger(w http.ResponseWriter, r *http.Request) {
+    var req InvokeRequest
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        http.Error(w, err.Error(), http.StatusBadRequest)
+        return
+    }
+
+    var message string
+    if err := json.Unmarshal(req.Data["queueItem"], &message); err != nil {
+        http.Error(w, "bad payload", http.StatusBadRequest)
+        return
+    }
+
+    slog.Info("processing queue message", "message", message)
+
+    resp := InvokeResponse{
+        Outputs: map[string]any{},
+        Logs:    []string{fmt.Sprintf("processed: %s", message)},
+    }
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(resp)
+}
+
+func main() {
+    port := os.Getenv("FUNCTIONS_CUSTOMHANDLER_PORT")
+    if port == "" {
+        port = "8080"
+    }
+
+    mux := http.NewServeMux()
+
+    // Route name must match the function folder name
+    mux.HandleFunc("/api/HttpTrigger", httpTrigger)
+    mux.HandleFunc("/QueueTrigger",    queueTrigger)
+
+    slog.Info("custom handler listening", "port", port)
+    if err := http.ListenAndServe(":"+port, mux); err != nil {
+        slog.Error("server error", "err", err)
+        os.Exit(1)
+    }
+}
+```
+
+### Build & deploy
+
+```bash
+# Build for Linux (Functions runtime is Linux-based)
+GOOS=linux GOARCH=amd64 go build -o handler .
+
+# Run locally with Azure Functions Core Tools
+func start
+
+# Deploy to Azure
+func azure functionapp publish <your-function-app-name>
+
+# Or deploy via zip
+zip -r deploy.zip handler host.json HttpTrigger/ QueueTrigger/
+az functionapp deployment source config-zip \
+  --resource-group rg-myapp \
+  --name <your-function-app-name> \
+  --src deploy.zip
+```
+
+### local.settings.json
+
+```json
+{
+  "IsEncrypted": false,
+  "Values": {
+    "FUNCTIONS_WORKER_RUNTIME": "custom",
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true"
+  }
+}
+```
+
+---
+
+## Useful Patterns
+
+### Functional options
+
+```go
+type serverConfig struct {
+    host    string
+    port    int
+    timeout time.Duration
+    tls     bool
+}
+
+type Option func(*serverConfig)
+
+func WithHost(h string) Option           { return func(c *serverConfig) { c.host = h } }
+func WithPort(p int) Option              { return func(c *serverConfig) { c.port = p } }
+func WithTimeout(d time.Duration) Option { return func(c *serverConfig) { c.timeout = d } }
+func WithTLS() Option                    { return func(c *serverConfig) { c.tls = true } }
+
+func NewServer(opts ...Option) *Server {
+    cfg := &serverConfig{host: "localhost", port: 8080, timeout: 30 * time.Second}
+    for _, o := range opts { o(cfg) }
+    return &Server{cfg: cfg}
+}
+
+// Usage
+srv := NewServer(
+    WithPort(9090),
+    WithTimeout(60*time.Second),
+    WithTLS(),
+)
+```
+
+### Retry with exponential backoff
+
+```go
+func Retry(ctx context.Context, attempts int, fn func() error) error {
+    var err error
+    for i := range attempts {
+        if err = fn(); err == nil { return nil }
+        wait := time.Duration(1<<uint(i)) * 100 * time.Millisecond  // 100ms, 200ms, 400ms…
+        select {
+        case <-time.After(wait):
+        case <-ctx.Done():
+            return fmt.Errorf("retry cancelled: %w", ctx.Err())
+        }
+    }
+    return fmt.Errorf("after %d attempts: %w", attempts, err)
+}
+```
+
+### Pipeline with context cancellation
+
+```go
+func generate(ctx context.Context, nums ...int) <-chan int {
+    out := make(chan int)
+    go func() {
+        defer close(out)
+        for _, n := range nums {
+            select {
+            case out <- n:
+            case <-ctx.Done():
+                return
+            }
+        }
+    }()
+    return out
+}
+
+func square(ctx context.Context, in <-chan int) <-chan int {
+    out := make(chan int)
+    go func() {
+        defer close(out)
+        for n := range in {
+            select {
+            case out <- n * n:
+            case <-ctx.Done():
+                return
+            }
+        }
+    }()
+    return out
+}
+
+ctx := context.Background()
+for v := range square(ctx, generate(ctx, 1, 2, 3, 4, 5)) {
+    fmt.Println(v)  // 1 4 9 16 25
+}
+```

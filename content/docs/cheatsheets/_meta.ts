@@ -1,6 +1,7 @@
 export default {
     terraform:             'Terraform',
     'git-cheatsheet':      'Git',
+    'go-cheatsheet':       'Go',
     'aws-cheatsheet':      'AWS',
     'azure-cheatsheet':    'Azure',
     'bash-cheatsheet':     'Bash',
