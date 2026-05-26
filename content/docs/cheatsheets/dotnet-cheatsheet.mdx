@@ -1,0 +1,1035 @@
+---
+title: .NET Cheatsheet
+description: .NET CLI, C# patterns, interfaces, classes, records, LINQ, async, Azure SDK, Kusto SDK, and dependency injection. Targets .NET 10.
+---
+
+# .NET Cheat Sheet
+
+.NET CLI, C# language patterns, and Azure SDK integration. Targets .NET 10 and C# 14.
+
+---
+
+## .NET CLI
+
+### Project management
+
+```bash
+# Install / update SDK
+# Download from https://dot.net or:
+winget install Microsoft.DotNet.SDK.10
+brew install dotnet
+
+dotnet --version
+dotnet --list-sdks
+dotnet --list-runtimes
+
+# New projects
+dotnet new console   -n MyApp    -o ./src/MyApp
+dotnet new classlib  -n MyLib    -o ./src/MyLib
+dotnet new webapi    -n MyApi    -o ./src/MyApi    --use-controllers
+dotnet new worker    -n MyWorker -o ./src/MyWorker
+dotnet new xunit     -n MyApp.Tests -o ./tests/MyApp.Tests
+dotnet new sln       -n MySolution
+
+# Add projects to solution
+dotnet sln add ./src/MyApp/MyApp.csproj
+dotnet sln add ./src/MyLib/MyLib.csproj
+dotnet sln add ./tests/MyApp.Tests/MyApp.Tests.csproj
+
+# Add project reference
+dotnet add ./src/MyApp/MyApp.csproj reference ./src/MyLib/MyLib.csproj
+```
+
+### Build, run, test
+
+```bash
+# Restore, build, run
+dotnet restore
+dotnet build   --configuration Release
+dotnet run     --project ./src/MyApp
+dotnet run     --project ./src/MyApp -- --arg1 value1
+
+# Publish (self-contained single binary)
+dotnet publish ./src/MyApp \
+  --configuration Release \
+  --runtime       linux-x64 \
+  --self-contained true \
+  -p:PublishSingleFile=true \
+  -p:EnableCompressionInSingleFile=true \
+  --output ./publish
+
+# Tests
+dotnet test
+dotnet test --configuration Release --logger "console;verbosity=normal"
+dotnet test --filter "Category=Unit"
+dotnet test --collect "Code Coverage"  # or coverlet
+
+# Watch (auto-rebuild on save)
+dotnet watch run   --project ./src/MyApp
+dotnet watch test  --project ./tests/MyApp.Tests
+```
+
+### NuGet package management
+
+```bash
+# Add packages
+dotnet add package Azure.Identity
+dotnet add package Azure.Security.KeyVault.Secrets
+dotnet add package Azure.Monitor.Query
+dotnet add package Microsoft.Extensions.DependencyInjection
+dotnet add package Microsoft.Extensions.Hosting
+dotnet add package Microsoft.Extensions.Http
+dotnet add package Serilog.AspNetCore
+
+# Remove package
+dotnet remove package SomePackage
+
+# List outdated packages
+dotnet list package --outdated
+
+# Update all (requires dotnet-outdated tool)
+dotnet tool install -g dotnet-outdated-tool
+dotnet-outdated --upgrade
+
+# Global tools
+dotnet tool install -g dotnet-ef
+dotnet tool install -g dotnet-format
+dotnet tool list   -g
+dotnet tool update -g dotnet-ef
+```
+
+---
+
+## Project Structure
+
+### .csproj — key properties
+
+```xml
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <WarningsAsErrors />
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <Optimize>true</Optimize>
+    <RootNamespace>MyCompany.MyApp</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Azure.Identity"              Version="1.13.*" />
+    <PackageReference Include="Azure.Security.KeyVault.Secrets" Version="4.7.*" />
+    <PackageReference Include="Azure.Monitor.Query"         Version="1.4.*" />
+  </ItemGroup>
+</Project>
+```
+
+---
+
+## Interfaces & Classes
+
+### Interface patterns
+
+```csharp
+// Basic interface
+public interface IUserRepository
+{
+    Task<User?> GetByIdAsync(string id, CancellationToken ct = default);
+    Task<IReadOnlyList<User>> GetAllAsync(CancellationToken ct = default);
+    Task<User> CreateAsync(CreateUserRequest request, CancellationToken ct = default);
+    Task UpdateAsync(string id, UpdateUserRequest request, CancellationToken ct = default);
+    Task DeleteAsync(string id, CancellationToken ct = default);
+}
+
+// Interface with default implementation (C# 8+)
+public interface ILogger
+{
+    void Log(string message, LogLevel level = LogLevel.Info);
+    void LogError(string message) => Log(message, LogLevel.Error);
+    void LogWarning(string message) => Log(message, LogLevel.Warning);
+}
+
+// Generic interface
+public interface IRepository<T, TId> where T : class
+{
+    Task<T?> FindAsync(TId id, CancellationToken ct = default);
+    Task<T>  SaveAsync(T entity, CancellationToken ct = default);
+}
+
+// Interface segregation
+public interface IReadableStore<T>  { Task<T?> GetAsync(string key); }
+public interface IWritableStore<T>  { Task SetAsync(string key, T value); }
+public interface IStore<T>          : IReadableStore<T>, IWritableStore<T> { }
+```
+
+### Class patterns
+
+```csharp
+// Sealed class with primary constructor
+public sealed class UserService(
+    IUserRepository repo,
+    ILogger<UserService> logger,
+    TimeProvider time)
+{
+    public async Task<User?> GetUserAsync(string id, CancellationToken ct = default)
+    {
+        logger.LogInformation("Fetching user {Id}", id);
+        var user = await repo.GetByIdAsync(id, ct);
+        if (user is null) logger.LogWarning("User {Id} not found", id);
+        return user;
+    }
+
+    public async Task<User> CreateUserAsync(CreateUserRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.Name);
+
+        var user = new User
+        {
+            Id        = Guid.NewGuid().ToString(),
+            Name      = request.Name,
+            Email     = request.Email,
+            CreatedAt = time.GetUtcNow().UtcDateTime,
+        };
+        return await repo.CreateAsync(request, ct);
+    }
+}
+
+// Abstract base class
+public abstract class BaseHandler<TRequest, TResponse>
+{
+    protected abstract Task<TResponse> HandleCoreAsync(TRequest request, CancellationToken ct);
+
+    public async Task<TResponse> HandleAsync(TRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return await HandleCoreAsync(request, ct);
+    }
+}
+```
+
+---
+
+## Records
+
+```csharp
+// Positional record (immutable, value equality)
+public record User(string Id, string Name, string Email, DateTime CreatedAt);
+
+// Record with additional members
+public record UserProfile(string Id, string Name, string Email) : IEquatable<UserProfile>
+{
+    public string DisplayName => $"{Name} <{Email}>";
+
+    // Non-destructive mutation
+    public UserProfile WithName(string name) => this with { Name = name };
+}
+
+// Record struct (stack-allocated, value type — C# 10+)
+public readonly record struct Point(double X, double Y)
+{
+    public double DistanceTo(Point other) =>
+        Math.Sqrt(Math.Pow(X - other.X, 2) + Math.Pow(Y - other.Y, 2));
+}
+
+// Class records are reference types with value equality
+var u1 = new User("1", "Alice", "alice@example.com", DateTime.UtcNow);
+var u2 = u1 with { Name = "Bob" };   // new record, different Name
+Console.WriteLine(u1 == u2);         // false
+Console.WriteLine(u1 with { } == u1); // true — structural equality
+```
+
+---
+
+## Pattern Matching
+
+```csharp
+// Switch expression
+string Describe(object obj) => obj switch
+{
+    int n when n < 0          => "negative integer",
+    int n                     => $"positive integer: {n}",
+    string { Length: 0 }      => "empty string",
+    string s                  => $"string: {s}",
+    null                      => "null",
+    _                         => "something else"
+};
+
+// Property pattern
+decimal GetDiscount(User user) => user switch
+{
+    { Role: "admin" }                       => 0.5m,
+    { Role: "premium", CreatedAt: var d }
+        when (DateTime.UtcNow - d).TotalDays > 365 => 0.2m,
+    _                                       => 0m
+};
+
+// List pattern
+string Describe(int[] arr) => arr switch
+{
+    []          => "empty",
+    [var x]     => $"single: {x}",
+    [var x, var y] => $"pair: {x}, {y}",
+    [var first, .., var last] => $"starts {first}, ends {last}",
+    _           => "many elements"
+};
+
+// Deconstruct in patterns
+if (GetUser() is { Name: var name, Email: var email })
+    Console.WriteLine($"{name} — {email}");
+```
+
+---
+
+## LINQ
+
+```csharp
+var users = new List<User> { /* ... */ };
+
+// Query syntax
+var admins =
+    from u in users
+    where u.Role == "admin"
+    orderby u.Name
+    select new { u.Id, u.Name };
+
+// Method syntax (preferred)
+var top10 = users
+    .Where(u => u.IsActive)
+    .OrderByDescending(u => u.CreatedAt)
+    .Take(10)
+    .Select(u => new UserSummary(u.Id, u.Name));
+
+// Grouping
+var byRole = users
+    .GroupBy(u => u.Role)
+    .ToDictionary(g => g.Key, g => g.ToList());
+
+// Aggregations
+var stats = new
+{
+    Total   = users.Count,
+    Active  = users.Count(u => u.IsActive),
+    Oldest  = users.Min(u => u.CreatedAt),
+    Newest  = users.Max(u => u.CreatedAt),
+};
+
+// Async LINQ (EF Core)
+var activeUsers = await dbContext.Users
+    .Where(u => u.IsActive && u.Role == "admin")
+    .OrderBy(u => u.Name)
+    .Select(u => new UserDto(u.Id, u.Name, u.Email))
+    .AsNoTracking()
+    .ToListAsync(cancellationToken);
+
+// Chunk (batching)
+foreach (var batch in users.Chunk(100))
+{
+    await ProcessBatchAsync(batch);
+}
+```
+
+---
+
+## Async & Error Handling
+
+```csharp
+// Async best practices
+public async Task<Result<User>> GetUserSafeAsync(string id, CancellationToken ct)
+{
+    try
+    {
+        // ConfigureAwait(false) in library code (not in ASP.NET Core — sync context absent)
+        var user = await repo.GetByIdAsync(id, ct).ConfigureAwait(false);
+        return user is not null
+            ? Result<User>.Success(user)
+            : Result<User>.Failure("User not found");
+    }
+    catch (OperationCanceledException)
+    {
+        throw;   // never swallow cancellation
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Failed to get user {Id}", id);
+        return Result<User>.Failure(ex.Message);
+    }
+}
+
+// Parallel async with bounded concurrency
+var semaphore = new SemaphoreSlim(10);   // max 10 concurrent
+var tasks = ids.Select(async id =>
+{
+    await semaphore.WaitAsync(ct);
+    try   { return await GetUserSafeAsync(id, ct); }
+    finally { semaphore.Release(); }
+});
+var results = await Task.WhenAll(tasks);
+
+// Task.WhenEach (.NET 9+) — process results as each task completes
+await foreach (var completed in Task.WhenEach(tasks))
+{
+    var result = await completed;
+    Console.WriteLine(result.IsSuccess ? result.Value!.Name : result.Error);
+}
+
+// ValueTask — avoid heap allocation for hot paths that usually complete synchronously
+public ValueTask<int> GetCountAsync()
+{
+    if (_cache.TryGetValue("count", out var cached)) return new ValueTask<int>(cached);
+    return new ValueTask<int>(FetchCountFromDbAsync());
+}
+
+// IAsyncEnumerable — streaming
+public async IAsyncEnumerable<User> StreamUsersAsync(
+    [EnumeratorCancellation] CancellationToken ct = default)
+{
+    await foreach (var user in dbContext.Users.AsAsyncEnumerable().WithCancellation(ct))
+        yield return user;
+}
+
+// Consume
+await foreach (var user in StreamUsersAsync(ct))
+    Console.WriteLine(user.Name);
+```
+
+### Result type pattern
+
+```csharp
+public class Result<T>
+{
+    public bool    IsSuccess { get; }
+    public T?      Value     { get; }
+    public string? Error     { get; }
+
+    private Result(bool ok, T? value, string? error)
+        => (IsSuccess, Value, Error) = (ok, value, error);
+
+    public static Result<T> Success(T value) => new(true,  value, null);
+    public static Result<T> Failure(string error) => new(false, default, error);
+
+    public Result<TOut> Map<TOut>(Func<T, TOut> fn) =>
+        IsSuccess ? Result<TOut>.Success(fn(Value!)) : Result<TOut>.Failure(Error!);
+
+    public async Task<Result<TOut>> MapAsync<TOut>(Func<T, Task<TOut>> fn) =>
+        IsSuccess ? Result<TOut>.Success(await fn(Value!)) : Result<TOut>.Failure(Error!);
+}
+```
+
+---
+
+## Dependency Injection
+
+```csharp
+// Program.cs — .NET 10 minimal hosting
+using Azure.Identity;
+using Azure.Security.KeyVault.Secrets;
+using Microsoft.Extensions.Azure;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Azure clients (thread-safe, pooled)
+builder.Services.AddAzureClients(clients =>
+{
+    clients.AddSecretClient(new Uri($"https://{builder.Configuration["KeyVaultName"]}.vault.azure.net/"));
+    clients.AddLogsQueryClient();
+    clients.UseCredential(new DefaultAzureCredential());
+});
+
+// Services
+builder.Services.AddSingleton<IUserRepository, CosmosUserRepository>();
+builder.Services.AddScoped<IUserService, UserService>();
+builder.Services.AddTransient<IEmailSender, SmtpEmailSender>();
+
+// HttpClient with resilience
+builder.Services.AddHttpClient<IGitHubClient, GitHubClient>(c =>
+{
+    c.BaseAddress = new Uri("https://api.github.com/");
+    c.DefaultRequestHeaders.Add("User-Agent", "MyApp/1.0");
+})
+.AddStandardResilienceHandler();   // retries, circuit breaker, timeouts (Polly)
+
+// Options pattern
+builder.Services.Configure<DatabaseOptions>(builder.Configuration.GetSection("Database"));
+builder.Services.AddOptions<DatabaseOptions>()
+    .BindConfiguration("Database")
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+
+var app = builder.Build();
+app.MapControllers();
+app.Run();
+```
+
+```csharp
+// Strongly-typed options
+public class DatabaseOptions
+{
+    public const string Section = "Database";
+
+    [Required, Url]
+    public string ConnectionString { get; init; } = "";
+
+    [Range(1, 100)]
+    public int MaxPoolSize { get; init; } = 10;
+}
+
+// Inject options
+public class DatabaseService(IOptions<DatabaseOptions> opts)
+{
+    private readonly DatabaseOptions _opts = opts.Value;
+}
+```
+
+---
+
+## Azure SDK
+
+### Authentication
+
+```csharp
+using Azure.Identity;
+using Azure.Core;
+
+// DefaultAzureCredential — tries: env vars → workload identity → managed identity → CLI → VS
+var credential = new DefaultAzureCredential();
+
+// Managed identity (system-assigned)
+var credential = new ManagedIdentityCredential();
+
+// Managed identity (user-assigned)
+var credential = new ManagedIdentityCredential(clientId: "YOUR-UAMI-CLIENT-ID");
+
+// Service principal (client secret — prefer federated in production)
+var credential = new ClientSecretCredential(
+    tenantId:     Environment.GetEnvironmentVariable("AZURE_TENANT_ID")!,
+    clientId:     Environment.GetEnvironmentVariable("AZURE_CLIENT_ID")!,
+    clientSecret: Environment.GetEnvironmentVariable("AZURE_CLIENT_SECRET")!);
+
+// Workload identity (GitHub Actions / AKS pod)
+var credential = new WorkloadIdentityCredential();
+
+// Get token manually (for raw HTTP calls)
+var token = await credential.GetTokenAsync(
+    new TokenRequestContext(["https://management.azure.com/.default"]),
+    cancellationToken);
+```
+
+### Key Vault secrets
+
+```csharp
+using Azure.Security.KeyVault.Secrets;
+
+var kvUri    = new Uri($"https://{kvName}.vault.azure.net/");
+var client   = new SecretClient(kvUri, new DefaultAzureCredential());
+
+// Get secret
+var secret   = await client.GetSecretAsync("my-secret");
+string value = secret.Value.Value;
+
+// Set secret
+await client.SetSecretAsync("my-secret", "new-value");
+
+// List secrets
+await foreach (var props in client.GetPropertiesOfSecretsAsync())
+    Console.WriteLine($"{props.Name}  expires: {props.ExpiresOn}");
+
+// Delete (soft-delete — must purge to fully remove)
+await client.StartDeleteSecretAsync("my-secret");
+
+// Inject via IConfiguration (recommended for ASP.NET Core)
+// builder.Configuration.AddAzureKeyVault(kvUri, new DefaultAzureCredential());
+// Then: config["my-secret"]
+```
+
+### Blob Storage
+
+```csharp
+using Azure.Storage.Blobs;
+using Azure.Storage.Blobs.Models;
+
+var serviceClient    = new BlobServiceClient(new Uri($"https://{account}.blob.core.windows.net/"), credential);
+var containerClient  = serviceClient.GetBlobContainerClient("my-container");
+await containerClient.CreateIfNotExistsAsync();
+
+// Upload
+var blobClient = containerClient.GetBlobClient("path/to/file.json");
+await blobClient.UploadAsync(BinaryData.FromString(json), overwrite: true);
+
+// Upload stream
+await using var stream = File.OpenRead("large-file.bin");
+await blobClient.UploadAsync(stream, new BlobUploadOptions
+{
+    TransferOptions = new StorageTransferOptions { MaximumConcurrency = 4 }
+});
+
+// Download
+var download = await blobClient.DownloadContentAsync();
+string content = download.Value.Content.ToString();
+
+// List blobs with prefix
+await foreach (var blob in containerClient.GetBlobsAsync(prefix: "data/2026/"))
+    Console.WriteLine($"{blob.Name}  {blob.Properties.ContentLength} bytes");
+
+// Generate SAS (requires StorageSharedKeyCredential — not managed identity)
+var sasBuilder = new BlobSasBuilder
+{
+    BlobContainerName = "my-container",
+    BlobName          = "path/to/file.json",
+    Resource          = "b",
+    ExpiresOn         = DateTimeOffset.UtcNow.AddHours(1),
+};
+sasBuilder.SetPermissions(BlobSasPermissions.Read);
+```
+
+### Azure Resource Manager
+
+```csharp
+using Azure.ResourceManager;
+using Azure.ResourceManager.Resources;
+using Azure.ResourceManager.Compute;
+
+var armClient  = new ArmClient(new DefaultAzureCredential());
+var subscription = await armClient.GetDefaultSubscriptionAsync();
+
+// List resource groups
+await foreach (var rg in subscription.GetResourceGroups().GetAllAsync())
+    Console.WriteLine($"{rg.Data.Name}  {rg.Data.Location}");
+
+// Get a specific VM
+var vmId = new ResourceIdentifier(
+    $"/subscriptions/{subId}/resourceGroups/{rgName}/providers/Microsoft.Compute/virtualMachines/{vmName}");
+var vm = armClient.GetVirtualMachineResource(vmId);
+var vmData = (await vm.GetAsync()).Value;
+Console.WriteLine(vmData.Data.HardwareProfile?.VmSize);
+
+// Create resource group
+var rgData = new ResourceGroupData(AzureLocation.UKSouth);
+rgData.Tags.Add("Environment", "prod");
+var operation = await subscription.GetResourceGroups()
+    .CreateOrUpdateAsync(WaitUntil.Completed, "rg-myapp-prod", rgData);
+```
+
+---
+
+## Kusto (Azure Data Explorer) SDK
+
+### Setup
+
+```bash
+dotnet add package Microsoft.Azure.Kusto.Data
+dotnet add package Microsoft.Azure.Kusto.Ingest
+dotnet add package Azure.Identity   # for modern auth
+```
+
+### Query client
+
+```csharp
+using Kusto.Data;
+using Kusto.Data.Common;
+using Kusto.Data.Net.Client;
+using Azure.Identity;
+using Azure.Core;
+
+// Build connection string with AAD token provider
+var credential    = new DefaultAzureCredential();
+var clusterUri    = "https://mycluster.westeurope.kusto.windows.net";
+var databaseName  = "mydb";
+
+var connectionStringBuilder = new KustoConnectionStringBuilder(clusterUri, databaseName)
+    .WithAadAzureTokenCredentialsAuthentication(credential);
+
+using var queryClient = KustoClientFactory.CreateCslQueryProvider(connectionStringBuilder);
+```
+
+### Execute KQL queries
+
+```csharp
+// Simple query
+var query   = "MyTable | where Timestamp > ago(1h) | take 100";
+var reader  = await queryClient.ExecuteQueryAsync(databaseName, query, new ClientRequestProperties());
+
+while (reader.Read())
+{
+    var name      = reader.GetString(0);
+    var count     = reader.GetInt64(1);
+    var timestamp = reader.GetDateTime(2);
+    Console.WriteLine($"{name}: {count} at {timestamp}");
+}
+
+// Parameterised query (prevents KQL injection)
+var props = new ClientRequestProperties();
+props.SetParameter("userId",    "user-123");
+props.SetParameter("hoursBack", 24L);
+
+var paramQuery = @"
+declare query_parameters(userId: string, hoursBack: long);
+MyTable
+| where UserId == userId
+| where Timestamp > ago(hoursBack * 1h)
+| summarize count() by Category
+";
+
+using var paramReader = await queryClient.ExecuteQueryAsync(databaseName, paramQuery, props);
+var results = new List<(string Category, long Count)>();
+while (paramReader.Read())
+    results.Add((paramReader.GetString(0), paramReader.GetInt64(1)));
+
+// Map to typed objects
+public static async Task<List<T>> QueryAsync<T>(
+    ICslQueryProvider client,
+    string database,
+    string kql,
+    Func<IDataReader, T> mapper,
+    ClientRequestProperties? props = null,
+    CancellationToken ct = default)
+{
+    using var reader = await client.ExecuteQueryAsync(database, kql, props ?? new());
+    var results = new List<T>();
+    while (reader.Read()) results.Add(mapper(reader));
+    return results;
+}
+```
+
+### Validate KQL queries locally
+
+The `Kusto.Language` package provides an offline KQL parser — no cluster connection required. Use it in CI pipelines, editors, or pre-flight checks before sending queries to ADX/Sentinel.
+
+```bash
+# Offline KQL parser — separate from the query/ingest packages
+dotnet add package Kusto.Language
+```
+
+```csharp
+using Kusto.Language;
+using Kusto.Language.Symbols;
+
+// ── 1. Syntax-only validation (pure offline, no schema needed) ──────────────
+string kql = "MyTable | where Timestamp > ago(1h) | summarize count() by Category";
+
+KustoCode parsed      = KustoCode.Parse(kql);
+var       diagnostics = parsed.GetDiagnostics();
+
+if (diagnostics.Count == 0)
+    Console.WriteLine("Syntax OK");
+else
+    foreach (var d in diagnostics)
+        Console.WriteLine($"[{d.Severity}] {d.Message}  (pos {d.Start}, len {d.Length})");
+
+// ── 2. Semantic validation with a local schema ──────────────────────────────
+// Define the schema that mirrors your ADX/Sentinel table
+var table = new TableSymbol("MyTable",
+    new ColumnSymbol("Timestamp",  ScalarTypes.DateTime),
+    new ColumnSymbol("UserId",     ScalarTypes.String),
+    new ColumnSymbol("EventType",  ScalarTypes.String),
+    new ColumnSymbol("Count",      ScalarTypes.Long));
+
+GlobalState globals  = GlobalState.Default.WithDatabase(
+    new DatabaseSymbol("mydb", table));
+
+KustoCode analyzed = KustoCode.ParseAndAnalyze(kql, globals);
+
+bool isValid = analyzed.GetDiagnostics().Count == 0;
+Console.WriteLine(isValid ? "Valid" : "Invalid");
+foreach (var d in analyzed.GetDiagnostics())
+    Console.WriteLine($"  [{d.Severity}] {d.Message}");
+
+// ── 3. Bulk validation (useful for a library of saved queries) ──────────────
+string[] queries =
+[
+    "MyTable | count",
+    "MyTable | where NonExistentCol == 1",  // semantic error — unknown column
+    "MyTable | where Timestamp >",          // syntax error — incomplete expression
+    "MyTable | where EventType == 'login' | summarize count() by UserId",
+];
+
+foreach (var q in queries)
+{
+    var result = KustoCode.ParseAndAnalyze(q, globals);
+    var diags  = result.GetDiagnostics();
+    Console.WriteLine($"{(diags.Count == 0 ? "OK  " : "FAIL")} {q}");
+    foreach (var d in diags)
+        Console.WriteLine($"     └ [{d.Severity}] {d.Message}");
+}
+
+// ── 4. Build GlobalState from a live cluster schema ─────────────────────────
+// Run once per deployment; cache the GlobalState for offline validation.
+// .show database schema as json  →  returns JSON describing all tables/columns.
+const string schemaCmd = ".show database schema as json";
+using var schemaReader = await queryClient.ExecuteControlCommandAsync(
+    databaseName, schemaCmd, new ClientRequestProperties());
+
+// The first column of the first row is the JSON blob
+string schemaJson = schemaReader.Read() ? schemaReader.GetString(0) : "{}";
+
+// Parse the JSON into ColumnSymbol/TableSymbol collections
+// (structure: { "Tables": { "TableName": { "OrderedColumns": [...] } } })
+using var doc = JsonDocument.Parse(schemaJson);
+var tables = new List<TableSymbol>();
+
+foreach (var tableEntry in doc.RootElement.GetProperty("Tables").EnumerateObject())
+{
+    var columns = tableEntry.Value
+        .GetProperty("OrderedColumns")
+        .EnumerateArray()
+        .Select(col =>
+        {
+            var csType = col.GetProperty("CslType").GetString() switch
+            {
+                "datetime"  => ScalarTypes.DateTime,
+                "string"    => ScalarTypes.String,
+                "long"      => ScalarTypes.Long,
+                "real"      => ScalarTypes.Real,
+                "bool"      => ScalarTypes.Bool,
+                "dynamic"   => ScalarTypes.Dynamic,
+                "guid"      => ScalarTypes.Guid,
+                "timespan"  => ScalarTypes.TimeSpan,
+                _           => ScalarTypes.String,
+            };
+            return new ColumnSymbol(col.GetProperty("Name").GetString()!, csType);
+        })
+        .ToArray();
+
+    tables.Add(new TableSymbol(tableEntry.Name, columns));
+}
+
+GlobalState liveGlobals = GlobalState.Default.WithDatabase(
+    new DatabaseSymbol(databaseName, [.. tables]));
+
+// Now validate any KQL query against the real schema — offline
+var check = KustoCode.ParseAndAnalyze("MyTable | where Timestamp > ago(1d)", liveGlobals);
+Console.WriteLine(check.GetDiagnostics().Count == 0 ? "Valid" : "Invalid");
+```
+
+```csharp
+// ── 5. Server-side dry run via set noexec (requires cluster) ────────────────
+// Compiles the query against the real schema but skips execution entirely.
+// No RU cost, no results returned — useful when you don't have the schema locally.
+string noExecKql = $"set noexec;\n{kql}";
+try
+{
+    using var reader = await queryClient.ExecuteQueryAsync(
+        databaseName, noExecKql, new ClientRequestProperties());
+    Console.WriteLine("Query compiled successfully (noexec)");
+}
+catch (Exception ex) when (ex.GetType().Name.Contains("KustoService"))
+{
+    Console.WriteLine($"Compilation failed: {ex.Message}");
+}
+```
+
+### Log Analytics (Azure Monitor) via SDK
+
+```csharp
+using Azure.Monitor.Query;
+using Azure.Monitor.Query.Models;
+
+var logsClient    = new LogsQueryClient(new DefaultAzureCredential());
+var workspaceId   = "00000000-0000-0000-0000-000000000000";
+
+// Query workspace
+var response = await logsClient.QueryWorkspaceAsync(
+    workspaceId,
+    @"AzureActivity
+    | where TimeGenerated > ago(24h)
+    | summarize count() by OperationNameValue
+    | top 10 by count_",
+    TimeSpan.FromDays(1),
+    cancellationToken: ct);
+
+foreach (var table in response.Value.AllTables)
+{
+    foreach (var row in table.Rows)
+    {
+        Console.WriteLine($"{row["OperationNameValue"]}: {row["count_"]}");
+    }
+}
+
+// Batch queries
+var batch = new LogsBatchQuery();
+var q1Id  = batch.AddWorkspaceQuery(workspaceId, "AzureActivity | count", TimeSpan.FromDays(1));
+var q2Id  = batch.AddWorkspaceQuery(workspaceId, "SigninLogs | where ResultType != '0' | count", TimeSpan.FromDays(1));
+
+var batchResponse = await logsClient.QueryBatchAsync(batch, ct);
+var q1Result      = batchResponse.Value.GetResult<long>(q1Id);
+var q2Result      = batchResponse.Value.GetResult<long>(q2Id);
+```
+
+### Kusto ingest
+
+```csharp
+using Kusto.Ingest;
+
+var ingestUri     = "https://ingest-mycluster.westeurope.kusto.windows.net";
+var ingestConnStr = new KustoConnectionStringBuilder(ingestUri)
+    .WithAadAzureTokenCredentialsAuthentication(new DefaultAzureCredential());
+
+using var ingestClient = KustoIngestFactory.CreateQueuedIngestClient(ingestConnStr);
+
+var ingestProps = new KustoQueuedIngestionProperties(databaseName, "MyTable")
+{
+    Format = DataSourceFormat.json,
+    IngestionMapping = new IngestionMapping
+    {
+        IngestionMappingReference = "my-json-mapping",
+        IngestionMappingKind      = IngestionMappingKind.Json,
+    },
+    ReportLevel  = IngestionReportLevel.FailuresAndSuccesses,
+    ReportMethod = IngestionReportMethod.Table,
+};
+
+// Ingest from stream
+var payload = JsonSerializer.Serialize(new { UserId = "u1", EventType = "login", Timestamp = DateTime.UtcNow });
+await using var stream = new MemoryStream(Encoding.UTF8.GetBytes(payload));
+await ingestClient.IngestFromStreamAsync(stream, ingestProps);
+
+// Ingest from blob
+await ingestClient.IngestFromStorageAsync(
+    "https://mystg.blob.core.windows.net/raw/data.json?sv=...",
+    ingestProps);
+```
+
+---
+
+## Testing with xUnit
+
+```csharp
+// MyApp.Tests/UserServiceTests.cs
+using Xunit;
+using Moq;
+using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
+
+public class UserServiceTests
+{
+    private readonly Mock<IUserRepository> _repoMock  = new();
+    private readonly UserService           _sut;
+
+    public UserServiceTests()
+    {
+        _sut = new UserService(_repoMock.Object, NullLogger<UserService>.Instance, TimeProvider.System);
+    }
+
+    [Fact]
+    public async Task GetUserAsync_WhenUserExists_ReturnsUser()
+    {
+        // Arrange
+        var expected = new User("1", "Alice", "alice@example.com", DateTime.UtcNow);
+        _repoMock.Setup(r => r.GetByIdAsync("1", default)).ReturnsAsync(expected);
+
+        // Act
+        var result = await _sut.GetUserAsync("1");
+
+        // Assert
+        result.Should().BeEquivalentTo(expected);
+        _repoMock.Verify(r => r.GetByIdAsync("1", default), Times.Once);
+    }
+
+    [Fact]
+    public async Task GetUserAsync_WhenNotFound_ReturnsNull()
+    {
+        _repoMock.Setup(r => r.GetByIdAsync(It.IsAny<string>(), default)).ReturnsAsync((User?)null);
+        var result = await _sut.GetUserAsync("999");
+        result.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("  ")]
+    [InlineData(null)]
+    public async Task CreateUserAsync_WithInvalidName_Throws(string? name)
+    {
+        var request = new CreateUserRequest { Name = name!, Email = "test@example.com" };
+        await _sut.Invoking(s => s.CreateUserAsync(request, default))
+            .Should().ThrowAsync<ArgumentException>();
+    }
+}
+```
+
+```bash
+# Run tests with coverage
+dotnet test --collect:"XPlat Code Coverage"
+dotnet tool install -g dotnet-reportgenerator-globaltool
+reportgenerator -reports:"**/coverage.cobertura.xml" -targetdir:"coverage" -reporttypes:Html
+```
+
+---
+
+## Useful Patterns
+
+### System.Threading.Lock (.NET 9+)
+
+```csharp
+// Prefer Lock over lock(object) — lower overhead, no boxing, non-reentrant
+private readonly Lock _gate = new();
+
+public void UpdateCache(string key, string value)
+{
+    using (_gate.EnterScope())
+    {
+        _cache[key] = value;
+    }
+}
+
+// TryEnter for non-blocking attempt
+if (_gate.TryEnter())
+{
+    using (_gate.EnterScope()) { /* already entered */ }
+}
+```
+
+### Cancellation token propagation
+
+```csharp
+// Always accept and forward CancellationToken
+public async Task<IReadOnlyList<User>> SearchAsync(
+    string query,
+    CancellationToken ct = default)
+{
+    using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+    cts.CancelAfter(TimeSpan.FromSeconds(30));   // per-operation timeout
+
+    return await repo.SearchAsync(query, cts.Token);
+}
+```
+
+### Strongly-typed IDs
+
+```csharp
+// Prevent mixing IDs of different entity types
+public readonly record struct UserId(Guid Value)
+{
+    public static UserId New() => new(Guid.NewGuid());
+    public static UserId Parse(string s) => new(Guid.Parse(s));
+    public override string ToString() => Value.ToString();
+}
+
+public readonly record struct OrderId(Guid Value)
+{
+    public static OrderId New() => new(Guid.NewGuid());
+}
+
+// Now the compiler catches: void Process(UserId id) called with an OrderId
+```
+
+### Extension methods
+
+```csharp
+public static class StringExtensions
+{
+    public static string ToKebabCase(this string s) =>
+        string.Concat(s.Select((c, i) => i > 0 && char.IsUpper(c) ? $"-{c}" : $"{c}")).ToLower();
+
+    public static bool IsNullOrWhiteSpace([NotNullWhen(false)] this string? s) =>
+        string.IsNullOrWhiteSpace(s);
+}
+
+public static class EnumerableExtensions
+{
+    public static IEnumerable<IReadOnlyList<T>> Chunk<T>(this IEnumerable<T> source, int size) =>
+        source.Select((x, i) => (x, i))
+              .GroupBy(t => t.i / size)
+              .Select(g => (IReadOnlyList<T>)g.Select(t => t.x).ToList());
+}
+```

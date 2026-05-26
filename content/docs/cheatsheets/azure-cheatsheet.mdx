@@ -1,241 +1,1383 @@
 ---
 title: Azure Cheatsheet
-description: Azure authentication, policy management, and common CLI and PowerShell operations.
+description: Advanced Azure CLI, Bicep, IAM, networking, AKS, monitoring, policy, and governance patterns for Azure platform engineers.
 ---
 
 # Azure Cheat Sheet
 
-Quick-reference scripts and commands for working with Microsoft Azure via the Az PowerShell module and Azure CLI.
+Azure CLI, Bicep, and platform engineering patterns. Covers auth, IAM, compute, networking, AKS, storage, monitoring, policy, and governance. Most CLI examples require `az` 2.55+ and `jq`.
 
 ---
 
-## Authentication
+## Auth & Context
 
-### Login with Az PowerShell module
-
-Reusable auth helper that supports both interactive login and service principal with client secret. Pass `-UseServicePrincipal $true` and supply credentials to use the SPN path; omit for interactive.
-
-```powershell
-param(
-    [Parameter(Mandatory = $false)]
-    [bool]$UseServicePrincipal = $false,
-
-    [Parameter(Mandatory = $false)]
-    [string]$ClientId,
-
-    [Parameter(Mandatory = $false)]
-    [string]$TenantId,
-
-    [Parameter(Mandatory = $false)]
-    [string]$ClientSecret,
-
-    [Parameter(Mandatory = $false)]
-    [string]$SubscriptionId = $null,
-
-    [Parameter(Mandatory = $false)]
-    [switch]$IsDebugMode
-)
-
-$IsDebugMode = $IsDebugMode.IsPresent
-
-function _LogMessage {
-    param([string]$Level, [string]$Message, [string]$InvocationName)
-    $timestamp = Get-Date -Format "HH:mm:ss"
-    if ($Level -eq "DEBUG" -and -not $IsDebugMode) { return }
-    switch ($Level) {
-        "INFO"    { Write-Host "${Level}: $timestamp - [$InvocationName] $Message" -ForegroundColor Cyan }
-        "DEBUG"   { Write-Host "${Level}: $timestamp - [$InvocationName] $Message" -ForegroundColor Yellow }
-        "WARNING" { Write-Host "${Level}: $timestamp - [$InvocationName] $Message" -ForegroundColor DarkYellow }
-        "ERROR"   { Write-Host "${Level}: $timestamp - [$InvocationName] $Message" -ForegroundColor Red }
-        default   { Write-Host "${Level}: $timestamp - [$InvocationName] $Message" }
-    }
-}
-
-function Connect-AzureUser {
-    try {
-        $context = Get-AzContext
-        if ($null -eq $context -or $null -eq $context.Account) {
-            _LogMessage "INFO" "No existing Azure context. Authenticating..." $MyInvocation.MyCommand.Name
-            Connect-AzAccount -ErrorAction Stop
-            if ($SubscriptionId) { Set-AzContext -Subscription $SubscriptionId }
-        } else {
-            _LogMessage "INFO" "Already authenticated as $($context.Account.Id)." $MyInvocation.MyCommand.Name
-        }
-    } catch {
-        _LogMessage "ERROR" "Authentication failed: $($_.Exception.Message)" $MyInvocation.MyCommand.Name
-        throw
-    }
-}
-
-function Connect-ToAzureSpn {
-    param([bool]$UseSPN, [string]$ClientId, [string]$TenantId, [string]$ClientSecret)
-
-    if ($UseSPN) {
-        _LogMessage "INFO" "Connecting via Service Principal..." $MyInvocation.MyCommand.Name
-        $securePassword = ConvertTo-SecureString $ClientSecret -AsPlainText -Force
-        $credential = New-Object System.Management.Automation.PSCredential($ClientId, $securePassword)
-        Connect-AzAccount -ServicePrincipal -Tenant $TenantId -Credential $credential
-        if ($SubscriptionId) { Set-AzContext -Subscription $SubscriptionId }
-    } else {
-        Connect-AzureUser
-    }
-}
-
-try {
-    _LogMessage "INFO" "Starting script..." $MyInvocation.MyCommand.Name
-    Connect-ToAzureSpn -UseSPN $UseServicePrincipal -ClientId $ClientId -TenantId $TenantId -ClientSecret $ClientSecret
-} catch {
-    _LogMessage "ERROR" "Terminating error: $($_.Exception.Message)" $MyInvocation.MyCommand.Name
-    exit 1
-}
-```
-
-### Login with Azure CLI (Bash)
-
-Same interactive / SPN pattern but using `az login`. Suitable for pipelines running on Linux agents.
+### Login methods
 
 ```bash
-#!/usr/bin/env bash
-set -euo pipefail
+# Interactive browser login
+az login
 
-UseServicePrincipal=false
-ClientId=""
-TenantId=""
-ClientSecret=""
-SubscriptionId=""
-IsDebugMode=false
+# Service principal (client secret)
+az login --service-principal \
+  --username "$ARM_CLIENT_ID" \
+  --password "$ARM_CLIENT_SECRET" \
+  --tenant   "$ARM_TENANT_ID"
 
-while [[ $# -gt 0 ]]; do
-  case $1 in
-    --use-service-principal) UseServicePrincipal="$2"; shift 2 ;;
-    --client-id)             ClientId="$2"; shift 2 ;;
-    --tenant-id)             TenantId="$2"; shift 2 ;;
-    --client-secret)         ClientSecret="$2"; shift 2 ;;
-    --subscription-id)       SubscriptionId="$2"; shift 2 ;;
-    --debug)                 IsDebugMode="$2"; shift 2 ;;
-    *) echo "Unknown parameter: $1"; exit 1 ;;
-  esac
+# Service principal (certificate)
+az login --service-principal \
+  --username "$ARM_CLIENT_ID" \
+  --tenant   "$ARM_TENANT_ID" \
+  --password /path/to/cert.pem
+
+# Managed identity (from a VM / container / GitHub Actions OIDC)
+az login --identity
+az login --identity --username "<client-id-of-uami>"
+
+# Federated (OIDC) — GitHub Actions
+az login \
+  --service-principal \
+  --username     "$AZURE_CLIENT_ID" \
+  --tenant       "$AZURE_TENANT_ID" \
+  --federated-token "$(curl -sH "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+      "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=api://AzureADTokenExchange" | jq -r .value)"
+```
+
+### Context management
+
+```bash
+# Show current context
+az account show --output table
+
+# List all subscriptions
+az account list --output table --all
+
+# Switch subscription
+az account set --subscription "Production"
+az account set --subscription "00000000-0000-0000-0000-000000000000"
+
+# Verify caller identity
+az account show --query '{sub:id, tenant:tenantId, user:user.name}' -o json
+
+# Set default subscription and resource group
+az configure --defaults group=rg-myapp-prod-uksouth location=uksouth
+
+# Clear defaults
+az configure --defaults group='' location=''
+
+# List configured defaults
+az configure --list-defaults
+
+# Logout
+az logout
+az account clear
+```
+
+### ARM environment variables (azurerm provider / scripts)
+
+```bash
+export ARM_TENANT_ID="$(az account show --query tenantId -o tsv)"
+export ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+export ARM_CLIENT_ID=""
+export ARM_CLIENT_SECRET=""
+# For OIDC / managed identity:
+# export ARM_USE_OIDC=true
+# export ARM_USE_MSI=true
+```
+
+---
+
+## CLI Essentials
+
+### Output formats and JMESPath
+
+```bash
+# Output formats: json (default), table, tsv, yaml, jsonc, none
+az vm list -o table
+az vm list -o tsv --query '[].name'
+az vm list -o yaml
+
+# JMESPath --query
+az vm list --query '[].{Name:name, RG:resourceGroup, Size:hardwareProfile.vmSize}' -o table
+
+# Filter
+az resource list --query "[?tags.Environment=='prod']" -o table
+
+# sort_by
+az vm list --query "sort_by([].{Name:name, Size:hardwareProfile.vmSize}, &Name)" -o table
+
+# contains / starts_with
+az resource list --query "[?contains(name, 'prod')]" -o table
+
+# Nested: extract tag value
+az resource list --query "[].{Name:name, EnvTag:tags.Environment}" -o tsv
+
+# length
+az vm list --query 'length([])' -o tsv
+```
+
+### Pagination and large results
+
+```bash
+# Most list commands paginate automatically — use these flags to control
+az resource list --resource-group rg-myapp-prod-uksouth   # auto-paginates
+
+# Explicit next link pattern (REST / az rest)
+az rest --method GET \
+  --url "https://management.azure.com/subscriptions/$SUB/resources?api-version=2023-07-01" \
+  --query '{items:value, next:nextLink}'
+```
+
+### Raw REST calls
+
+```bash
+# GET any ARM resource
+az rest --method GET \
+  --url "https://management.azure.com/subscriptions/$SUB/resourceGroups/$RG/providers/Microsoft.Compute/virtualMachines/$VM?api-version=2024-03-01"
+
+# POST / PUT with a JSON body
+az rest --method PUT \
+  --url "https://management.azure.com/subscriptions/$SUB/resourceGroups/$RG/providers/Microsoft.Network/virtualNetworks/$VNET?api-version=2023-11-01" \
+  --body '{"location":"uksouth","properties":{"addressSpace":{"addressPrefixes":["10.0.0.0/16"]}}}'
+```
+
+### Global flags
+
+```bash
+--output / -o       # json | table | tsv | yaml | jsonc | none
+--query             # JMESPath expression
+--only-show-errors  # suppress warnings
+--no-wait           # async — don't block for long operations
+--verbose           # show HTTP requests
+--debug             # full wire-level logging
+```
+
+---
+
+## Resource Groups & Subscriptions
+
+```bash
+# Create
+az group create --name rg-myapp-prod-uksouth --location uksouth \
+  --tags Environment=prod Owner=platform-team CostCentre=CC-1234
+
+# List
+az group list -o table
+az group list --query "[?location=='uksouth']" -o table
+
+# Show
+az group show -n rg-myapp-prod-uksouth -o json
+
+# Update tags (replace — use ARM API or Bicep for merge)
+az group update -n rg-myapp-prod-uksouth --tags Environment=prod Owner=platform-team
+
+# Lock (prevent accidental deletion)
+az lock create --name no-delete --lock-type CanNotDelete \
+  --resource-group rg-myapp-prod-uksouth
+
+az lock list   --resource-group rg-myapp-prod-uksouth -o table
+az lock delete --name no-delete --resource-group rg-myapp-prod-uksouth
+
+# Delete (with confirmation prompt suppressed)
+az group delete -n rg-myapp-prod-uksouth --yes --no-wait
+
+# Export ARM template for existing RG
+az group export -n rg-myapp-prod-uksouth > rg-export.json
+
+# Move resources to another RG
+az resource move \
+  --destination-group rg-new \
+  --ids "/subscriptions/$SUB/resourceGroups/rg-old/providers/Microsoft.Compute/virtualMachines/my-vm"
+```
+
+### Management groups
+
+```bash
+az account management-group list -o table
+az account management-group show --name "mg-platform" --expand --recurse
+
+# Create hierarchy
+az account management-group create --name "mg-workloads" --display-name "Workloads" \
+  --parent-id "/providers/Microsoft.Management/managementGroups/mg-root"
+
+# Move subscription under management group
+az account management-group subscription add \
+  --name "mg-platform" \
+  --subscription "$SUBSCRIPTION_ID"
+```
+
+---
+
+## IAM & RBAC
+
+### Role assignments
+
+```bash
+# Assign built-in role
+az role assignment create \
+  --assignee     "user@example.com" \
+  --role         "Contributor" \
+  --scope        "/subscriptions/$SUB/resourceGroups/rg-myapp-prod-uksouth"
+
+# Assign to service principal by object ID
+SP_OID=$(az ad sp show --id "$APP_ID" --query id -o tsv)
+az role assignment create \
+  --assignee-object-id "$SP_OID" \
+  --assignee-principal-type ServicePrincipal \
+  --role  "Key Vault Secrets User" \
+  --scope "/subscriptions/$SUB/resourceGroups/rg-myapp-prod-uksouth/providers/Microsoft.KeyVault/vaults/kv-myapp-prod"
+
+# List assignments on a scope
+az role assignment list \
+  --scope "/subscriptions/$SUB" \
+  --include-inherited \
+  --query '[].{Principal:principalName, Role:roleDefinitionName, Scope:scope}' -o table
+
+# Remove assignment
+az role assignment delete \
+  --assignee "user@example.com" \
+  --role     "Contributor" \
+  --scope    "/subscriptions/$SUB/resourceGroups/rg-myapp-prod-uksouth"
+
+# List built-in roles
+az role definition list --custom-role-only false --query '[].roleName' -o tsv | sort
+```
+
+### Custom role definition
+
+```bash
+cat > custom-role.json <<'EOF'
+{
+  "Name": "Custom Deployment Operator",
+  "IsCustom": true,
+  "Description": "Can deploy ARM templates and read resources.",
+  "Actions": [
+    "Microsoft.Resources/deployments/*",
+    "Microsoft.Resources/subscriptions/resourceGroups/read",
+    "Microsoft.Compute/virtualMachines/read",
+    "Microsoft.Network/*/read",
+    "Microsoft.Storage/*/read"
+  ],
+  "NotActions": [],
+  "DataActions": [],
+  "NotDataActions": [],
+  "AssignableScopes": ["/subscriptions/00000000-0000-0000-0000-000000000000"]
+}
+EOF
+
+az role definition create --role-definition @custom-role.json
+az role definition update --role-definition @custom-role.json
+az role definition delete --name "Custom Deployment Operator"
+```
+
+---
+
+## Entra ID (Azure AD)
+
+### Service principals
+
+```bash
+# Create app registration + SP
+az ad app create --display-name "myapp-deploy" --sign-in-audience AzureADMyOrg
+APP_ID=$(az ad app list --display-name "myapp-deploy" --query '[0].appId' -o tsv)
+az ad sp create --id "$APP_ID"
+
+# Create SP with auto-generated secret (legacy shortcut)
+az ad sp create-for-rbac \
+  --name     "myapp-deploy" \
+  --role     "Contributor" \
+  --scopes   "/subscriptions/$SUB/resourceGroups/rg-myapp-prod-uksouth" \
+  -o json
+
+# Add client secret
+az ad app credential reset \
+  --id      "$APP_ID" \
+  --years   1 \
+  --display-name "ci-secret"
+# Output contains clientSecret — capture immediately
+
+# Add federated credential (GitHub Actions OIDC)
+az ad app federated-credential create --id "$APP_ID" --parameters '{
+  "name":        "github-main",
+  "issuer":      "https://token.actions.githubusercontent.com",
+  "subject":     "repo:myorg/myrepo:ref:refs/heads/main",
+  "audiences":   ["api://AzureADTokenExchange"]
+}'
+
+# List / delete federated credentials
+az ad app federated-credential list --id "$APP_ID" -o table
+az ad app federated-credential delete --id "$APP_ID" --federated-credential-id "<fc-id>"
+
+# List SP role assignments
+az role assignment list --assignee "$APP_ID" --all -o table
+```
+
+### Managed identities
+
+```bash
+# Create user-assigned managed identity
+az identity create --name mi-myapp-prod --resource-group rg-myapp-prod-uksouth
+
+# Get client ID and principal ID
+az identity show -n mi-myapp-prod -g rg-myapp-prod-uksouth \
+  --query '{clientId:clientId, principalId:principalId}' -o json
+
+# Assign role to the UAMI
+MI_PID=$(az identity show -n mi-myapp-prod -g rg-myapp-prod-uksouth --query principalId -o tsv)
+az role assignment create \
+  --assignee-object-id   "$MI_PID" \
+  --assignee-principal-type ManagedIdentity \
+  --role  "Key Vault Secrets User" \
+  --scope "/subscriptions/$SUB"
+
+# Attach UAMI to a VM
+az vm identity assign \
+  --name             my-vm \
+  --resource-group   rg-myapp-prod-uksouth \
+  --identities       "/subscriptions/$SUB/resourceGroups/rg-myapp-prod-uksouth/providers/Microsoft.ManagedIdentity/userAssignedIdentities/mi-myapp-prod"
+```
+
+### Users and groups
+
+```bash
+# List users
+az ad user list --filter "department eq 'Engineering'" \
+  --query '[].{Name:displayName, UPN:userPrincipalName}' -o table
+
+# Create user
+az ad user create \
+  --display-name    "Jane Smith" \
+  --user-principal-name "jsmith@example.com" \
+  --password        "TempPass123!" \
+  --force-change-password-next-sign-in true
+
+# Groups
+az ad group list --filter "displayName eq 'Platform Engineers'" -o table
+az ad group create --display-name "Platform Engineers" --mail-nickname "platform-engineers"
+
+# Add member
+az ad group member add \
+  --group "$GROUP_ID" \
+  --member-id "$USER_OID"
+
+# Check membership
+az ad group member check --group "$GROUP_ID" --member-id "$USER_OID" --query value -o tsv
+```
+
+---
+
+## Key Vault
+
+```bash
+# Create (with RBAC authorization model)
+az keyvault create \
+  --name              kv-myapp-prod \
+  --resource-group    rg-myapp-prod-uksouth \
+  --location          uksouth \
+  --enable-rbac-authorization true \
+  --sku               standard
+
+# Secrets
+az keyvault secret set   --vault-name kv-myapp-prod --name db-password --value "super-secret"
+az keyvault secret show  --vault-name kv-myapp-prod --name db-password --query value -o tsv
+az keyvault secret list  --vault-name kv-myapp-prod -o table
+az keyvault secret delete --vault-name kv-myapp-prod --name db-password
+
+# Recover / purge soft-deleted secret
+az keyvault secret recover --vault-name kv-myapp-prod --name db-password
+az keyvault secret purge   --vault-name kv-myapp-prod --name db-password
+
+# Keys
+az keyvault key create --vault-name kv-myapp-prod --name my-key --kty RSA --size 4096
+az keyvault key list   --vault-name kv-myapp-prod -o table
+az keyvault key encrypt --vault-name kv-myapp-prod --name my-key --algorithm RSA-OAEP --value "$(echo -n 'plaintext' | base64)"
+
+# Certificates
+az keyvault certificate create \
+  --vault-name kv-myapp-prod \
+  --name       my-cert \
+  --policy     "$(az keyvault certificate get-default-policy)"
+
+az keyvault certificate list   --vault-name kv-myapp-prod -o table
+az keyvault certificate show   --vault-name kv-myapp-prod --name my-cert
+az keyvault certificate download --vault-name kv-myapp-prod --name my-cert --file cert.pem
+
+# Diagnostics — enable audit logging to Log Analytics
+az monitor diagnostic-settings create \
+  --name              kv-diag \
+  --resource          "/subscriptions/$SUB/resourceGroups/rg-myapp-prod-uksouth/providers/Microsoft.KeyVault/vaults/kv-myapp-prod" \
+  --logs              '[{"category":"AuditEvent","enabled":true}]' \
+  --workspace         "/subscriptions/$SUB/resourceGroups/rg-sentinel/providers/Microsoft.OperationalInsights/workspaces/law-prod"
+```
+
+---
+
+## Compute (VMs)
+
+```bash
+# Create VM
+az vm create \
+  --name              my-vm \
+  --resource-group    rg-myapp-prod-uksouth \
+  --location          uksouth \
+  --image             Ubuntu2204 \
+  --size              Standard_D2s_v5 \
+  --admin-username    azureuser \
+  --ssh-key-values    ~/.ssh/id_rsa.pub \
+  --vnet-name         vnet-prod \
+  --subnet            snet-compute \
+  --public-ip-address "" \
+  --nsg               "" \
+  --tags              Environment=prod
+
+# Lifecycle
+az vm start      -n my-vm -g rg-myapp-prod-uksouth
+az vm stop       -n my-vm -g rg-myapp-prod-uksouth
+az vm deallocate -n my-vm -g rg-myapp-prod-uksouth
+az vm restart    -n my-vm -g rg-myapp-prod-uksouth
+az vm delete     -n my-vm -g rg-myapp-prod-uksouth --yes
+
+# Run command (no SSH needed)
+az vm run-command invoke \
+  --resource-group rg-myapp-prod-uksouth \
+  --name           my-vm \
+  --command-id     RunShellScript \
+  --scripts        "journalctl -u nginx -n 50 --no-pager"
+
+# Resize
+az vm resize -n my-vm -g rg-myapp-prod-uksouth --size Standard_D4s_v5
+
+# List sizes available in region
+az vm list-sizes --location uksouth --query '[].{Name:name, vCPUs:numberOfCores, MemGB:memoryInMb}' -o table
+
+# Capture image
+az vm deallocate -n my-vm -g rg-myapp-prod-uksouth
+az vm generalize -n my-vm -g rg-myapp-prod-uksouth
+az image create  -n my-golden-image -g rg-images --source my-vm
+
+# Extensions
+az vm extension set \
+  --resource-group rg-myapp-prod-uksouth \
+  --vm-name        my-vm \
+  --name           CustomScript \
+  --publisher      Microsoft.Azure.Extensions \
+  --settings       '{"fileUris":["https://mystg.blob.core.windows.net/scripts/setup.sh"],"commandToExecute":"bash setup.sh"}'
+
+# Connect via Azure Bastion (no public IP)
+az network bastion ssh \
+  --name           bastion-prod \
+  --resource-group rg-networking \
+  --target-resource-id "/subscriptions/$SUB/resourceGroups/rg-myapp-prod-uksouth/providers/Microsoft.Compute/virtualMachines/my-vm" \
+  --auth-type      ssh-key \
+  --username       azureuser \
+  --ssh-key        ~/.ssh/id_rsa
+```
+
+### VM Scale Sets
+
+```bash
+az vmss create \
+  --name           vmss-myapp \
+  --resource-group rg-myapp-prod-uksouth \
+  --image          Ubuntu2204 \
+  --vm-sku         Standard_D2s_v5 \
+  --instance-count 3 \
+  --lb-sku         Standard \
+  --upgrade-policy-mode Automatic
+
+az vmss scale     -n vmss-myapp -g rg-myapp-prod-uksouth --new-capacity 5
+az vmss update-instances -n vmss-myapp -g rg-myapp-prod-uksouth --instance-ids '*'
+az vmss list-instances -n vmss-myapp -g rg-myapp-prod-uksouth -o table
+```
+
+---
+
+## App Service
+
+```bash
+# Create App Service Plan + Web App
+az appservice plan create \
+  --name            asp-myapp-prod \
+  --resource-group  rg-myapp-prod-uksouth \
+  --sku             P1v3 \
+  --is-linux
+
+az webapp create \
+  --name            app-myapp-prod \
+  --resource-group  rg-myapp-prod-uksouth \
+  --plan            asp-myapp-prod \
+  --runtime         "NODE:20-lts"
+
+# Configuration
+az webapp config set \
+  --name           app-myapp-prod \
+  --resource-group rg-myapp-prod-uksouth \
+  --always-on      true \
+  --http20-enabled true \
+  --ftps-state     Disabled
+
+az webapp config appsettings set \
+  --name           app-myapp-prod \
+  --resource-group rg-myapp-prod-uksouth \
+  --settings       NODE_ENV=production API_URL=https://api.example.com
+
+az webapp config connection-string set \
+  --name           app-myapp-prod \
+  --resource-group rg-myapp-prod-uksouth \
+  --settings       DefaultDb="Server=..." \
+  --connection-string-type SQLAzure
+
+# Custom domain + managed certificate
+az webapp config hostname add \
+  --webapp-name    app-myapp-prod \
+  --resource-group rg-myapp-prod-uksouth \
+  --hostname       myapp.example.com
+
+az webapp config ssl bind \
+  --name           app-myapp-prod \
+  --resource-group rg-myapp-prod-uksouth \
+  --certificate-thumbprint "$(az webapp config ssl create \
+      --name app-myapp-prod -g rg-myapp-prod-uksouth \
+      --hostname myapp.example.com --query thumbprint -o tsv)" \
+  --ssl-type SNI
+
+# Deployment slots
+az webapp deployment slot create \
+  --name           app-myapp-prod \
+  --resource-group rg-myapp-prod-uksouth \
+  --slot           staging
+
+az webapp deployment slot swap \
+  --name           app-myapp-prod \
+  --resource-group rg-myapp-prod-uksouth \
+  --slot           staging \
+  --target-slot    production
+
+# Stream logs
+az webapp log tail --name app-myapp-prod --resource-group rg-myapp-prod-uksouth
+
+# Identity (system-assigned MI for Key Vault access)
+az webapp identity assign \
+  --name           app-myapp-prod \
+  --resource-group rg-myapp-prod-uksouth
+
+# VNet integration
+az webapp vnet-integration add \
+  --name           app-myapp-prod \
+  --resource-group rg-myapp-prod-uksouth \
+  --vnet           vnet-prod \
+  --subnet         snet-appservice
+```
+
+### Function Apps
+
+```bash
+az functionapp create \
+  --name             func-myapp-prod \
+  --resource-group   rg-myapp-prod-uksouth \
+  --storage-account  stdataprod \
+  --consumption-plan-location uksouth \
+  --runtime          python \
+  --runtime-version  3.11 \
+  --functions-version 4 \
+  --os-type          Linux
+
+# Deploy code
+func azure functionapp publish func-myapp-prod
+
+# App settings
+az functionapp config appsettings set \
+  --name           func-myapp-prod \
+  --resource-group rg-myapp-prod-uksouth \
+  --settings       MY_VAR=value
+
+# Scale plan
+az functionapp plan create \
+  --name           asp-functions-prod \
+  --resource-group rg-myapp-prod-uksouth \
+  --sku            EP1 \
+  --is-linux
+```
+
+---
+
+## AKS
+
+```bash
+# Create cluster with workload identity and OIDC issuer
+az aks create \
+  --name              aks-myapp-prod \
+  --resource-group    rg-myapp-prod-uksouth \
+  --location          uksouth \
+  --kubernetes-version 1.30 \
+  --node-count        3 \
+  --node-vm-size      Standard_D4s_v5 \
+  --os-sku            AzureLinux \
+  --network-plugin    azure \
+  --network-plugin-mode overlay \
+  --network-policy    cilium \
+  --vnet-subnet-id    "/subscriptions/$SUB/resourceGroups/rg-networking/providers/Microsoft.Network/virtualNetworks/vnet-prod/subnets/snet-aks" \
+  --enable-oidc-issuer \
+  --enable-workload-identity \
+  --enable-managed-identity \
+  --enable-cluster-autoscaler \
+  --min-count         2 \
+  --max-count         10 \
+  --zones             1 2 3 \
+  --tier              Standard \
+  --tags              Environment=prod
+
+# Get credentials
+az aks get-credentials -n aks-myapp-prod -g rg-myapp-prod-uksouth --overwrite-existing
+
+# Admin credentials (bypass RBAC — emergency only)
+az aks get-credentials -n aks-myapp-prod -g rg-myapp-prod-uksouth --admin
+
+# Add node pool
+az aks nodepool add \
+  --cluster-name   aks-myapp-prod \
+  --resource-group rg-myapp-prod-uksouth \
+  --name           gpupool \
+  --node-count     1 \
+  --node-vm-size   Standard_NC6s_v3 \
+  --node-taints    sku=gpu:NoSchedule \
+  --labels         sku=gpu
+
+az aks nodepool scale \
+  --cluster-name   aks-myapp-prod \
+  --resource-group rg-myapp-prod-uksouth \
+  --name           nodepool1 \
+  --node-count     5
+
+# Upgrade
+az aks get-upgrades -n aks-myapp-prod -g rg-myapp-prod-uksouth -o table
+az aks upgrade -n aks-myapp-prod -g rg-myapp-prod-uksouth --kubernetes-version 1.31 --yes
+
+# Managed add-ons
+az aks enable-addons \
+  --addons monitoring \
+  --name   aks-myapp-prod \
+  --resource-group rg-myapp-prod-uksouth \
+  --workspace-resource-id "/subscriptions/$SUB/resourceGroups/rg-monitoring/providers/Microsoft.OperationalInsights/workspaces/law-prod"
+
+# Workload identity federation (for pods to access Azure resources)
+OIDC_ISSUER=$(az aks show -n aks-myapp-prod -g rg-myapp-prod-uksouth --query oidcIssuerProfile.issuerUrl -o tsv)
+MI_CLIENT_ID=$(az identity show -n mi-myapp -g rg-myapp-prod-uksouth --query clientId -o tsv)
+MI_OID=$(az identity show -n mi-myapp -g rg-myapp-prod-uksouth --query principalId -o tsv)
+
+az identity federated-credential create \
+  --name              federated-aks-myapp \
+  --identity-name     mi-myapp \
+  --resource-group    rg-myapp-prod-uksouth \
+  --issuer            "$OIDC_ISSUER" \
+  --subject           "system:serviceaccount:my-namespace:my-service-account" \
+  --audience          "api://AzureADTokenExchange"
+
+# Stop / start cluster (save cost in dev)
+az aks stop  -n aks-myapp-prod -g rg-myapp-prod-uksouth
+az aks start -n aks-myapp-prod -g rg-myapp-prod-uksouth
+```
+
+---
+
+## Container Registry (ACR)
+
+```bash
+# Create
+az acr create \
+  --name            acrMyAppProd \
+  --resource-group  rg-myapp-prod-uksouth \
+  --sku             Premium \
+  --admin-enabled   false
+
+# Login
+az acr login --name acrMyAppProd
+
+# Build + push with ACR Tasks (no local Docker needed)
+az acr build \
+  --registry    acrMyAppProd \
+  --image       myapp:$(git rev-parse --short HEAD) \
+  --file        Dockerfile \
+  .
+
+# Import from Docker Hub / another registry
+az acr import \
+  --name     acrMyAppProd \
+  --source   docker.io/library/nginx:1.27 \
+  --image    nginx:1.27
+
+# List images and tags
+az acr repository list --name acrMyAppProd -o table
+az acr repository show-tags --name acrMyAppProd --repository myapp --orderby time_desc -o table
+
+# Delete untagged manifests (cleanup)
+az acr run --registry acrMyAppProd --cmd 'acr purge --filter "myapp:.*" --ago 30d --untagged' /dev/null
+
+# Grant AKS pull access
+AKS_KUBELET_MI=$(az aks show -n aks-myapp-prod -g rg-myapp-prod-uksouth \
+  --query identityProfile.kubeletidentity.objectId -o tsv)
+az role assignment create \
+  --assignee-object-id    "$AKS_KUBELET_MI" \
+  --assignee-principal-type ManagedIdentity \
+  --role   "AcrPull" \
+  --scope  "$(az acr show -n acrMyAppProd --query id -o tsv)"
+
+# Geo-replication
+az acr replication create --registry acrMyAppProd --location eastus
+```
+
+---
+
+## Storage
+
+```bash
+# Create storage account
+az storage account create \
+  --name              stdataprod001 \
+  --resource-group    rg-myapp-prod-uksouth \
+  --location          uksouth \
+  --sku               Standard_ZRS \
+  --kind              StorageV2 \
+  --access-tier       Hot \
+  --min-tls-version   TLS1_2 \
+  --allow-blob-public-access false \
+  --require-infrastructure-encryption true
+
+# Get connection string / key
+CONN=$(az storage account show-connection-string -n stdataprod001 -g rg-myapp-prod-uksouth --query connectionString -o tsv)
+KEY=$(az storage account keys list -n stdataprod001 -g rg-myapp-prod-uksouth --query '[0].value' -o tsv)
+
+# Blob containers
+az storage container create  --name raw   --account-name stdataprod001 --auth-mode login
+az storage container list    --account-name stdataprod001 --auth-mode login -o table
+az storage container delete  --name raw   --account-name stdataprod001 --auth-mode login
+
+# Upload / download
+az storage blob upload \
+  --account-name stdataprod001 --container-name raw \
+  --name "data/$(date +%Y/%m/%d)/file.parquet" \
+  --file ./local-file.parquet \
+  --auth-mode login
+
+az storage blob download \
+  --account-name stdataprod001 --container-name raw \
+  --name "data/2025/01/01/file.parquet" \
+  --file ./download.parquet \
+  --auth-mode login
+
+# Copy between accounts
+az storage blob copy start \
+  --destination-account-name stdataprod002 \
+  --destination-container     raw \
+  --destination-blob          archive/file.parquet \
+  --source-uri "https://stdataprod001.blob.core.windows.net/raw/data/file.parquet?$SAS"
+
+# SAS token (1-hour read)
+az storage blob generate-sas \
+  --account-name stdataprod001 \
+  --container-name raw \
+  --name    "data/file.parquet" \
+  --permissions r \
+  --expiry  "$(date -u -d '+1 hour' '+%Y-%m-%dT%H:%MZ')" \
+  --auth-mode login \
+  --as-user \
+  --full-uri
+
+# Enable soft delete + versioning
+az storage blob service-properties update \
+  --account-name stdataprod001 \
+  --enable-delete-retention true \
+  --delete-retention-days   30 \
+  --enable-versioning       true \
+  --auth-mode login
+
+# Lifecycle management policy
+az storage account management-policy create \
+  --account-name stdataprod001 \
+  --resource-group rg-myapp-prod-uksouth \
+  --policy '{
+    "rules": [{
+      "name": "archive-old",
+      "enabled": true,
+      "type": "Lifecycle",
+      "definition": {
+        "filters": {"blobTypes": ["blockBlob"], "prefixMatch": ["data/"]},
+        "actions": {
+          "baseBlob": {
+            "tierToArchive": {"daysAfterModificationGreaterThan": 90},
+            "delete":        {"daysAfterModificationGreaterThan": 365}
+          }
+        }
+      }
+    }]
+  }'
+```
+
+---
+
+## Networking
+
+### Virtual Network
+
+```bash
+# Create VNet + subnets
+az network vnet create \
+  --name           vnet-prod \
+  --resource-group rg-networking \
+  --location       uksouth \
+  --address-prefixes 10.0.0.0/16
+
+az network vnet subnet create \
+  --name snet-web --resource-group rg-networking \
+  --vnet-name vnet-prod --address-prefixes 10.0.1.0/24 \
+  --delegations Microsoft.Web/serverFarms
+
+for name_prefix in "aks 10.0.2.0/23" "pe 10.0.4.0/24" "bastion 10.0.5.0/27" "appgw 10.0.6.0/26"; do
+  read snet cidr <<< "$name_prefix"
+  az network vnet subnet create \
+    --name "snet-$snet" --resource-group rg-networking \
+    --vnet-name vnet-prod --address-prefixes "$cidr"
 done
 
-CYAN='\033[0;36m' YELLOW='\033[0;33m' RED='\033[0;31m' RESET='\033[0m'
+# NSG
+az network nsg create -n nsg-compute -g rg-networking
 
-_log() {
-  local level="$1" msg="$2" caller="$3"
-  [[ "$level" == "DEBUG" && "$IsDebugMode" != "true" ]] && return
-  local ts; ts="$(date +%H:%M:%S)"
-  case "$level" in
-    INFO)    echo -e "${CYAN}${level}: ${ts} - [${caller}] ${msg}${RESET}" ;;
-    DEBUG|WARNING) echo -e "${YELLOW}${level}: ${ts} - [${caller}] ${msg}${RESET}" ;;
-    ERROR)   echo -e "${RED}${level}: ${ts} - [${caller}] ${msg}${RESET}" ;;
-    *)       echo "${level}: ${ts} - [${caller}] ${msg}" ;;
-  esac
-}
+az network nsg rule create \
+  --resource-group rg-networking --nsg-name nsg-compute \
+  --name AllowHTTPS --priority 100 \
+  --direction Inbound --protocol Tcp \
+  --source-address-prefixes '*' --source-port-ranges '*' \
+  --destination-address-prefixes '*' --destination-port-ranges 443 \
+  --access Allow
 
-connect_user() {
-  if ! az account show --output json &>/dev/null; then
-    _log INFO "No existing login. Authenticating..." "connect_user"
-    az login || { _log ERROR "Interactive login failed." "connect_user"; return 1; }
-    [[ -n "$SubscriptionId" ]] && az account set --subscription "$SubscriptionId"
-  else
-    local user; user=$(az account show --query user.name -o tsv)
-    _log INFO "Already logged in as $user." "connect_user"
-  fi
-}
+az network vnet subnet update \
+  --name snet-compute --resource-group rg-networking --vnet-name vnet-prod \
+  --network-security-group nsg-compute
 
-connect_spn() {
-  local use_spn="$1"
-  if [[ "$use_spn" == "true" ]]; then
-    _log INFO "Connecting via Service Principal..." "connect_spn"
-    az login --service-principal \
-      --username "$ClientId" --password "$ClientSecret" --tenant "$TenantId" \
-      || { _log ERROR "SPN login failed." "connect_spn"; return 1; }
-    [[ -n "$SubscriptionId" ]] && az account set --subscription "$SubscriptionId"
-  else
-    connect_user
-  fi
-}
+# Peering
+az network vnet peering create \
+  --name           prod-to-hub \
+  --resource-group rg-networking \
+  --vnet-name      vnet-prod \
+  --remote-vnet    "/subscriptions/$HUB_SUB/resourceGroups/rg-hub/providers/Microsoft.Network/virtualNetworks/vnet-hub" \
+  --allow-vnet-access \
+  --allow-forwarded-traffic
+```
 
-_log INFO "Starting..." "main"
-connect_spn "$UseServicePrincipal"
+### Private endpoints
+
+```bash
+# Disable network policies (required before creating PE)
+az network vnet subnet update \
+  --name snet-pe --resource-group rg-networking --vnet-name vnet-prod \
+  --disable-private-endpoint-network-policies true
+
+# Create private endpoint for Key Vault
+az network private-endpoint create \
+  --name             pe-kv-myapp \
+  --resource-group   rg-networking \
+  --vnet-name        vnet-prod \
+  --subnet           snet-pe \
+  --private-connection-resource-id "/subscriptions/$SUB/resourceGroups/rg-myapp-prod-uksouth/providers/Microsoft.KeyVault/vaults/kv-myapp-prod" \
+  --group-id         vault \
+  --connection-name  kv-myapp-prod-conn
+
+# Create private DNS zone + link
+az network private-dns zone create -n privatelink.vaultcore.azure.net -g rg-networking
+az network private-dns link vnet create \
+  --zone-name        privatelink.vaultcore.azure.net \
+  --resource-group   rg-networking \
+  --name             vnet-prod-link \
+  --virtual-network  vnet-prod \
+  --registration-enabled false
+
+# Auto-register DNS record from PE NIC
+PE_NIC=$(az network private-endpoint show -n pe-kv-myapp -g rg-networking --query 'networkInterfaces[0].id' -o tsv)
+PE_IP=$(az network nic show --ids "$PE_NIC" --query 'ipConfigurations[0].privateIPAddress' -o tsv)
+az network private-dns record-set a add-record \
+  --zone-name privatelink.vaultcore.azure.net \
+  --resource-group rg-networking \
+  --record-set-name kv-myapp-prod \
+  --ipv4-address "$PE_IP"
+```
+
+### DNS Zones
+
+```bash
+# Public DNS
+az network dns zone create -n example.com -g rg-networking
+az network dns record-set a add-record -z example.com -g rg-networking -n www -a 1.2.3.4
+az network dns record-set cname set-record -z example.com -g rg-networking -n api -c api.trafficmanager.net
+
+# Private DNS
+az network private-dns zone create -n internal.example.com -g rg-networking
+az network private-dns link vnet create \
+  --zone-name internal.example.com -g rg-networking \
+  --name prod-link --virtual-network vnet-prod --registration-enabled true
 ```
 
 ---
 
-## Policy Management
+## Azure Monitor & Log Analytics
 
-### Get all policy assignments across management groups and subscriptions
+### Log Analytics queries via CLI
 
-Iterates every management group and subscription in the tenant, collects all policy assignments, and returns a structured report.
+```bash
+# Run a KQL query from CLI
+az monitor log-analytics query \
+  --workspace "$LAW_ID" \
+  --analytics-query "AzureActivity | where TimeGenerated > ago(1h) | summarize count() by OperationNameValue | top 10 by count_" \
+  --timespan PT1H \
+  -o table
+
+LAW_ID=$(az monitor log-analytics workspace show \
+  -n law-prod -g rg-monitoring --query customerId -o tsv)
+```
+
+### Diagnostic settings
+
+```bash
+# Enable all logs + metrics for a resource → Log Analytics
+RESOURCE_ID="/subscriptions/$SUB/resourceGroups/rg-myapp-prod-uksouth/providers/Microsoft.ContainerService/managedClusters/aks-myapp-prod"
+LAW_ID="/subscriptions/$SUB/resourceGroups/rg-monitoring/providers/Microsoft.OperationalInsights/workspaces/law-prod"
+
+az monitor diagnostic-settings create \
+  --name   aks-diag \
+  --resource "$RESOURCE_ID" \
+  --workspace "$LAW_ID" \
+  --logs   '[{"categoryGroup":"allLogs","enabled":true}]' \
+  --metrics '[{"category":"AllMetrics","enabled":true}]'
+```
+
+### Alerts
+
+```bash
+# Metric alert — CPU > 85% for 5 min
+az monitor metrics alert create \
+  --name              cpu-alert \
+  --resource-group    rg-myapp-prod-uksouth \
+  --scopes            "/subscriptions/$SUB/resourceGroups/rg-myapp-prod-uksouth/providers/Microsoft.Compute/virtualMachines/my-vm" \
+  --condition         "avg Percentage CPU > 85" \
+  --window-size       5m \
+  --evaluation-frequency 1m \
+  --action            "$ACTION_GROUP_ID" \
+  --severity          2 \
+  --description       "VM CPU over 85%"
+
+# Action group (email + webhook)
+az monitor action-group create \
+  --name           ag-platform-alerts \
+  --resource-group rg-monitoring \
+  --short-name     platform \
+  --email-receiver name=oncall address=oncall@example.com \
+  --webhook-receiver name=pagerduty serviceUri=https://events.pagerduty.com/integration/abc123/enqueue
+
+# Log alert (KQL-based)
+az monitor scheduled-query create \
+  --name           login-failures-alert \
+  --resource-group rg-monitoring \
+  --scopes         "$LAW_ID" \
+  --condition      "count > 10" \
+  --condition-query "SigninLogs | where ResultType != '0' | summarize count()" \
+  --evaluation-frequency 5m \
+  --window-size    15m \
+  --severity       2 \
+  --action-groups  "$ACTION_GROUP_ID"
+
+# Activity log alert — resource group deletions
+az monitor activity-log alert create \
+  --name              rg-delete-alert \
+  --resource-group    rg-monitoring \
+  --scope             "/subscriptions/$SUB" \
+  --condition         "category=Administrative and operationName=Microsoft.Resources/subscriptions/resourceGroups/delete and status=Succeeded" \
+  --action-group      "$ACTION_GROUP_ID"
+```
+
+### Workbooks and dashboards
+
+```bash
+# List workbooks
+az monitor app-insights workbook list --resource-group rg-monitoring -o table
+
+# Export dashboard definition (az portal is not a built-in command — use az rest)
+az rest --method GET \
+  --url "https://management.azure.com/subscriptions/$SUB/resourceGroups/rg-monitoring/providers/Microsoft.Portal/dashboards/MyDashboard?api-version=2020-09-01-preview" \
+  -o json > dashboard.json
+```
+
+---
+
+## Policy & Governance
+
+### Policy definitions and assignments
+
+```bash
+# List built-in policies
+az policy definition list --query "[?policyType=='BuiltIn'].{Name:displayName, Id:name}" -o table | grep -i tag
+
+# Assign built-in policy (require tag)
+az policy assignment create \
+  --name           require-env-tag \
+  --display-name   "Require Environment tag" \
+  --scope          "/subscriptions/$SUB" \
+  --policy         "$(az policy definition list --query "[?displayName=='Require a tag on resources'].name" -o tsv)" \
+  --params         '{"tagName":{"value":"Environment"}}'
+
+# Assign with remediation (deployIfNotExists / modify effects)
+az policy assignment create \
+  --name              tag-inherit \
+  --scope             "/subscriptions/$SUB" \
+  --policy            "<policy-definition-id>" \
+  --assign-identity \
+  --identity-scope    "/subscriptions/$SUB" \
+  --role              Contributor \
+  --location          uksouth
+
+# Create remediation task
+az policy remediation create \
+  --name           tag-inherit-remediation \
+  --policy-assignment tag-inherit \
+  --resource-discovery-mode ReEvaluateCompliance
+
+# Compliance state
+az policy state list \
+  --query "[?complianceState=='NonCompliant']" \
+  -o table
+
+az policy state summarize --scope "/subscriptions/$SUB"
+
+# Custom policy definition
+az policy definition create \
+  --name        deny-public-ip \
+  --display-name "Deny Public IP creation" \
+  --mode        All \
+  --rules '{
+    "if": {
+      "field": "type",
+      "equals": "Microsoft.Network/publicIPAddresses"
+    },
+    "then": {"effect": "Deny"}
+  }' \
+  --params '{}'
+
+# Initiative (policy set)
+az policy set-definition create \
+  --name        baseline-governance \
+  --display-name "Baseline Governance Initiative" \
+  --definitions '[
+    {"policyDefinitionId": "/providers/Microsoft.Authorization/policyDefinitions/abc123", "parameters": {}},
+    {"policyDefinitionId": "/subscriptions/$SUB/providers/Microsoft.Authorization/policyDefinitions/deny-public-ip", "parameters": {}}
+  ]'
+```
+
+### Get all policy assignments across management groups
 
 ```powershell
-$TenantId = "01b9e453-84bc-4dc5-88de-a97a1fd42455"
-
-function Get-AllPolicyDefinitionAssignments {
-    param(
-        [Parameter(Mandatory)]
-        [string]$TenantId
-    )
-
+function Get-AllPolicyAssignments {
+    param ([Parameter(Mandatory)][string]$TenantId)
     Set-AzContext -TenantId $TenantId | Out-Null
 
-    $allSubscriptions   = Get-AzSubscription -TenantId $TenantId
-    $allManagementGroups = Get-AzManagementGroup
+    $mgs  = Get-AzManagementGroup
+    $subs = Get-AzSubscription -TenantId $TenantId
 
-    $allMgAssignments  = foreach ($mg in $allManagementGroups) {
-        [pscustomobject]@{ Name = $mg.DisplayName; Id = $mg.Id; Assignments = Get-AzPolicyAssignment -Scope $mg.Id -WarningAction SilentlyContinue }
+    $mgAssignments = foreach ($mg in $mgs) {
+        Get-AzPolicyAssignment -Scope $mg.Id -WarningAction SilentlyContinue |
+            Select-Object @{ N='Scope'; E={ $mg.DisplayName } }, Name, DisplayName
     }
 
-    $allSubAssignments = foreach ($sub in $allSubscriptions) {
-        Select-AzSubscription $sub | Set-AzContext | Out-Null
-        [pscustomobject]@{ Name = $sub.Name; Id = $sub.Id; Assignments = Get-AzPolicyAssignment -Scope "/subscriptions/$($sub.Id)" -IncludeDescendent -WarningAction SilentlyContinue }
+    $subAssignments = foreach ($sub in $subs) {
+        Set-AzContext -SubscriptionId $sub.Id | Out-Null
+        Get-AzPolicyAssignment -Scope "/subscriptions/$($sub.Id)" -IncludeDescendent -WarningAction SilentlyContinue |
+            Select-Object @{ N='Scope'; E={ $sub.Name } }, Name, DisplayName
     }
 
-    return [pscustomobject]@{
-        ManagementGroups = $allMgAssignments
-        Subscriptions    = $allSubAssignments
+    [PSCustomObject]@{
+        ManagementGroups = $mgAssignments
+        Subscriptions    = $subAssignments
     }
 }
 
-Connect-AzAccount
-$result = Get-AllPolicyDefinitionAssignments -TenantId $TenantId
+$result = Get-AllPolicyAssignments -TenantId $env:AZURE_TENANT_ID
+$result.Subscriptions | Format-Table -AutoSize
 ```
 
 ---
 
-## Common Az CLI Quick Commands
+## Bicep & ARM Deployments
+
+### Bicep CLI
 
 ```bash
-az account show                                    # current context
-az account list --output table                    # all subscriptions
-az account set --subscription "My Subscription"  # switch subscription
+# Build Bicep → ARM JSON
+az bicep build --file main.bicep --outfile main.json
 
-az group list --output table
-az group create --name my-rg --location uksouth
-az group delete --name my-rg --yes
+# Decompile ARM → Bicep
+az bicep decompile --file main.json
 
-az resource list --resource-group my-rg --output table
-az resource show --ids /subscriptions/.../resourceGroups/my-rg/providers/Microsoft.Compute/virtualMachines/my-vm
+# Install / upgrade Bicep
+az bicep install
+az bicep upgrade
+az bicep version
+```
 
-az vm list --output table
-az vm start  --name my-vm --resource-group my-rg
-az vm stop   --name my-vm --resource-group my-rg
-az vm deallocate --name my-vm --resource-group my-rg
+### Deployment patterns
 
-az keyvault secret list --vault-name my-vault --output table
-az keyvault secret show --vault-name my-vault --name my-secret --query value -o tsv
+```bash
+# Resource group scope
+az deployment group create \
+  --name           deploy-$(date +%Y%m%d-%H%M%S) \
+  --resource-group rg-myapp-prod-uksouth \
+  --template-file  main.bicep \
+  --parameters     @params.prod.json \
+  --parameters     imageTag="$(git rev-parse --short HEAD)"
+
+# What-if (dry run)
+az deployment group what-if \
+  --resource-group rg-myapp-prod-uksouth \
+  --template-file  main.bicep \
+  --parameters     @params.prod.json
+
+# Subscription scope
+az deployment sub create \
+  --location    uksouth \
+  --template-file main.bicep \
+  --parameters  @params.json
+
+# Management group scope
+az deployment mg create \
+  --management-group-id "mg-platform" \
+  --location    uksouth \
+  --template-file main.bicep
+
+# Tenant scope (e.g., management group hierarchy)
+az deployment tenant create \
+  --location uksouth \
+  --template-file tenant.bicep
+
+# Validate template
+az deployment group validate \
+  --resource-group rg-myapp-prod-uksouth \
+  --template-file  main.bicep \
+  --parameters     @params.prod.json
+
+# Check deployment status and outputs
+az deployment group show \
+  --resource-group rg-myapp-prod-uksouth \
+  --name           my-deployment \
+  --query          '{status:properties.provisioningState, outputs:properties.outputs}' -o json
+
+# List deployments
+az deployment group list -g rg-myapp-prod-uksouth -o table
+
+# Cancel in-progress deployment
+az deployment group cancel -g rg-myapp-prod-uksouth -n my-deployment
+```
+
+### Deployment Stacks
+
+```bash
+# Create stack (replaces ad-hoc RG deployments — manages lifecycle)
+az stack group create \
+  --name              stack-myapp-prod \
+  --resource-group    rg-myapp-prod-uksouth \
+  --template-file     main.bicep \
+  --parameters        @params.prod.json \
+  --deny-settings-mode none \
+  --action-on-unmanage deleteResources
+
+# Update existing stack
+az stack group set \
+  --name              stack-myapp-prod \
+  --resource-group    rg-myapp-prod-uksouth \
+  --template-file     main.bicep \
+  --parameters        @params.prod.json
+
+# Show stack
+az stack group show -n stack-myapp-prod -g rg-myapp-prod-uksouth
+
+# Delete stack (and optionally managed resources)
+az stack group delete -n stack-myapp-prod -g rg-myapp-prod-uksouth \
+  --action-on-unmanage deleteResources --yes
+```
+
+### Minimal Bicep starter
+
+```bicep
+// main.bicep
+targetScope = 'resourceGroup'
+
+@description('Environment name')
+@allowed(['dev', 'staging', 'prod'])
+param environment string
+
+@description('Location for all resources')
+param location string = resourceGroup().location
+
+param tags object = {
+  Environment: environment
+  ManagedBy:   'Bicep'
+}
+
+module keyVault './modules/kv.bicep' = {
+  name: 'keyVault'
+  params: {
+    name:     'kv-myapp-${environment}'
+    location: location
+    tags:     tags
+  }
+}
+
+output keyVaultUri string = keyVault.outputs.uri
 ```
 
 ---
 
-## Set Terraform ARM Environment Variables
-
-Export the variables needed for the `azurerm` Terraform provider from your shell.
+## Azure DevOps CLI
 
 ```bash
-echo 'export ARM_TENANT_ID=""'        >> ~/.bashrc
-echo 'export ARM_CLIENT_ID=""'        >> ~/.bashrc
-echo 'export ARM_CLIENT_SECRET=""'    >> ~/.bashrc
-echo 'export ARM_SUBSCRIPTION_ID=""'  >> ~/.bashrc
-echo 'export ARM_ACCESS_KEY=""'       >> ~/.bashrc
-source ~/.bashrc
+# Install extension
+az extension add --name azure-devops
+
+# Configure defaults
+az devops configure --defaults organization=https://dev.azure.com/myorg project=myproject
+
+# Pipelines
+az pipelines list -o table
+az pipelines run --name "MyPipeline" --branch main --variables myVar=value
+az pipelines show --name "MyPipeline" --open
+
+# Pipeline variables
+az pipelines variable create \
+  --pipeline-name "MyPipeline" \
+  --name           ARM_CLIENT_SECRET \
+  --value          "$SECRET" \
+  --secret         true
+
+# Releases / environments
+az pipelines environment list -o table
+
+# Repos
+az repos list -o table
+az repos ref list --repository myrepo --filter heads/ -o table
+
+# PRs
+az repos pr list --status active -o table
+az repos pr create \
+  --repository myrepo \
+  --source-branch feature/my-feature \
+  --target-branch main \
+  --title "My feature" \
+  --auto-complete true \
+  --squash true
+
+# Work items
+az boards work-item create --title "Fix the thing" --type Bug --assigned-to "user@example.com"
+az boards work-item update --id 1234 --state "In Progress"
+```
+
+---
+
+## Cost & Billing
+
+```bash
+# Cost by service (last 30 days)
+az consumption usage list \
+  --start-date "$(date -d '-30 days' '+%Y-%m-%d')" \
+  --end-date   "$(date '+%Y-%m-%d')" \
+  --query      '[].{Service:instanceName, Cost:pretaxCost, Currency:currency}' \
+  -o table
+
+# Budgets
+az consumption budget list -o table
+az consumption budget create \
+  --budget-name   monthly-prod \
+  --amount        1000 \
+  --time-grain    Monthly \
+  --start-date    "$(date '+%Y-%m-01')" \
+  --end-date      "2026-12-31" \
+  --category      Cost \
+  --notifications '[{
+    "enabled": true,
+    "operator": "GreaterThan",
+    "threshold": 80,
+    "contactEmails": ["finops@example.com"],
+    "thresholdType": "Actual"
+  }]'
+# Note: subscription-scope budget; for RG-scoped budgets use az rest with the Consumption Budgets API
+
+# Rate card / pricing
+az billing account list -o table
+```
+
+---
+
+## Useful Global Patterns
+
+### Find resources by tag
+
+```bash
+# All resources with Environment=prod
+az resource list --tag Environment=prod -o table
+
+# Resources missing a tag
+az resource list --query "[?tags == null || !contains(keys(tags || \`{}\`), 'Environment')]" -o table
+
+# Resources by type across subscription
+az resource list --resource-type Microsoft.KeyVault/vaults -o table
+```
+
+### Bulk tag update
+
+```bash
+# Tag all resources in RG
+az resource list -g rg-myapp-prod-uksouth --query '[].id' -o tsv | while read -r id; do
+  az tag update --resource-id "$id" --operation merge \
+    --tags Environment=prod ManagedBy=platform-team
+done
+```
+
+### Wait for resource state
+
+```bash
+# Wait for VM to be running
+az vm wait --name my-vm --resource-group rg-myapp-prod-uksouth --custom "instanceView.statuses[?code=='PowerState/running']"
+
+# Wait for deployment to complete
+az deployment group wait \
+  --resource-group rg-myapp-prod-uksouth \
+  --name           my-deployment \
+  --created
+```
+
+### Cross-subscription resource search
+
+```bash
+# Find all VMs across all subscriptions
+az account list --query '[].id' -o tsv | while read -r sub; do
+  az vm list --subscription "$sub" \
+    --query "[].{Name:name, Sub:'$sub', RG:resourceGroup, Size:hardwareProfile.vmSize}" \
+    -o json
+done | jq -s 'flatten' | jq -r '.[] | [.Sub, .RG, .Name, .Size] | @tsv' | column -t
+```
+
+### Azure CLI in CI (non-interactive)
+
+```bash
+# GitHub Actions — use azure/login action, then:
+az account show          # verify context
+az group list -o table   # confirm access
+
+# Azure Pipelines (service connection sets environment automatically)
+# ARM_* variables auto-set — no az login needed with AzureCLI@2 task
+```
+
+### Useful aliases for $PROFILE / .bashrc
+
+```bash
+# Bash
+alias azctx='az account show --query "{sub:name, tenant:tenantId}" -o json'
+alias azlist='az account list --query "[].{Name:name, Id:id, State:state}" -o table'
+alias azswitch='az account set --subscription'
+
+# Get bearer token for debugging ARM API calls
+alias aztoken='az account get-access-token --query accessToken -o tsv'
 ```

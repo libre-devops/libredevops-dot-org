@@ -1,407 +1,1485 @@
 ---
 title: Terraform Cheatsheet
-description: Practical Terraform snippets for Azure infrastructure — formatting, type conversions, dynamic blocks, state management, OS detection, and workflow automation.
+description: Advanced Terraform reference for Azure — provider auth, state, lifecycle, expressions, validation, modules, RBAC, Key Vault, and CI/CD patterns.
 ---
 
 # Terraform Cheat Sheet
 
-A practical reference for common Terraform patterns used in Azure infrastructure. Each snippet solves a real problem — not just syntax demos.
+Advanced Terraform patterns for Azure infrastructure. Covers the language deeply, common Azure-specific idioms, and real operational concerns around state and CI/CD.
 
 ---
 
-## Formatting & String Manipulation
+## Provider & Authentication
 
-### Number padding
+### AzureRM provider — minimal required block
 
-Use `format("%02d", count.index + 1)` to produce zero-padded numbers (`01`, `02`, ...) in resource names. This keeps names sortable and visually consistent when you have more than nine instances.
+The `features {}` block is mandatory even if empty. `subscription_id` is required in v4+.
 
 ```hcl
-resource "azurerm_application_security_group" "with_pad" {
-  count               = 4
-  name                = "asg-${var.short}-${var.loc}-${terraform.workspace}-web-${format("%02d", count.index + 1)}"
-  location            = local.location
-  resource_group_name = azurerm_resource_group.example_rg.name
-  tags                = local.tags
+terraform {
+  required_version = ">= 1.9"
+  required_providers {
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = "~> 4.0"
+    }
+  }
 }
 
-resource "azurerm_application_security_group" "without_pad" {
-  count               = 4
-  name                = "asg-${var.short}-${var.loc}-${terraform.workspace}-web-${count.index + 1}"
-  location            = local.location
-  resource_group_name = azurerm_resource_group.example_rg.name
-  tags                = local.tags
+provider "azurerm" {
+  subscription_id = var.subscription_id
+  features {}
 }
 ```
 
-#### Output comparison
+### Authentication options
 
-```text
-Changes to Outputs:
+#### OIDC / Workload Identity Federation (recommended for CI/CD)
 
-  + asg_with_pad_output    = [
-      + "asg-lbdo-euw-tst-web-01",
-      + "asg-lbdo-euw-tst-web-02",
-      + "asg-lbdo-euw-tst-web-03",
-      + "asg-lbdo-euw-tst-web-04",
-    ]
-  + asg_without_pad_output = [
-      + "asg-lbdo-euw-tst-web-1",
-      + "asg-lbdo-euw-tst-web-2",
-      + "asg-lbdo-euw-tst-web-3",
-      + "asg-lbdo-euw-tst-web-4",
-    ]
-```
-
-### Title-case and strip punctuation
-
-Combine `title()` and `replace()` to normalise a string — e.g. turning a kebab-case resource name into a PascalCase display name for tags or Azure AD application names.
+No secrets stored. Configure a federated credential on the service principal in Entra ID.
 
 ```hcl
-replace(replace(title("rg-craig-test"), "-", ""), " ", "")
-# => "RgCraigTest"
+provider "azurerm" {
+  subscription_id = var.subscription_id
+  use_oidc        = true
+  tenant_id       = var.tenant_id
+  client_id       = var.client_id   # or ARM_CLIENT_ID env var
+  features {}
+}
 ```
 
-### Region name lookup
+Set in the pipeline:
+```bash
+export ARM_USE_OIDC=true
+export ARM_TENANT_ID="..."
+export ARM_CLIENT_ID="..."
+export ARM_SUBSCRIPTION_ID="..."
+```
 
-Keep Azure region names consistent by storing shorthand ↔ longhand mappings in a variable and resolving them with `lookup()`. The third argument is a safe fallback if the key is not found.
+#### Managed Identity (recommended for self-hosted runners)
 
 ```hcl
-variable "loc" {
-  description = "Shorthand Azure location — passed as TF_VAR in CI."
+provider "azurerm" {
+  subscription_id = var.subscription_id
+  use_msi         = true
+  features {}
+}
+```
+
+#### Service principal with client secret (legacy — avoid in new projects)
+
+```bash
+export ARM_CLIENT_ID="..."
+export ARM_CLIENT_SECRET="..."
+export ARM_TENANT_ID="..."
+export ARM_SUBSCRIPTION_ID="..."
+```
+
+No `client_id`/`client_secret` in HCL — keep secrets out of source control.
+
+### Multi-subscription with provider aliases
+
+```hcl
+provider "azurerm" {
+  alias           = "hub"
+  subscription_id = var.hub_subscription_id
+  features {}
+}
+
+provider "azurerm" {
+  alias           = "spoke"
+  subscription_id = var.spoke_subscription_id
+  features {}
+}
+
+resource "azurerm_resource_group" "spoke_rg" {
+  provider = azurerm.spoke
+  name     = "rg-spoke-prod"
+  location = "UK South"
+}
+```
+
+Pass the alias into a module:
+```hcl
+module "networking" {
+  source = "./modules/networking"
+  providers = {
+    azurerm = azurerm.spoke
+  }
+}
+```
+
+### Useful `features {}` options
+
+```hcl
+provider "azurerm" {
+  subscription_id = var.subscription_id
+  features {
+    resource_group {
+      prevent_deletion_if_contains_resources = true  # fail destroy if RG not empty
+    }
+    key_vault {
+      purge_soft_delete_on_destroy    = false  # keep soft-deleted vault recoverable
+      recover_soft_deleted_key_vaults = true
+    }
+    virtual_machine {
+      delete_os_disk_on_deletion     = true
+      graceful_shutdown              = false
+      skip_shutdown_and_force_delete = false
+    }
+  }
+}
+```
+
+---
+
+## Remote State Backend
+
+### Azure Blob Storage backend
+
+```hcl
+terraform {
+  backend "azurerm" {
+    resource_group_name  = "rg-tfstate-prod"
+    storage_account_name = "sttfstateprod001"
+    container_name       = "tfstate"
+    key                  = "myapp/prod/terraform.tfstate"
+    use_azuread_auth     = true  # use Entra ID auth, not storage key
+  }
+}
+```
+
+Backend values cannot use variables — pass them via `-backend-config` for reuse:
+
+```bash
+terraform init \
+  -backend-config="resource_group_name=rg-tfstate-prod" \
+  -backend-config="storage_account_name=sttfstateprod001" \
+  -backend-config="container_name=tfstate" \
+  -backend-config="key=myapp/prod/terraform.tfstate"
+```
+
+### `override.tf` — swap backend for local dev
+
+Add to `.gitignore`. Terraform merges it over the main config at runtime.
+
+```hcl
+terraform {
+  backend "local" {
+    path = "terraform.tfstate"
+  }
+}
+```
+
+### Cross-stack reference with `terraform_remote_state`
+
+```hcl
+data "terraform_remote_state" "networking" {
+  backend = "azurerm"
+  config = {
+    resource_group_name  = "rg-tfstate-prod"
+    storage_account_name = "sttfstateprod001"
+    container_name       = "tfstate"
+    key                  = "networking/prod/terraform.tfstate"
+    use_azuread_auth     = true
+  }
+}
+
+# Consume an output from the networking stack
+resource "azurerm_subnet" "app" {
+  virtual_network_name = data.terraform_remote_state.networking.outputs.vnet_name
+  resource_group_name  = data.terraform_remote_state.networking.outputs.vnet_rg
+  # ...
+}
+```
+
+---
+
+## Variables, Locals & Outputs
+
+### Variable types and defaults
+
+```hcl
+variable "environment" {
   type        = string
-  default     = "ukw"
+  description = "Deployment environment."
+  default     = "prod"
 }
 
-variable "regions" {
-  type = map(string)
+variable "instance_count" {
+  type    = number
+  default = 2
+}
+
+variable "enable_monitoring" {
+  type    = bool
+  default = true
+}
+
+variable "allowed_ip_ranges" {
+  type    = list(string)
+  default = ["10.0.0.0/8"]
+}
+
+variable "tags" {
+  type    = map(string)
+  default = {}
+}
+```
+
+### Object and tuple types
+
+```hcl
+variable "vm_config" {
+  type = object({
+    size          = string
+    os_disk_type  = string
+    data_disk_gb  = optional(number, 128)   # optional() with default — Terraform 1.3+
+    enable_backup = optional(bool, true)
+  })
   default = {
+    size         = "Standard_D4ds_v5"
+    os_disk_type = "Premium_LRS"
+  }
+}
+```
+
+### Variable validation
+
+```hcl
+variable "location" {
+  type = string
+  validation {
+    condition     = contains(["UK South", "UK West", "East US", "West Europe"], var.location)
+    error_message = "Location must be one of: UK South, UK West, East US, West Europe."
+  }
+}
+
+variable "vm_name" {
+  type = string
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9-]{1,13}[a-z0-9]$", var.vm_name))
+    error_message = "VM name must be 3-15 lowercase alphanumeric characters or hyphens, start with a letter, and end with alphanumeric."
+  }
+}
+
+variable "subnet_cidr" {
+  type = string
+  validation {
+    condition     = can(cidrnetmask(var.subnet_cidr))
+    error_message = "subnet_cidr must be a valid CIDR block."
+  }
+}
+```
+
+### Multiple validations on one variable
+
+```hcl
+variable "tags" {
+  type = map(string)
+  validation {
+    condition     = contains(keys(var.tags), "CostCentre")
+    error_message = "tags must include a 'CostCentre' key."
+  }
+  validation {
+    condition     = contains(keys(var.tags), "ManagedBy")
+    error_message = "tags must include a 'ManagedBy' key."
+  }
+}
+```
+
+### Locals — derived values and DRY
+
+```hcl
+locals {
+  # Compose a naming prefix from convention variables
+  prefix = "${var.short}-${var.loc}-${var.env}"
+
+  # Merge caller tags with mandatory tags
+  mandatory_tags = {
+    ManagedBy   = "Terraform"
+    Environment = var.environment
+    CostCentre  = var.cost_centre
+  }
+  tags = merge(var.tags, local.mandatory_tags)
+
+  # Region lookup — safe fallback if shorthand not in map
+  region_map = {
     uks = "UK South"
     ukw = "UK West"
     eus = "East US"
+    euw = "West Europe"
+    aus = "Australia East"
   }
-  description = "Converts shorthand name to longhand via map lookup."
-}
-
-locals {
-  location = lookup(var.regions, var.loc, "UK South")
+  location = lookup(local.region_map, var.loc, "UK South")
 }
 ```
 
-#### Output
+### Sensitive outputs
 
-```text
-Changes to Outputs:
-  + location_output = "UK West"
+```hcl
+output "connection_string" {
+  value     = azurerm_storage_account.sa.primary_connection_string
+  sensitive = true  # redacted in plan/apply output, still stored in state
+}
+
+output "vm_public_ips" {
+  value = {
+    for k, v in azurerm_public_ip.pip : k => v.ip_address
+  }
+}
+```
+
+---
+
+## Data Sources
+
+### Common Azure data sources
+
+```hcl
+# Current client credentials
+data "azurerm_client_config" "current" {}
+
+# Current subscription details
+data "azurerm_subscription" "current" {}
+
+# An existing resource group
+data "azurerm_resource_group" "shared" {
+  name = "rg-shared-prod"
+}
+
+# An existing virtual network
+data "azurerm_virtual_network" "hub" {
+  name                = "vnet-hub-prod"
+  resource_group_name = "rg-networking-prod"
+}
+
+# A specific subnet
+data "azurerm_subnet" "app" {
+  name                 = "snet-app-prod"
+  virtual_network_name = data.azurerm_virtual_network.hub.name
+  resource_group_name  = data.azurerm_virtual_network.hub.resource_group_name
+}
+
+# Key Vault reference
+data "azurerm_key_vault" "shared" {
+  name                = "kv-shared-prod-001"
+  resource_group_name = "rg-shared-prod"
+}
+
+# Read a secret from Key Vault (service principal needs Secret User)
+data "azurerm_key_vault_secret" "db_password" {
+  name         = "db-password"
+  key_vault_id = data.azurerm_key_vault.shared.id
+}
+
+# Log Analytics workspace
+data "azurerm_log_analytics_workspace" "law" {
+  name                = "law-prod-001"
+  resource_group_name = "rg-monitoring-prod"
+}
+```
+
+Use the current client's tenant and object IDs directly:
+
+```hcl
+resource "azurerm_key_vault" "kv" {
+  tenant_id = data.azurerm_client_config.current.tenant_id
+  # ...
+
+  access_policy {
+    tenant_id = data.azurerm_client_config.current.tenant_id
+    object_id = data.azurerm_client_config.current.object_id
+    # grant the deploying identity permissions
+    secret_permissions = ["Get", "List", "Set", "Delete"]
+  }
+}
 ```
 
 ---
 
 ## Resource Patterns
 
-### Conditional `for_each` with regex
-
-Only create resources where a map value matches a pattern — everything else is skipped. This avoids maintaining a separate allow-list of which keys to deploy, and keeps the logic co-located with the data.
+### `count` — indexed copies of one resource
 
 ```hcl
-variable "environment" {
-  default     = "prd"
-  type        = string
-  description = "Used as an alternative to terraform.workspace."
+resource "azurerm_availability_set" "avset" {
+  count                        = var.instance_count
+  name                         = "avset-${local.prefix}-${format("%02d", count.index + 1)}"
+  location                     = local.location
+  resource_group_name          = azurerm_resource_group.rg.name
+  platform_fault_domain_count  = 2
+  platform_update_domain_count = 5
+  tags                         = local.tags
 }
+```
 
+`count` produces a list — reference by index: `azurerm_availability_set.avset[0].id`
+
+### `for_each` with a map — preferred for stable keys
+
+```hcl
 locals {
-  names = {
-    key0 = var.environment          # "prd"
-    key1 = "${var.environment}-vm"  # "prd-vm"
-    key2 = "prd-biscuit"
-    key3 = "tst_pizza"
+  subnets = {
+    app = { cidr = "10.0.1.0/24", service_endpoints = ["Microsoft.Storage"] }
+    db  = { cidr = "10.0.2.0/24", service_endpoints = ["Microsoft.Sql"] }
+    mgmt = { cidr = "10.0.3.0/24", service_endpoints = [] }
   }
 }
 
-resource "azurerm_resource_group" "test_rg" {
-  # Creates RGs only for values containing "prd-" — key1 and key2
-  for_each = {
-    for key, value in local.names : key => value
-    if length(regexall("${var.environment}-", value)) > 0
-  }
+resource "azurerm_subnet" "subnets" {
+  for_each             = local.subnets
+  name                 = "snet-${each.key}-${var.env}"
+  resource_group_name  = azurerm_resource_group.rg.name
+  virtual_network_name = azurerm_virtual_network.vnet.name
+  address_prefixes     = [each.value.cidr]
+  service_endpoints    = each.value.service_endpoints
+}
+
+# Reference by key — stable, not index-dependent
+output "app_subnet_id" {
+  value = azurerm_subnet.subnets["app"].id
+}
+```
+
+### `for_each` with `toset()` — deduplicated list input
+
+```hcl
+variable "resource_group_names" {
+  type    = list(string)
+  default = ["rg-app-prod", "rg-data-prod", "rg-mgmt-prod"]
+}
+
+resource "azurerm_resource_group" "rgs" {
+  for_each = toset(var.resource_group_names)
+  name     = each.key
   location = local.location
-  name     = each.value
+  tags     = local.tags
 }
 ```
 
-#### Output — only matching keys are planned
+### `setproduct` — cross-product deployments
 
-```text
-# azurerm_resource_group.test_rg["key1"] will be created
-  + resource "azurerm_resource_group" "test_rg" {
-      + id       = (known after apply)
-      + location = "uksouth"
-      + name     = "prd-vm"
-    }
-
-# azurerm_resource_group.test_rg["key2"] will be created
-  + resource "azurerm_resource_group" "test_rg" {
-      + id       = (known after apply)
-      + location = "uksouth"
-      + name     = "prd-biscuit"
-    }
-```
-
-### Dynamic blocks — multiple identity type conditions
-
-Terraform only allows one `identity` block per resource, but `SystemAssigned`, `UserAssigned`, and `SystemAssigned, UserAssigned` each need different attributes. Dynamic blocks let you express all three cases — only one will actually emit a block per run, depending on the variable values.
+Create every combination of two lists (e.g., deploy a resource in every region × environment pair):
 
 ```hcl
-dynamic "identity" {
-  for_each = length(var.identity_ids) == 0 && var.identity_type == "SystemAssigned" ? [var.identity_type] : []
-  content {
-    type = var.identity_type
+locals {
+  regions      = ["UK South", "West Europe"]
+  environments = ["prod", "staging"]
+
+  deployments = {
+    for pair in setproduct(local.regions, local.environments) :
+    "${pair[0]}-${pair[1]}" => {
+      location    = pair[0]
+      environment = pair[1]
+    }
   }
 }
 
-dynamic "identity" {
-  for_each = length(var.identity_ids) > 0 || var.identity_type == "UserAssigned" ? [var.identity_type] : []
-  content {
-    type         = var.identity_type
-    identity_ids = length(var.identity_ids) > 0 ? var.identity_ids : []
-  }
-}
-
-dynamic "identity" {
-  for_each = length(var.identity_ids) > 0 || var.identity_type == "SystemAssigned, UserAssigned" ? [var.identity_type] : []
-  content {
-    type         = var.identity_type
-    identity_ids = length(var.identity_ids) > 0 ? var.identity_ids : []
-  }
+resource "azurerm_resource_group" "multi" {
+  for_each = local.deployments
+  name     = "rg-app-${each.value.environment}-${replace(lower(each.value.location), " ", "")}"
+  location = each.value.location
+  tags     = merge(local.tags, { Environment = each.value.environment })
 }
 ```
 
-### VMSS — Azure DevOps agent extension
+### Conditional `for_each` with regex filter
 
-The extension block for attaching a self-hosted Azure Pipelines agent to a Virtual Machine Scale Set. `jsonencode` handles the escaping so the settings block stays readable in HCL.
+Only create resources where a map value matches a pattern:
 
 ```hcl
-extension {
-  auto_upgrade_minor_version = false
-  automatic_upgrade_enabled  = false
-  name                       = "Microsoft.Azure.DevOps.Pipelines.Agent"
-  provision_after_extensions = []
-  publisher                  = "Microsoft.VisualStudio.Services"
-  settings = jsonencode({
-    agentDownloadUrl        = "https://vstsagentpackage.azureedge.net/agent/2.209.0/vsts-agent-linux-x64-2.209.0.tar.gz"
-    agentFolder             = "/agent"
-    enableScriptDownloadUrl = "https://vstsagenttools.blob.core.windows.net/tools/ElasticPools/Linux/13/enableagent.sh"
-    isPipelinesAgent        = true
-  })
-  type                 = "TeamServicesAgentLinux"
-  type_handler_version = "1.22"
+locals {
+  all_configs = {
+    prod_web  = { env = "prod",    role = "web" }
+    prod_api  = { env = "prod",    role = "api" }
+    stage_web = { env = "staging", role = "web" }
+    dev_web   = { env = "dev",     role = "web" }
+  }
 }
+
+resource "azurerm_resource_group" "prod_only" {
+  for_each = {
+    for k, v in local.all_configs : k => v
+    if v.env == "prod"
+  }
+  name     = "rg-${each.key}"
+  location = local.location
+}
+```
+
+### Number padding in names
+
+```hcl
+resource "azurerm_network_interface" "nic" {
+  count               = 4
+  name                = "nic-${local.prefix}-${format("%02d", count.index + 1)}"
+  location            = local.location
+  resource_group_name = azurerm_resource_group.rg.name
+
+  ip_configuration {
+    name                          = "internal"
+    subnet_id                     = azurerm_subnet.subnets["app"].id
+    private_ip_address_allocation = "Dynamic"
+  }
+}
+# Produces: nic-app-uks-prod-01, nic-app-uks-prod-02 ...
 ```
 
 ---
 
-## Type Conversions & Data Structures
+## Dynamic Blocks
 
-### `for_each` output as `list(map(object({})))`
-
-When resources are created with `for_each`, the result is a `map(object({}))`. This pattern shows how to query and reshape that output for downstream consumption.
+### Network security group rules
 
 ```hcl
-variable "environment" {
-  default     = "prd"
-  type        = string
-  description = "Used as an alternative to terraform.workspace."
-}
-
-locals {
-  names = {
-    key0 = var.environment
-    key1 = "${var.environment}-vm"
-    key2 = "prd-biscuit"
-    key3 = "tst_pizza"
-  }
-}
-
-resource "azurerm_resource_group" "test_rg" {
-  for_each = {
-    for key, value in local.names : key => value
-    if length(regexall("${var.environment}-", value)) > 0
-  }
-  location = local.location
-  name     = each.value
-}
-
-output "rg_name" {
-  value = element(azurerm_resource_group.test_rg[*], 0)
-}
-```
-
-#### Output
-
-```text
-rg_name = [
-  + {
-      + key1 = {
-          + id       = (known after apply)
-          + location = "uksouth"
-          + name     = "prd-vm"
-          + tags     = null
-          + timeouts = null
-        }
-      + key2 = {
-          + id       = (known after apply)
-          + location = "uksouth"
-          + name     = "prd-biscuit"
-          + tags     = null
-          + timeouts = null
-        }
+variable "nsg_rules" {
+  type = list(object({
+    name                       = string
+    priority                   = number
+    direction                  = string
+    access                     = string
+    protocol                   = string
+    source_port_range          = string
+    destination_port_range     = string
+    source_address_prefix      = string
+    destination_address_prefix = string
+  }))
+  default = [
+    {
+      name                       = "allow-https-inbound"
+      priority                   = 100
+      direction                  = "Inbound"
+      access                     = "Allow"
+      protocol                   = "Tcp"
+      source_port_range          = "*"
+      destination_port_range     = "443"
+      source_address_prefix      = "Internet"
+      destination_address_prefix = "*"
     },
-]
-```
+    {
+      name                       = "deny-all-inbound"
+      priority                   = 4096
+      direction                  = "Inbound"
+      access                     = "Deny"
+      protocol                   = "*"
+      source_port_range          = "*"
+      destination_port_range     = "*"
+      source_address_prefix      = "*"
+      destination_address_prefix = "*"
+    }
+  ]
+}
 
-### Extract a single attribute from `map(object({}))`
+resource "azurerm_network_security_group" "nsg" {
+  name                = "nsg-${local.prefix}-app"
+  location            = local.location
+  resource_group_name = azurerm_resource_group.rg.name
+  tags                = local.tags
 
-Get just the `name` field from each entry in the map using a `for` expression.
-
-```hcl
-output "rg_name" {
-  value = {
-    for key, value in element(azurerm_resource_group.test_rg[*], 0) : key => value.name
+  dynamic "security_rule" {
+    for_each = var.nsg_rules
+    content {
+      name                       = security_rule.value.name
+      priority                   = security_rule.value.priority
+      direction                  = security_rule.value.direction
+      access                     = security_rule.value.access
+      protocol                   = security_rule.value.protocol
+      source_port_range          = security_rule.value.source_port_range
+      destination_port_range     = security_rule.value.destination_port_range
+      source_address_prefix      = security_rule.value.source_address_prefix
+      destination_address_prefix = security_rule.value.destination_address_prefix
+    }
   }
 }
 ```
 
-```text
-rg_name = {
-  + key1 = "prd-vm"
-  + key2 = "prd-biscuit"
+### Managed identity — all three types
+
+One resource, three mutually exclusive cases. Only one block emits per run.
+
+```hcl
+variable "identity_type" {
+  type    = string
+  default = "SystemAssigned"
+  validation {
+    condition     = contains(["SystemAssigned", "UserAssigned", "SystemAssigned, UserAssigned"], var.identity_type)
+    error_message = "identity_type must be SystemAssigned, UserAssigned, or SystemAssigned, UserAssigned."
+  }
+}
+
+variable "identity_ids" {
+  type    = list(string)
+  default = []
+}
+
+resource "azurerm_linux_virtual_machine" "vm" {
+  # ...
+
+  dynamic "identity" {
+    for_each = var.identity_type == "SystemAssigned" ? [1] : []
+    content {
+      type = "SystemAssigned"
+    }
+  }
+
+  dynamic "identity" {
+    for_each = var.identity_type == "UserAssigned" ? [1] : []
+    content {
+      type         = "UserAssigned"
+      identity_ids = var.identity_ids
+    }
+  }
+
+  dynamic "identity" {
+    for_each = var.identity_type == "SystemAssigned, UserAssigned" ? [1] : []
+    content {
+      type         = "SystemAssigned, UserAssigned"
+      identity_ids = var.identity_ids
+    }
+  }
 }
 ```
 
-### Pass a map attribute into another resource
-
-Extract `location` from the first map entry and pass it as input to a dependent resource. `element(values(...), 0)` picks the first value without needing to know the key name at authoring time.
+### Diagnostic settings — conditional log categories
 
 ```hcl
 locals {
-  resource_group_locations = {
-    for key, value in element(azurerm_resource_group.test_rg[*], 0) : key => value.location
-  }
-
-  resource_group_name = {
-    for key, value in element(azurerm_resource_group.test_rg[*], 0) : key => value.name
-  }
+  diag_log_categories = ["AuditEvent", "AzurePolicyEvaluationDetails"]
+  diag_metric_categories = ["AllMetrics"]
 }
 
-resource "azurerm_application_security_group" "example" {
-  name                = "libre-devops-asg"
-  location            = element(values(local.resource_group_locations), 0)
-  resource_group_name = element(values(local.resource_group_name), 0)
+resource "azurerm_monitor_diagnostic_setting" "diag" {
+  name                       = "diag-${local.prefix}"
+  target_resource_id         = azurerm_key_vault.kv.id
+  log_analytics_workspace_id = data.azurerm_log_analytics_workspace.law.id
 
-  tags = {
-    Hello = "World"
+  dynamic "enabled_log" {
+    for_each = local.diag_log_categories
+    content {
+      category = enabled_log.value
+    }
   }
-}
 
-output "asg_location" {
-  value = azurerm_application_security_group.example.location
-}
-
-output "asg_rg_name" {
-  value = azurerm_application_security_group.example.resource_group_name
+  dynamic "metric" {
+    for_each = local.diag_metric_categories
+    content {
+      category = metric.value
+    }
+  }
 }
 ```
 
-```text
-+ asg_location = "uksouth"
-+ asg_rg_name  = "prd-vm"
-```
-
-### Access nested identity inside a multi-key `for_each`
-
-When each `for_each` value has its own nested blocks (like `identity`), use `element()` on the splat expression and then index into the nested block list.
+### Optional subnet delegation
 
 ```hcl
-locals {
-  fnc_apps = {
-    fnc_app1 = { name = "fnc_app1" }
-    fnc_app2 = { name = "fnc_app2" }
-  }
+variable "subnet_delegations" {
+  type = list(object({
+    name    = string
+    service = string
+    actions = list(string)
+  }))
+  default = []
 }
 
-resource "azurerm_function_app" "fnc" {
-  for_each = local.fnc_apps
+resource "azurerm_subnet" "snet" {
+  name                 = "snet-app-prod"
+  resource_group_name  = azurerm_resource_group.rg.name
+  virtual_network_name = azurerm_virtual_network.vnet.name
+  address_prefixes     = ["10.0.1.0/24"]
 
-  identity {
-    type = each.value.identity
+  dynamic "delegation" {
+    for_each = var.subnet_delegations
+    content {
+      name = delegation.value.name
+      service_delegation {
+        name    = delegation.value.service
+        actions = delegation.value.actions
+      }
+    }
   }
-}
-
-output "managed_identity_principal_id" {
-  value = {
-    for key, value in element(azurerm_function_app.fnc[*], 0) : key => element(value.identity, 0).principal_id
-  }
-}
-```
-
-```text
-managed_identity_principal_id = {
-  + fnc_app1 = "3ca56017-d384-4899-bbad-1066800809c0"
-  + fnc_app2 = "0cca0226-011d-444d-8763-e210878ef4dc"
 }
 ```
 
 ---
 
-## Networking & Infrastructure Utilities
+## Expressions & Functions
 
-### Fetch your outbound IP
-
-Useful for dynamically allowing a runner or developer machine IP in firewall rules, so you don't hard-code IPs or open wide CIDR ranges in CI.
-
-`chomp()` strips the trailing newline from the HTTP response body — without it the IP includes a `\n` that breaks string comparisons and CIDR notation.
+### `for` expressions — reshaping collections
 
 ```hcl
-data "http" "user_ip" {
+locals {
+  # List → list (transform)
+  upper_names = [for name in var.names : upper(name)]
+
+  # List → list (filter)
+  prod_names = [for name in var.names : name if startswith(name, "prod-")]
+
+  # List → map (index as key)
+  indexed = { for i, name in var.names : tostring(i) => name }
+
+  # Map → map (transform values)
+  env_upper = { for k, v in var.environments : k => upper(v) }
+
+  # Map → list of objects
+  env_list = [for k, v in var.environments : { name = k, value = v }]
+
+  # Map → filtered map
+  prod_envs = { for k, v in var.environments : k => v if v == "prod" }
+
+  # Flatten nested: list of objects → flat list of IDs
+  all_subnet_ids = flatten([
+    for vnet in var.vnets : [
+      for subnet in vnet.subnets : subnet.id
+    ]
+  ])
+}
+```
+
+### `try()` — safe attribute access
+
+Use when a value might be null or a nested attribute might not exist:
+
+```hcl
+locals {
+  # Returns the principal_id, or empty string if identity is not set
+  principal_id = try(azurerm_linux_virtual_machine.vm.identity[0].principal_id, "")
+
+  # Safe lookup in a map that may not have the key
+  tier = try(local.tier_map[var.environment], "Standard")
+}
+```
+
+### `can()` — validate that an expression succeeds
+
+```hcl
+variable "cidr" {
+  type = string
+  validation {
+    condition     = can(cidrnetmask(var.cidr))
+    error_message = "Must be a valid CIDR block."
+  }
+}
+```
+
+### `one()` — extract exactly one item or null
+
+```hcl
+locals {
+  # Returns the single identity's principal_id, or null if no identity
+  system_principal_id = one(azurerm_linux_virtual_machine.vm.identity[*].principal_id)
+}
+```
+
+### Collection manipulation
+
+```hcl
+locals {
+  # merge — later maps win on key conflicts
+  all_tags = merge(var.default_tags, var.extra_tags, { DeployedAt = timestamp() })
+
+  # concat — join lists
+  all_ips = concat(var.office_ips, var.vpn_ips, ["10.0.0.0/8"])
+
+  # flatten — remove nesting
+  flat_ids = flatten([azurerm_subnet.subnets[*].id])
+
+  # distinct — deduplicate
+  unique_locations = distinct(var.locations)
+
+  # keys / values — extract from map
+  subnet_names = keys(local.subnets)
+  subnet_cidrs = values(local.subnets)
+
+  # zipmap — create map from parallel lists
+  name_to_id = zipmap(
+    [for s in azurerm_subnet.subnets : s.name],
+    [for s in azurerm_subnet.subnets : s.id]
+  )
+
+  # sort
+  sorted_names = sort(var.names)
+}
+```
+
+### String functions
+
+```hcl
+locals {
+  # Format with zero-padding
+  padded     = format("%03d", 7)             # "007"
+
+  # Join and split
+  joined     = join(",", var.allowed_ips)    # "10.0.0.1,10.0.0.2"
+  parts      = split("/", "10.0.0.0/24")    # ["10.0.0.0", "24"]
+
+  # Replace
+  slug       = replace(lower(var.name), " ", "-")
+
+  # Trim
+  clean      = trimspace("  value  ")
+
+  # Starts/ends with
+  is_prod    = startswith(var.env, "prod")
+
+  # Substr
+  short_name = substr(var.name, 0, 24)       # truncate to 24 chars
+
+  # Contains
+  has_https  = strcontains(var.url, "https")
+
+  # Regex
+  matched    = can(regex("^[a-z0-9-]+$", var.name))
+}
+```
+
+### IP and CIDR functions
+
+```hcl
+locals {
+  vnet_cidr      = "10.0.0.0/16"
+
+  # Slice a subnet from the VNet CIDR
+  app_subnet     = cidrsubnet(local.vnet_cidr, 8, 1)   # 10.0.1.0/24
+  db_subnet      = cidrsubnet(local.vnet_cidr, 8, 2)   # 10.0.2.0/24
+
+  # Get the host count for a CIDR
+  host_count     = pow(2, 32 - parseint(split("/", local.app_subnet)[1], 10)) - 2
+
+  # Validate an IP is in a range
+  is_private     = cidrcontains("10.0.0.0/8", var.ip_address)
+}
+```
+
+### Encode / decode
+
+```hcl
+locals {
+  # Base64 encode an inline script (e.g., for VM custom_data)
+  cloud_init_b64 = base64encode(file("${path.module}/cloud-init.yaml"))
+
+  # JSON encode a complex object for use in a string field
+  settings_json  = jsonencode({
+    adminUser    = "azureadmin"
+    enableAudit  = true
+    allowedCidrs = var.allowed_cidrs
+  })
+
+  # Decode JSON from a data source
+  parsed = jsondecode(data.http.config_api.response_body)
+}
+```
+
+---
+
+## Lifecycle & Dependencies
+
+### `lifecycle` — control resource replacement behaviour
+
+```hcl
+resource "azurerm_key_vault" "kv" {
+  # ...
+
+  lifecycle {
+    # Ignore drift on access_policy (managed externally or via separate resource)
+    ignore_changes = [access_policy, tags["LastModified"]]
+
+    # Create new resource first, then destroy old — avoids downtime on replacement
+    create_before_destroy = true
+
+    # Block accidental deletion (requires explicit remove from state first)
+    prevent_destroy = true
+
+    # Trigger replacement when a related resource changes
+    replace_triggered_by = [azurerm_resource_group.rg.name]
+  }
+}
+```
+
+### Explicit dependency
+
+Use only when a dependency isn't expressed through attribute references:
+
+```hcl
+resource "azurerm_role_assignment" "deployer" {
+  # ...
+  depends_on = [azurerm_key_vault.kv]  # wait for KV before assigning roles
+}
+```
+
+### `precondition` and `postcondition` (Terraform 1.2+)
+
+Encode invariants that must hold before or after an apply:
+
+```hcl
+resource "azurerm_virtual_machine_extension" "ama" {
+  # ...
+
+  lifecycle {
+    precondition {
+      condition     = var.vm_sku != "Standard_B1s"
+      error_message = "Azure Monitor Agent is not supported on Standard_B1s — choose a larger SKU."
+    }
+
+    postcondition {
+      condition     = self.provision_state == "Succeeded"
+      error_message = "VM extension did not provision successfully."
+    }
+  }
+}
+```
+
+### `check` blocks — ambient assertions (Terraform 1.5+)
+
+`check` blocks run on every plan and apply and emit **warnings**, not errors — the operation continues regardless. Use them for compliance drift detection, runtime health assertions, and anything you want visible in CI without being a hard gate.
+
+Each `check` block can contain one optional inline `data` source and any number of `assert` blocks.
+
+#### Single assertion — blob public access
+
+```hcl
+check "storage_public_access" {
+  data "azurerm_storage_account" "sa" {
+    name                = var.storage_account_name
+    resource_group_name = var.resource_group_name
+  }
+
+  assert {
+    condition     = data.azurerm_storage_account.sa.allow_nested_items_to_be_public == false
+    error_message = "Storage account '${var.storage_account_name}' allows public blob access — this should be disabled."
+  }
+}
+```
+
+#### Multiple assertions in one block — Key Vault hardening
+
+```hcl
+check "key_vault_hardening" {
+  data "azurerm_key_vault" "kv" {
+    name                = azurerm_key_vault.kv.name
+    resource_group_name = azurerm_resource_group.rg.name
+  }
+
+  assert {
+    condition     = data.azurerm_key_vault.kv.purge_protection_enabled
+    error_message = "Key Vault purge protection must be enabled."
+  }
+
+  assert {
+    condition     = data.azurerm_key_vault.kv.soft_delete_retention_days >= 90
+    error_message = "Key Vault soft delete retention is ${data.azurerm_key_vault.kv.soft_delete_retention_days} days — must be at least 90."
+  }
+
+  assert {
+    condition     = data.azurerm_key_vault.kv.public_network_access_enabled == false
+    error_message = "Key Vault must not allow public network access."
+  }
+
+  assert {
+    condition     = data.azurerm_key_vault.kv.enable_rbac_authorization
+    error_message = "Key Vault should use RBAC authorisation, not legacy access policies."
+  }
+}
+```
+
+#### HTTP endpoint health check after apply
+
+```hcl
+check "api_health" {
+  data "http" "health" {
+    url = "https://${azurerm_container_app.api.ingress[0].fqdn}/health"
+
+    retry {
+      attempts     = 5
+      min_delay_ms = 5000
+      max_delay_ms = 30000
+    }
+  }
+
+  assert {
+    condition     = data.http.health.status_code == 200
+    error_message = "API health endpoint returned HTTP ${data.http.health.status_code}, expected 200."
+  }
+}
+```
+
+#### Safe assertion using `try()` — attribute may not exist yet
+
+```hcl
+check "nsg_flow_logs_enabled" {
+  assert {
+    condition     = try(azurerm_network_watcher_flow_log.nsg.enabled, false)
+    error_message = "NSG flow logs are not enabled — traffic analysis will be unavailable."
+  }
+}
+```
+
+#### `check` vs `precondition`/`postcondition` — when to use each
+
+| | `check` block | `precondition` / `postcondition` |
+|---|---|---|
+| Failure action | Warning — plan/apply continues | Error — plan/apply aborts |
+| Runs on | Every plan and apply | Before/after a specific resource |
+| Can use data sources | Yes (inline `data` block) | No — only references in current scope |
+| Best for | Compliance drift, health checks, informational guards | Hard invariants that must hold to proceed safely |
+
+---
+
+## State Management
+
+### Force-unlock a stuck state
+
+```bash
+# Bash — extract lock ID from plan output and release
+lock_id=$(terraform plan 2>&1 | grep -oP 'ID:\s+\K[\w-]+')
+terraform force-unlock -force "$lock_id"
+```
+
+```powershell
+# PowerShell
+$lockId = (terraform plan 2>&1 |
+  Select-String -Pattern 'ID:\s+([\w-]+)' |
+  ForEach-Object { $_.Matches.Groups[1].Value })
+terraform force-unlock -force $lockId
+```
+
+### `moved` block — rename resources without destroying them (Terraform 1.1+)
+
+```hcl
+# Rename a resource (e.g., you renamed the label in code)
+moved {
+  from = azurerm_resource_group.example
+  to   = azurerm_resource_group.rg
+}
+
+# Move a resource into a module
+moved {
+  from = azurerm_virtual_network.vnet
+  to   = module.networking.azurerm_virtual_network.vnet
+}
+
+# Move from count-indexed to for_each-keyed
+moved {
+  from = azurerm_subnet.snet[0]
+  to   = azurerm_subnet.snet["app"]
+}
+```
+
+### `import` block — bring existing resources under management (Terraform 1.5+)
+
+Preferred over `terraform import` CLI because it's code-reviewable and plan-visible:
+
+```hcl
+import {
+  id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-existing-prod"
+  to = azurerm_resource_group.rg
+}
+
+import {
+  id = "/subscriptions/.../resourceGroups/rg-net/providers/Microsoft.Network/virtualNetworks/vnet-hub"
+  to = module.networking.azurerm_virtual_network.hub
+}
+```
+
+Generate a starter resource block from an import:
+```bash
+terraform plan -generate-config-out=generated.tf
+```
+
+### State surgery — CLI operations
+
+```bash
+# List all resources in state
+terraform state list
+
+# Show details of a specific resource
+terraform state show azurerm_virtual_network.hub
+
+# Remove a resource from state (without destroying it)
+terraform state rm azurerm_virtual_network.old
+
+# Move a resource to a new address in state
+terraform state mv azurerm_virtual_network.vnet module.networking.azurerm_virtual_network.vnet
+
+# Pull current state to a local file
+terraform state pull > current.tfstate
+
+# Push a modified state file (dangerous — always backup first)
+terraform state push current.tfstate
+```
+
+### Targeted operations (use sparingly)
+
+```bash
+# Plan / apply only specific resources
+terraform plan -target=azurerm_resource_group.rg
+terraform apply -target=module.networking
+
+# Refresh state for a specific resource without applying changes
+terraform apply -refresh-only -target=azurerm_virtual_network.hub
+```
+
+---
+
+## Modules
+
+### Module structure
+
+```text
+modules/
+  networking/
+    main.tf
+    variables.tf
+    outputs.tf
+    versions.tf
+    README.md
+```
+
+### Calling a local module
+
+```hcl
+module "networking" {
+  source = "./modules/networking"
+
+  resource_group_name = azurerm_resource_group.rg.name
+  location            = local.location
+  vnet_cidr           = "10.0.0.0/16"
+  subnets             = local.subnets
+  tags                = local.tags
+}
+
+output "vnet_id" {
+  value = module.networking.vnet_id
+}
+```
+
+### Calling a versioned module from a registry
+
+```hcl
+module "key_vault" {
+  source  = "libre-devops/key-vault/azurerm"
+  version = "~> 1.2"
+
+  kv_name             = "kv-${local.prefix}-001"
+  resource_group_name = azurerm_resource_group.rg.name
+  location            = local.location
+  tenant_id           = data.azurerm_client_config.current.tenant_id
+  tags                = local.tags
+}
+```
+
+### Passing a provider alias into a module
+
+Define which alias the module should use — child modules cannot create aliases themselves.
+
+```hcl
+# Root
+module "spoke_rg" {
+  source = "./modules/resource_group"
+  providers = {
+    azurerm = azurerm.spoke
+  }
+  name     = "rg-spoke-prod"
+  location = "UK South"
+}
+
+# modules/resource_group/versions.tf
+terraform {
+  required_providers {
+    azurerm = {
+      source = "hashicorp/azurerm"
+    }
+  }
+}
+```
+
+### Complex output from a module
+
+```hcl
+# modules/networking/outputs.tf
+output "subnet_ids" {
+  description = "Map of subnet name to subnet ID."
+  value = {
+    for k, v in azurerm_subnet.subnets : k => v.id
+  }
+}
+
+# Root — consume the map
+resource "azurerm_private_endpoint" "pe" {
+  subnet_id = module.networking.subnet_ids["private-endpoints"]
+  # ...
+}
+```
+
+---
+
+## Azure-Specific Patterns
+
+### RBAC — role assignment
+
+```hcl
+# Built-in role by name
+resource "azurerm_role_assignment" "storage_blob_contributor" {
+  scope                = azurerm_storage_account.sa.id
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = azurerm_user_assigned_identity.app.principal_id
+}
+
+# Custom role by ID, scoped to subscription
+resource "azurerm_role_assignment" "custom" {
+  scope              = data.azurerm_subscription.current.id
+  role_definition_id = azurerm_role_definition.custom.role_definition_resource_id
+  principal_id       = var.principal_id
+}
+
+# Assign the deploying principal Contributor on the RG
+resource "azurerm_role_assignment" "deployer_contributor" {
+  scope                = azurerm_resource_group.rg.id
+  role_definition_name = "Contributor"
+  principal_id         = data.azurerm_client_config.current.object_id
+}
+```
+
+### User-assigned managed identity + role assignment
+
+```hcl
+resource "azurerm_user_assigned_identity" "app" {
+  name                = "id-${local.prefix}-app"
+  resource_group_name = azurerm_resource_group.rg.name
+  location            = local.location
+  tags                = local.tags
+}
+
+resource "azurerm_role_assignment" "kv_reader" {
+  scope                = azurerm_key_vault.kv.id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = azurerm_user_assigned_identity.app.principal_id
+}
+
+output "identity_client_id" {
+  value = azurerm_user_assigned_identity.app.client_id
+}
+```
+
+### Key Vault — create, configure RBAC, write secrets
+
+```hcl
+resource "azurerm_key_vault" "kv" {
+  name                          = "kv-${local.prefix}-001"
+  resource_group_name           = azurerm_resource_group.rg.name
+  location                      = local.location
+  tenant_id                     = data.azurerm_client_config.current.tenant_id
+  sku_name                      = "standard"
+  enable_rbac_authorization     = true   # use RBAC rather than access policies
+  purge_protection_enabled      = true
+  soft_delete_retention_days    = 90
+  public_network_access_enabled = false
+  tags                          = local.tags
+}
+
+# Grant the deploying identity permissions to write secrets during apply
+resource "azurerm_role_assignment" "kv_admin" {
+  scope                = azurerm_key_vault.kv.id
+  role_definition_name = "Key Vault Administrator"
+  principal_id         = data.azurerm_client_config.current.object_id
+  depends_on           = [azurerm_key_vault.kv]
+}
+
+resource "azurerm_key_vault_secret" "db_pass" {
+  name         = "db-password"
+  value        = var.db_password
+  key_vault_id = azurerm_key_vault.kv.id
+  depends_on   = [azurerm_role_assignment.kv_admin]
+
+  lifecycle {
+    ignore_changes = [value]  # don't overwrite after initial creation
+  }
+}
+```
+
+### Inject a Key Vault secret into a VM's cloud-init or extension
+
+```hcl
+data "azurerm_key_vault_secret" "admin_password" {
+  name         = "vm-admin-password"
+  key_vault_id = data.azurerm_key_vault.shared.id
+}
+
+resource "azurerm_linux_virtual_machine" "vm" {
+  admin_password                  = data.azurerm_key_vault_secret.admin_password.value
+  disable_password_authentication = false
+  # ...
+}
+```
+
+### Virtual network with subnets — composable pattern
+
+```hcl
+resource "azurerm_virtual_network" "vnet" {
+  name                = "vnet-${local.prefix}"
+  resource_group_name = azurerm_resource_group.rg.name
+  location            = local.location
+  address_space       = var.vnet_cidr
+  tags                = local.tags
+}
+
+locals {
+  subnets = {
+    app = {
+      cidr              = cidrsubnet(var.vnet_cidr[0], 8, 1)
+      service_endpoints = ["Microsoft.Storage", "Microsoft.KeyVault"]
+      delegations       = []
+    }
+    aks = {
+      cidr              = cidrsubnet(var.vnet_cidr[0], 4, 1)
+      service_endpoints = []
+      delegations = [{
+        name    = "aks-delegation"
+        service = "Microsoft.ContainerService/managedClusters"
+        actions = ["Microsoft.Network/virtualNetworks/subnets/join/action"]
+      }]
+    }
+    private_endpoints = {
+      cidr              = cidrsubnet(var.vnet_cidr[0], 8, 10)
+      service_endpoints = []
+      delegations       = []
+    }
+  }
+}
+
+resource "azurerm_subnet" "subnets" {
+  for_each             = local.subnets
+  name                 = "snet-${each.key}-${var.env}"
+  resource_group_name  = azurerm_resource_group.rg.name
+  virtual_network_name = azurerm_virtual_network.vnet.name
+  address_prefixes     = [each.value.cidr]
+  service_endpoints    = each.value.service_endpoints
+
+  dynamic "delegation" {
+    for_each = each.value.delegations
+    content {
+      name = delegation.value.name
+      service_delegation {
+        name    = delegation.value.service
+        actions = delegation.value.actions
+      }
+    }
+  }
+}
+```
+
+### Private endpoint
+
+```hcl
+resource "azurerm_private_endpoint" "kv_pe" {
+  name                = "pe-kv-${local.prefix}"
+  resource_group_name = azurerm_resource_group.rg.name
+  location            = local.location
+  subnet_id           = azurerm_subnet.subnets["private-endpoints"].id
+  tags                = local.tags
+
+  private_service_connection {
+    name                           = "psc-kv-${local.prefix}"
+    private_connection_resource_id = azurerm_key_vault.kv.id
+    is_manual_connection           = false
+    subresource_names              = ["vault"]
+  }
+
+  private_dns_zone_group {
+    name                 = "dzg-kv"
+    private_dns_zone_ids = [azurerm_private_dns_zone.kv.id]
+  }
+}
+
+resource "azurerm_private_dns_zone" "kv" {
+  name                = "privatelink.vaultcore.azure.net"
+  resource_group_name = azurerm_resource_group.rg.name
+  tags                = local.tags
+}
+
+resource "azurerm_private_dns_zone_virtual_network_link" "kv" {
+  name                  = "vnetlink-kv-${local.prefix}"
+  resource_group_name   = azurerm_resource_group.rg.name
+  private_dns_zone_name = azurerm_private_dns_zone.kv.name
+  virtual_network_id    = azurerm_virtual_network.vnet.id
+  tags                  = local.tags
+}
+```
+
+### Diagnostic settings — applied to every resource in a map
+
+```hcl
+resource "azurerm_monitor_diagnostic_setting" "nsg_diag" {
+  for_each = azurerm_network_security_group.nsgs
+
+  name                       = "diag-${each.key}"
+  target_resource_id         = each.value.id
+  log_analytics_workspace_id = data.azurerm_log_analytics_workspace.law.id
+
+  enabled_log { category = "NetworkSecurityGroupEvent" }
+  enabled_log { category = "NetworkSecurityGroupRuleCounter" }
+}
+```
+
+### Fetch your outbound IP for dynamic firewall rules
+
+```hcl
+data "http" "runner_ip" {
   url = "https://ipv4.icanhazip.com"
 }
 
-data "http" "user_ip_from_aws" {
-  url = "https://checkip.amazonaws.com"
+locals {
+  runner_ip_cidr = "${chomp(data.http.runner_ip.response_body)}/32"
 }
 
-output "my_ip" {
-  value = data.http.user_ip.body
-}
-
-output "my_ip_chomp" {
-  value = chomp(data.http.user_ip.body)
+resource "azurerm_storage_account_network_rules" "sa_rules" {
+  storage_account_id = azurerm_storage_account.sa.id
+  default_action     = "Deny"
+  ip_rules           = [local.runner_ip_cidr]
 }
 ```
 
-```text
-+ my_ip       = <<-EOT
-      20.108.154.139
-  EOT
-+ my_ip_chomp = "20.108.154.139"
+---
+
+## Region Name Lookup
+
+```hcl
+variable "loc" {
+  type        = string
+  description = "Shorthand location — e.g. uks, euw."
+  default     = "uks"
+}
+
+locals {
+  region_map = {
+    uks  = "UK South"
+    ukw  = "UK West"
+    eus  = "East US"
+    eus2 = "East US 2"
+    wus  = "West US"
+    wus2 = "West US 2"
+    euw  = "West Europe"
+    eun  = "North Europe"
+    seau = "Southeast Asia"
+    aus  = "Australia East"
+  }
+  location = lookup(local.region_map, var.loc, "UK South")
+}
 ```
 
 ---
 
 ## OS & Environment Detection
 
-### Detect the runner OS
+### Detect runner OS for cross-platform scripts
 
-Terraform doesn't expose the host OS natively. The trick is a cross-platform `external` data source: on Linux, `printf` outputs JSON inline; on Windows, a `.cmd` wrapper does the same.
-
-Add `printf.cmd` to the repo root for Windows runners:
+`data "external"` executes a process and reads its JSON output. On Linux, `printf` works inline; on Windows, use a `.cmd` shim.
 
 ```bat
+:: printf.cmd — place at repo root for Windows runners
 @echo off
 echo {"os": "Windows"}
 ```
-
-Then call it via `data "external"`:
 
 ```hcl
 data "external" "os" {
@@ -410,183 +1488,670 @@ data "external" "os" {
 }
 
 locals {
-  os    = data.external.os.result.os
-  check = local.os == "Windows" ? "We are on Windows" : "We are on Linux"
-}
-
-output "os" {
-  value = local.os
+  os       = data.external.os.result.os
+  is_win   = local.os == "Windows"
+  shell    = local.is_win ? "powershell" : "bash"
 }
 ```
 
-### Generate timestamp tags without `timestamp()`
+### Stable timestamps for tags (avoids perpetual diff)
 
-`timestamp()` is evaluated at plan time and surfaces as "not known until apply" — this causes every plan/apply cycle to show a diff on tag values. Instead, use an `external` data source to call a small script that returns the current time as a JSON string.
+`timestamp()` re-evaluates on every plan, causing an infinite drift loop. Use an `external` script instead — it only runs during apply.
 
 ```hcl
-data "external" "detect_os" {
-  working_dir = path.module
-  program     = ["printf", "{\"os\": \"Linux\"}"]
-}
-
-data "external" "generate_timestamp" {
-  program = data.external.detect_os.result.os == "Linux" ? [
-    "${path.module}/timestamp.sh"
-  ] : ["powershell", "${path.module}/timestamp.ps1"]
+data "external" "timestamp" {
+  program = data.external.os.result.os == "Linux" ? [
+    "${path.module}/scripts/timestamp.sh"
+  ] : ["powershell", "${path.module}/scripts/timestamp.ps1"]
 }
 
 locals {
-  dynamic_tags = {
-    "LastUpdated" = data.external.generate_timestamp.result["timestamp"]
-    "Environment" = terraform.workspace
-  }
-
-  tags = merge(var.static_tags, local.dynamic_tags)
-}
-
-variable "static_tags" {
-  type        = map(string)
-  description = "Static tags merged with dynamic ones."
-  default = {
-    "CostCentre" = "671888"
-    "ManagedBy"  = "Terraform"
-    "Contact"    = "help@libredevops.org"
-  }
+  tags = merge(var.tags, {
+    ManagedBy   = "Terraform"
+    Environment = var.environment
+    LastUpdated = data.external.timestamp.result["timestamp"]
+  })
 }
 ```
-
-#### `timestamp.sh`
 
 ```bash
+# scripts/timestamp.sh
 #!/usr/bin/env bash
-DATE=$(date '+%d-%m-%Y:%H:%M')
-echo "{\"timestamp\": \"$DATE\"}"
+echo "{\"timestamp\": \"$(date -u '+%Y-%m-%dT%H:%M:%SZ')\"}"
 ```
-
-#### `timestamp.ps1`
 
 ```powershell
-#!/usr/bin/env pwsh
-$date       = Get-Date -Format "dd-MM-yyyy:HH:mm"
-$jsonOutput = @{ timestamp = $date } | ConvertTo-Json
-Write-Output $jsonOutput
-```
-
-#### `timestamp.py`
-
-```python
-import datetime
-
-now       = datetime.datetime.now()
-timestamp = now.strftime("%d-%m-%Y:%H:%M")
-print("{\"timestamp\": \"" + timestamp + "\"}")
+# scripts/timestamp.ps1
+@{ timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ") } | ConvertTo-Json -Compress
 ```
 
 ---
 
-## State Management
+## Workflow & CI/CD
 
-### Force-unlock a stuck state
+### Standard workspace flow
 
-When a plan fails mid-run and leaves a lock, grab the lock ID from the error output and immediately release it. The `-force` flag skips the interactive confirmation prompt.
+```bash
+terraform init
+terraform workspace select prod || terraform workspace new prod
+terraform validate
+terraform fmt -recursive -check   # fail if formatting is wrong
+terraform plan -out tfplan.plan
+terraform show -json tfplan.plan > tfplan.json
+terraform apply tfplan.plan
+```
 
-```powershell
-$lockId = (terraform plan 2>&1 |
-  Select-String -Pattern 'ID:\s+([\w-]+)' |
-  ForEach-Object { $_.Matches.Groups[1].Value })
-terraform force-unlock -force $lockId
+### GitHub Actions — OIDC auth with AzureRM
+
+```yaml
+# .github/workflows/terraform.yml
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    env:
+      ARM_USE_OIDC:        "true"
+      ARM_TENANT_ID:       ${{ secrets.AZURE_TENANT_ID }}
+      ARM_CLIENT_ID:       ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.9"
+
+      - run: terraform init
+      - run: terraform validate
+      - run: terraform plan -out tfplan.plan
+      - run: terraform apply -auto-approve tfplan.plan
+```
+
+### Full local validation pipeline
+
+```bash
+terraform_run() {
+  local workspace="${1:-prod}"
+  local tf_version="${2:-1.9.5}"
+
+  command -v tfenv &>/dev/null && { tfenv install "$tf_version"; tfenv use "$tf_version"; }
+
+  terraform init && \
+  { terraform workspace select "$workspace" || terraform workspace new "$workspace"; } && \
+  terraform validate && \
+  terraform fmt -recursive -check && \
+  terraform plan -out tfplan.plan && \
+  terraform show -json tfplan.plan > tfplan.json && \
+  { command -v tfsec    &>/dev/null && tfsec . --force-all-dirs; } && \
+  { command -v checkov  &>/dev/null && checkov -f tfplan.json; } && \
+  echo "✓ All checks passed"
+
+  rm -f tfplan.plan tfplan.json
+}
+```
+
+### Key CLI flags
+
+```bash
+terraform plan \
+  -var-file="prod.tfvars" \
+  -var="image_version=1.2.3" \
+  -parallelism=30 \
+  -refresh=false \
+  -out tfplan.plan
+  # -refresh=false skips state refresh (faster; use after a confirmed-clean apply)
+
+terraform apply \
+  -auto-approve \
+  -compact-warnings \
+  tfplan.plan
+
+# Destroy a single resource (use -target sparingly — it can leave state inconsistent)
+terraform destroy -target=azurerm_virtual_machine.vm
+```
+
+### `.tfvars` file per environment
+
+```bash
+# environments/prod.tfvars
+environment    = "prod"
+location       = "UK South"
+loc            = "uks"
+instance_count = 3
+tags = {
+  CostCentre = "671888"
+  ManagedBy  = "Terraform"
+}
 ```
 
 ```bash
-lockId=$(terraform plan 2>&1 | grep -oP 'ID:\s+\K[\w-]+')
-terraform force-unlock -force "$lockId"
+terraform plan -var-file="environments/prod.tfvars" -out tfplan.plan
 ```
 
-### `override.tf` for local development
+---
 
-Swap the remote backend for a local run without touching the shared config. Terraform merges `override.tf` on top of the main config at runtime, so you can change the backend without modifying the file that CI uses. Add `override.tf` to `.gitignore`.
+## Testing
+
+Terraform's native test framework uses `.tftest.hcl` files. Place them in a `tests/` subdirectory or the module root. Each file can contain `run` blocks that either plan or apply the module, then assert on the result.
+
+```text
+module/
+  main.tf
+  variables.tf
+  outputs.tf
+  tests/
+    unit.tftest.hcl          # mock providers, no real infra
+    integration.tftest.hcl   # real apply against a test subscription
+```
+
+### Commands
+
+```bash
+# Run every test file discovered under the current directory
+terraform test
+
+# Run a single file
+terraform test -filter=tests/unit.tftest.hcl
+
+# Show full plan/apply output for each run block
+terraform test -verbose
+
+# Pass variables to every run block in every test file
+terraform test -var="environment=test" -var-file="test.tfvars"
+```
+
+### Unit tests — mock providers, no real infrastructure (Terraform 1.7+)
+
+`mock_provider` intercepts all provider calls and returns synthetic values. No Azure credentials or real resources needed.
+
+```hcl
+# tests/unit.tftest.hcl
+
+mock_provider "azurerm" {
+  mock_resource "azurerm_resource_group" {
+    defaults = {
+      id       = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-test"
+      location = "uksouth"
+    }
+  }
+
+  mock_resource "azurerm_virtual_network" {
+    defaults = {
+      id            = "/subscriptions/00000000/resourceGroups/rg-test/providers/Microsoft.Network/virtualNetworks/vnet-test"
+      address_space = ["10.0.0.0/16"]
+    }
+  }
+
+  mock_data "azurerm_client_config" {
+    defaults = {
+      tenant_id       = "00000000-0000-0000-0000-000000000000"
+      subscription_id = "00000000-0000-0000-0000-000000000000"
+      client_id       = "00000000-0000-0000-0000-000000000000"
+      object_id       = "00000000-0000-0000-0000-000000000000"
+    }
+  }
+}
+
+variables {
+  environment = "test"
+  loc         = "uks"
+}
+
+run "resource_group_name_follows_convention" {
+  command = plan
+
+  assert {
+    condition     = azurerm_resource_group.rg.name == "rg-myapp-test"
+    error_message = "Resource group name '${azurerm_resource_group.rg.name}' does not follow the naming convention."
+  }
+}
+
+run "vnet_cidr_is_within_allowed_range" {
+  command = plan
+
+  assert {
+    condition     = startswith(azurerm_virtual_network.vnet.address_space[0], "10.")
+    error_message = "VNet CIDR must use the 10.0.0.0/8 RFC 1918 range."
+  }
+}
+```
+
+### Testing that validation rejects bad inputs
+
+Use `expect_failures` to assert that a specific variable's validation rule fires. The run block passes if (and only if) the expected validation error occurs.
+
+```hcl
+# tests/validation.tftest.hcl
+
+mock_provider "azurerm" {}
+
+run "invalid_location_rejected" {
+  command = plan
+
+  variables {
+    location = "Mars"   # not in the allowed list
+  }
+
+  expect_failures = [var.location]
+}
+
+run "vm_name_with_spaces_rejected" {
+  command = plan
+
+  variables {
+    vm_name = "my vm name"   # spaces are not allowed
+  }
+
+  expect_failures = [var.vm_name]
+}
+
+run "valid_inputs_accepted" {
+  command = plan
+
+  variables {
+    location = "UK South"
+    vm_name  = "vm-web-prod-01"
+  }
+  # No expect_failures — plan must succeed cleanly
+}
+```
+
+### Integration tests — real apply against a test environment
+
+Integration tests actually create infrastructure. Use a dedicated test subscription and clean up with `destroy` in CI.
+
+```hcl
+# tests/integration.tftest.hcl
+
+provider "azurerm" {
+  features {}
+  # Credentials come from ARM_* environment variables in CI
+}
+
+variables {
+  environment    = "test"
+  location       = "UK South"
+  loc            = "uks"
+  instance_count = 1
+}
+
+# Optional: a setup module that creates shared pre-requisites (e.g., a resource group)
+# and whose outputs are available to subsequent run blocks
+run "setup" {
+  module {
+    source = "./tests/setup"
+  }
+}
+
+run "deploy_networking" {
+  command = apply
+
+  assert {
+    condition     = azurerm_virtual_network.vnet.location == "uksouth"
+    error_message = "VNet deployed to wrong location: ${azurerm_virtual_network.vnet.location}."
+  }
+
+  assert {
+    condition     = length(azurerm_subnet.subnets) == 3
+    error_message = "Expected 3 subnets, got ${length(azurerm_subnet.subnets)}."
+  }
+}
+
+run "subnets_are_non_overlapping" {
+  command = plan
+
+  assert {
+    condition = (
+      azurerm_subnet.subnets["app"].address_prefixes[0] !=
+      azurerm_subnet.subnets["db"].address_prefixes[0]
+    )
+    error_message = "App and DB subnets share the same CIDR — address ranges overlap."
+  }
+}
+```
+
+### Overriding specific resources or data sources mid-test (Terraform 1.7+)
+
+`override_resource` and `override_data` let you surgically replace individual lookups without mocking the whole provider — useful when most resources are real but one data source is unavailable in the test environment.
+
+```hcl
+# tests/partial_override.tftest.hcl
+
+provider "azurerm" {
+  features {}
+}
+
+# Override just the shared Log Analytics workspace lookup
+# (it lives in a different subscription that test credentials can't reach)
+override_data {
+  target = data.azurerm_log_analytics_workspace.law
+  values = {
+    id                  = "/subscriptions/00000000/resourceGroups/rg-mon/providers/Microsoft.OperationalInsights/workspaces/law-test"
+    workspace_id        = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    primary_shared_key  = "dGVzdGtleQ=="
+  }
+}
+
+run "diagnostic_setting_references_law" {
+  command = plan
+
+  assert {
+    condition     = azurerm_monitor_diagnostic_setting.diag.log_analytics_workspace_id == data.azurerm_log_analytics_workspace.law.id
+    error_message = "Diagnostic setting does not reference the expected Log Analytics workspace."
+  }
+}
+```
+
+---
+
+## Multiple Providers
+
+### Declaring multiple providers
+
+All providers must appear in the `required_providers` block. Terraform initialises each independently.
+
+```hcl
+terraform {
+  required_version = ">= 1.9"
+  required_providers {
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = "~> 4.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
+    http = {
+      source  = "hashicorp/http"
+      version = "~> 3.4"
+    }
+    ansible = {
+      source  = "ansible.com/ansible"
+      version = "~> 1.3"
+    }
+  }
+}
+```
+
+### `random` — unique, stable suffixes for globally-namespaced resources
+
+Storage account names and Key Vault names must be globally unique. Use `random_string` so names stay consistent between plans (the value is stored in state).
+
+```hcl
+resource "random_string" "suffix" {
+  length  = 6
+  lower   = true
+  numeric = true
+  special = false
+  upper   = false
+}
+
+resource "azurerm_storage_account" "sa" {
+  name                     = "st${local.short}${random_string.suffix.result}"
+  resource_group_name      = azurerm_resource_group.rg.name
+  location                 = local.location
+  account_tier             = "Standard"
+  account_replication_type = "LRS"
+  tags                     = local.tags
+}
+
+resource "azurerm_key_vault" "kv" {
+  name                = "kv-${local.prefix}-${random_string.suffix.result}"
+  resource_group_name = azurerm_resource_group.rg.name
+  location            = local.location
+  tenant_id           = data.azurerm_client_config.current.tenant_id
+  sku_name            = "standard"
+  tags                = local.tags
+}
+```
+
+### AKS then Kubernetes/Helm — provider chaining
+
+Spin up the cluster with `azurerm`, then configure workloads with `kubernetes` and `helm` in the same root module. The Kubernetes and Helm providers are initialised using outputs from the cluster resource.
 
 ```hcl
 terraform {
   required_providers {
-    azurerm = {
-      source = "hashicorp/azurerm"
-    }
+    azurerm    = { source = "hashicorp/azurerm",    version = "~> 4.0" }
+    kubernetes = { source = "hashicorp/kubernetes", version = "~> 2.30" }
+    helm       = { source = "hashicorp/helm",       version = "~> 2.14" }
   }
-  backend "azurerm" {
-    subscription_id      = "your-subscription-id"
-    storage_account_name = "your-storage-account"
-    container_name       = "tfstate"
-    key                  = "local.terraform.tfstate"
+}
+
+resource "azurerm_kubernetes_cluster" "aks" {
+  name                = "aks-${local.prefix}"
+  resource_group_name = azurerm_resource_group.rg.name
+  location            = local.location
+  dns_prefix          = local.prefix
+
+  default_node_pool {
+    name       = "system"
+    node_count = 2
+    vm_size    = "Standard_D2ds_v5"
   }
+
+  identity {
+    type = "SystemAssigned"
+  }
+
+  tags = local.tags
+}
+
+provider "kubernetes" {
+  host                   = azurerm_kubernetes_cluster.aks.kube_config[0].host
+  client_certificate     = base64decode(azurerm_kubernetes_cluster.aks.kube_config[0].client_certificate)
+  client_key             = base64decode(azurerm_kubernetes_cluster.aks.kube_config[0].client_key)
+  cluster_ca_certificate = base64decode(azurerm_kubernetes_cluster.aks.kube_config[0].cluster_ca_certificate)
+}
+
+provider "helm" {
+  kubernetes {
+    host                   = azurerm_kubernetes_cluster.aks.kube_config[0].host
+    client_certificate     = base64decode(azurerm_kubernetes_cluster.aks.kube_config[0].client_certificate)
+    client_key             = base64decode(azurerm_kubernetes_cluster.aks.kube_config[0].client_key)
+    cluster_ca_certificate = base64decode(azurerm_kubernetes_cluster.aks.kube_config[0].cluster_ca_certificate)
+  }
+}
+
+resource "helm_release" "nginx_ingress" {
+  name             = "ingress-nginx"
+  repository       = "https://kubernetes.github.io/ingress-nginx"
+  chart            = "ingress-nginx"
+  namespace        = "ingress-nginx"
+  create_namespace = true
+  version          = "4.10.1"
+
+  set {
+    name  = "controller.replicaCount"
+    value = "2"
+  }
+
+  depends_on = [azurerm_kubernetes_cluster.aks]
 }
 ```
 
----
+### Ansible provider — inventory management + playbook execution
 
-## Workflow Automation
+The `ansible.com/ansible` provider manages **Ansible inventory state** — it registers hosts and groups so that the Ansible CLI (or AWX/AAP) can discover them. Running the playbook itself is triggered via `terraform_data` with a `local-exec` provisioner, which executes after the inventory is registered.
 
-### Full local pipeline — init → validate → plan → compliance → tfsec → checkov
-
-A single shell function that wires up the full local verification pipeline. Run it from the module root to validate, plan, check naming convention compliance, and scan for misconfigurations in one shot.
-
-```bash
-terraform_run() {
-  rm -rf .terraform tfplan* terraform.lock.hcl
-
-  if command -v tfenv &>/dev/null && \
-     command -v terraform &>/dev/null && \
-     command -v terraform-compliance &>/dev/null && \
-     command -v tfsec &>/dev/null && \
-     command -v checkov &>/dev/null; then
-    echo "All packages are installed"
-  else
-    echo "Packages needed to run are not installed, exiting" && return 1
-  fi
-
-  terraform_workspace="prd"
-  checkov_skipped_tests=""
-  terraform_compliance_policy_path="git:https://github.com/libre-devops/azure-naming-convention.git//?ref=main"
-  terraform_version="1.5.5"
-
-  setup_tfenv() {
-    if [ -z "${terraform_version}" ]; then
-      export terraform_version="latest"
-    fi
-    tfenv install "${terraform_version}" && tfenv use "${terraform_version}"
+```hcl
+terraform {
+  required_providers {
+    azurerm = { source = "hashicorp/azurerm", version = "~> 4.0" }
+    ansible = { source = "ansible.com/ansible", version = "~> 1.3" }
   }
-
-  terraform_plan() {
-    terraform init && \
-      terraform workspace new "${terraform_workspace}" || \
-      terraform workspace select "${terraform_workspace}"
-    terraform validate && \
-      terraform fmt -recursive && \
-      terraform plan -out "$(pwd)/tfplan.plan"
-    terraform show -json tfplan.plan | tee tfplan.json >/dev/null
-  }
-
-  terraform_compliance_check() {
-    terraform-compliance -p "$(pwd)/tfplan.json" -f "${terraform_compliance_policy_path}"
-  }
-
-  tfsec_check() {
-    tfsec . --force-all-dirs
-  }
-
-  checkov_check() {
-    checkov -f tfplan.json --skip-check "${checkov_skipped_tests}"
-  }
-
-  cleanup_tfplan() {
-    rm -rf "$(pwd)/tfplan" "$(pwd)/tfplan.json"
-  }
-
-  setup_tfenv && \
-    terraform_plan && \
-    terraform_compliance_check && \
-    tfsec_check && \
-    checkov_check
-  cleanup_tfplan
 }
+
+provider "ansible" {}
+
+# --- Infrastructure ---
+
+resource "azurerm_linux_virtual_machine" "vm" {
+  name                            = "vm-${local.prefix}-app-01"
+  resource_group_name             = azurerm_resource_group.rg.name
+  location                        = local.location
+  size                            = "Standard_D2ds_v5"
+  admin_username                  = "azureadmin"
+  disable_password_authentication = true
+
+  admin_ssh_key {
+    username   = "azureadmin"
+    public_key = file("~/.ssh/id_rsa.pub")
+  }
+
+  network_interface_ids = [azurerm_network_interface.nic.id]
+
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Premium_LRS"
+  }
+
+  source_image_reference {
+    publisher = "Canonical"
+    offer     = "0001-com-ubuntu-server-jammy"
+    sku       = "22_04-lts-gen2"
+    version   = "latest"
+  }
+
+  tags = local.tags
+}
+
+# --- Ansible inventory ---
+
+resource "ansible_group" "webservers" {
+  name = "webservers"
+  variables = {
+    http_port          = "80"
+    https_port         = "443"
+    ansible_user       = "azureadmin"
+    env                = var.environment
+  }
+}
+
+resource "ansible_host" "vm" {
+  name   = azurerm_linux_virtual_machine.vm.public_ip_address
+  groups = [ansible_group.webservers.name]
+  variables = {
+    ansible_ssh_private_key_file = "~/.ssh/id_rsa"
+    ansible_python_interpreter   = "/usr/bin/python3"
+    vm_name                      = azurerm_linux_virtual_machine.vm.name
+    resource_group               = azurerm_resource_group.rg.name
+  }
+}
+
+# --- Trigger playbook after inventory is registered ---
+
+resource "terraform_data" "run_playbook" {
+  # Re-run the playbook whenever the VM's IP or the playbook file changes
+  triggers_replace = {
+    host_ip         = azurerm_linux_virtual_machine.vm.public_ip_address
+    playbook_sha    = filesha256("${path.module}/playbooks/configure_web.yml")
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      ansible-playbook \
+        -i "${azurerm_linux_virtual_machine.vm.public_ip_address}," \
+        --private-key ~/.ssh/id_rsa \
+        --ssh-extra-args="-o StrictHostKeyChecking=no" \
+        -e "env=${var.environment}" \
+        -e "vm_name=${azurerm_linux_virtual_machine.vm.name}" \
+        ${path.module}/playbooks/configure_web.yml
+    EOT
+  }
+
+  depends_on = [ansible_host.vm]
+}
+```
+
+### Why `terraform_data` instead of `null_resource`
+
+`terraform_data` (Terraform 1.4+) is the built-in replacement for `null_resource`. It needs no provider, behaves identically for `triggers_replace` and `provisioner`, and avoids requiring the `hashicorp/null` provider.
+
+```hcl
+# Old pattern — requires null provider
+resource "null_resource" "run_playbook" {
+  triggers = { host = azurerm_linux_virtual_machine.vm.public_ip_address }
+  provisioner "local-exec" { command = "..." }
+}
+
+# Modern pattern — built-in, no extra provider
+resource "terraform_data" "run_playbook" {
+  triggers_replace = { host = azurerm_linux_virtual_machine.vm.public_ip_address }
+  provisioner "local-exec" { command = "..." }
+}
+```
+
+### Running a playbook against multiple hosts
+
+When deploying several VMs with `for_each`, create one `terraform_data` trigger per host using the same key:
+
+```hcl
+resource "azurerm_linux_virtual_machine" "vms" {
+  for_each = local.vm_configs
+  # ...
+}
+
+resource "ansible_host" "vms" {
+  for_each = azurerm_linux_virtual_machine.vms
+  name     = each.value.public_ip_address
+  groups   = ["webservers"]
+  variables = {
+    ansible_user                 = "azureadmin"
+    ansible_ssh_private_key_file = "~/.ssh/id_rsa"
+    vm_name                      = each.value.name
+  }
+}
+
+resource "terraform_data" "configure_vms" {
+  for_each = azurerm_linux_virtual_machine.vms
+
+  triggers_replace = {
+    host_ip      = each.value.public_ip_address
+    playbook_sha = filesha256("${path.module}/playbooks/configure_web.yml")
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      ansible-playbook \
+        -i "${each.value.public_ip_address}," \
+        --private-key ~/.ssh/id_rsa \
+        --ssh-extra-args="-o StrictHostKeyChecking=no" \
+        -e "vm_name=${each.value.name}" \
+        ${path.module}/playbooks/configure_web.yml
+    EOT
+  }
+
+  depends_on = [ansible_host.vms[each.key]]
+}
+```
+
+### Provider chaining: the execution order problem
+
+When a provider is configured using attributes of a resource (like the Kubernetes or Ansible examples), Terraform can't initialise the provider until that resource exists. This means you cannot use `-target` to deploy just the upstream resource, because the downstream provider won't initialise cleanly.
+
+The recommended patterns to handle this:
+
+```hcl
+# Option 1 — split into two root modules: one for infra, one for config
+# Module 1: creates AKS, stores kubeconfig in state
+# Module 2: reads kubeconfig via terraform_remote_state, configures Kubernetes
+
+# Option 2 — use a local file as an intermediary
+resource "local_file" "kubeconfig" {
+  content  = azurerm_kubernetes_cluster.aks.kube_config_raw
+  filename = "${path.module}/.kube/config"
+}
+
+provider "kubernetes" {
+  config_path = local_file.kubeconfig.filename
+}
+
+# Option 3 — use a null-initialised provider during first apply (advanced)
+# Set provider host to a dummy value; use -target to create the cluster first,
+# then re-run without -target so the provider can resolve the real host.
 ```

@@ -5,11 +5,13 @@ export default {
     'azure-cheatsheet':    'Azure',
     'bash-cheatsheet':     'Bash',
     'containers-cheatsheet': 'Containers',
+    'dotnet-cheatsheet':   '.NET',
     'kql-cheatsheet':      'KQL',
     'linux-cheatsheet':    'Linux',
     'nginx-cheatsheet':    'Nginx',
     'powershell-cheatsheet': 'PowerShell',
     'python-cheatsheet':   'Python',
     'security-cheatsheet': 'Security',
+    'typescript-cheatsheet': 'TypeScript',
     'windows-cheatsheet':  'Windows',
 }

@@ -328,7 +328,7 @@ whoami /priv
 ### Dump environment variables
 
 ```powershell
-[System.Environment]::GetEnvironmentVariables() | Sort-Object Name
+[System.Environment]::GetEnvironmentVariables().GetEnumerator() | Sort-Object Name
 ```
 
 ### Search for passwords in files (recursive)
@@ -390,7 +390,10 @@ JSON.stringify(sessionStorage, null, 2)
 ```javascript
 const token = localStorage.getItem('token') || sessionStorage.getItem('token');
 if (token) {
-  const [h, p] = token.split('.').slice(0,2).map(b => JSON.parse(atob(b.replace(/-/g,'+').replace(/_/g,'/'))));
+  const [h, p] = token.split('.').slice(0,2).map(b => {
+    const s = b.replace(/-/g,'+').replace(/_/g,'/');
+    return JSON.parse(atob(s + '=='.slice(0, (4 - s.length % 4) % 4)));
+  });
   console.log('Header:', h, '\nPayload:', p);
 }
 ```
@@ -585,10 +588,12 @@ git log --all --oneline | awk '{print $1}' | \
 gitleaks detect --source . --verbose --report-path gitleaks-report.json
 ```
 
-### Scan a remote repo without cloning
+### Scan a remote repo
 
 ```bash
-gitleaks detect --source https://github.com/org/repo --verbose
+# Clone first — gitleaks --source expects a local path, not a URL
+git clone --depth=50 https://github.com/org/repo /tmp/repo
+gitleaks detect --source /tmp/repo --verbose --report-path gitleaks-report.json
 ```
 
 ### Scan with Trufflehog (finds verified live secrets)
@@ -612,7 +617,11 @@ git config --list --show-origin | grep -i 'url\|credential\|token'
 ### Search recursively for common secret patterns
 
 ```bash
-grep -rn --include="*.{js,ts,py,go,rb,php,env,yaml,yml,json,toml,tf,sh}" \
+grep -rn \
+  --include="*.js" --include="*.ts" --include="*.py" --include="*.go" \
+  --include="*.rb" --include="*.php" --include="*.env" --include="*.yaml" \
+  --include="*.yml" --include="*.json" --include="*.toml" --include="*.tf" \
+  --include="*.sh" \
   -iE 'password\s*=|api.?key\s*=|secret\s*=|token\s*=' .
 ```
 

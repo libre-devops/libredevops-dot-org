@@ -1,28 +1,27 @@
 ---
 title: AWS Cheatsheet
-description: AWS CLI setup, S3, EC2, IAM, EKS, and CloudFormation quick-reference for platform engineers.
+description: Comprehensive AWS reference — CLI mastery, IAM, S3, EC2, VPC, Lambda, EKS, RDS, Secrets Manager, CloudWatch, CloudFormation, and CDK.
 ---
 
 # AWS Cheat Sheet
 
-A practical reference for common AWS operations using the AWS CLI and SDKs.
+Advanced AWS reference for platform and DevOps engineers. Covers CLI patterns, IAM deeply, core services, and real operational workflows.
 
 ---
 
 ## Authentication & Credentials
 
-### Configure named profiles
-
-Store credentials for multiple accounts without environment variables. The `--profile` flag selects which profile to use at runtime.
+### Named profiles
 
 ```bash
 aws configure                          # configure the default profile
-aws configure --profile staging        # configure a named profile
-aws configure list                     # show what's configured
-aws configure list --profile staging   # show a specific profile
+aws configure --profile prod           # configure a named profile
+aws configure list                     # show active config
+aws configure list --profile prod      # show a specific profile
+aws configure get region --profile prod
 ```
 
-`aws configure` writes to `~/.aws/credentials` and `~/.aws/config`. You can also edit these directly:
+`~/.aws/credentials` and `~/.aws/config` are written by `aws configure`. Edit directly for more control:
 
 ```ini
 # ~/.aws/credentials
@@ -30,7 +29,7 @@ aws configure list --profile staging   # show a specific profile
 aws_access_key_id     = AKIAIOSFODNN7EXAMPLE
 aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
 
-[staging]
+[prod]
 aws_access_key_id     = AKIAI44QH8DHBEXAMPLE
 aws_secret_access_key = je7MtGbClwBF/2Zp9Utk/h3yCo8nvbEXAMPLEKEY
 ```
@@ -41,95 +40,181 @@ aws_secret_access_key = je7MtGbClwBF/2Zp9Utk/h3yCo8nvbEXAMPLEKEY
 region = eu-west-2
 output = json
 
-[profile staging]
-region = us-east-1
-output = table
+[profile prod]
+region         = eu-west-2
+output         = json
+role_arn       = arn:aws:iam::123456789012:role/DeployRole
+source_profile = default          # assume role from default credentials
 ```
 
-### Assume a role (cross-account)
+### AWS SSO / IAM Identity Center (recommended for organisations)
+
+```bash
+# One-time setup
+aws configure sso
+
+# ~/.aws/config entry (can also write manually)
+# [profile my-sso]
+# sso_start_url  = https://my-org.awsapps.com/start
+# sso_region     = eu-west-2
+# sso_account_id = 123456789012
+# sso_role_name  = AdministratorAccess
+# region         = eu-west-2
+
+# Log in — opens browser, caches token for 8 hours
+aws sso login --profile my-sso
+
+# Log out
+aws sso logout
+
+# Use profile for any command
+aws s3 ls --profile my-sso
+```
+
+### Assume a role (cross-account or elevated)
+
+```bash
+# Export temporary credentials into the current shell
+eval $(aws sts assume-role \
+  --role-arn arn:aws:iam::123456789012:role/DeployRole \
+  --role-session-name deploy-$(date +%s) \
+  --query 'Credentials' \
+  --output json \
+  | jq -r '@sh "
+      export AWS_ACCESS_KEY_ID=\(.AccessKeyId)
+      export AWS_SECRET_ACCESS_KEY=\(.SecretAccessKey)
+      export AWS_SESSION_TOKEN=\(.SessionToken)"')
+
+# Verify
+aws sts get-caller-identity
+
+# Unset when done
+unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+```
+
+### Assume role with MFA
 
 ```bash
 aws sts assume-role \
-  --role-arn arn:aws:iam::123456789012:role/MyRole \
-  --role-session-name my-session \
-  --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
-  --output text
+  --role-arn arn:aws:iam::123456789012:role/MFARequiredRole \
+  --role-session-name mfa-session \
+  --serial-number arn:aws:iam::111111111111:mfa/my-device \
+  --token-code 123456
 ```
 
-Export the returned credentials into your shell:
+### Environment variables
 
 ```bash
-eval $(aws sts assume-role \
-  --role-arn arn:aws:iam::123456789012:role/MyRole \
-  --role-session-name my-session \
-  --query 'Credentials' \
-  --output json | jq -r '@sh "export AWS_ACCESS_KEY_ID=\(.AccessKeyId) AWS_SECRET_ACCESS_KEY=\(.SecretAccessKey) AWS_SESSION_TOKEN=\(.SessionToken)"')
+export AWS_DEFAULT_REGION=eu-west-2
+export AWS_PROFILE=prod
+export AWS_ACCESS_KEY_ID=...
+export AWS_SECRET_ACCESS_KEY=...
+export AWS_SESSION_TOKEN=...        # required when using temporary credentials
 ```
 
-### Login to ECR
+Priority order: CLI flags > env vars > `~/.aws/credentials` > IAM instance profile
+
+### Who am I?
 
 ```bash
-aws ecr get-login-password --region eu-west-2 \
-  | docker login --username AWS --password-stdin 123456789012.dkr.ecr.eu-west-2.amazonaws.com
-```
-
----
-
-## S3
-
-```bash
-aws s3 ls                              # list all buckets
-aws s3 ls s3://my-bucket               # list bucket contents
-aws s3 ls s3://my-bucket/prefix/ --recursive
-
-aws s3 cp file.txt s3://my-bucket/path/
-aws s3 cp s3://my-bucket/path/file.txt .
-aws s3 sync ./local-dir s3://my-bucket/prefix/
-aws s3 sync s3://my-bucket/prefix/ ./local-dir --delete  # mirror, delete extras
-
-aws s3 rm s3://my-bucket/path/file.txt
-aws s3 rm s3://my-bucket/prefix/ --recursive
-
-aws s3 mb s3://my-new-bucket --region eu-west-2   # make bucket
-aws s3 rb s3://my-bucket --force                   # remove bucket (must be empty, or use --force)
-```
-
-### Presigned URLs
-
-Generate a time-limited URL for sharing an object without granting public access.
-
-```bash
-aws s3 presign s3://my-bucket/my-file.zip --expires-in 3600   # 1 hour
+aws sts get-caller-identity
+# { "UserId": "AROAEXAMPLEID", "Account": "123456789012", "Arn": "arn:aws:iam::123456789012:role/MyRole" }
 ```
 
 ---
 
-## EC2
+## CLI Essentials
+
+### `--query` — JMESPath filtering
 
 ```bash
-aws ec2 describe-instances --output table
-aws ec2 describe-instances --filters "Name=tag:Name,Values=my-server" \
-  --query 'Reservations[*].Instances[*].[InstanceId,State.Name,PublicIpAddress]' \
+# Extract specific fields from a list
+aws ec2 describe-instances \
+  --query 'Reservations[*].Instances[*].[InstanceId,State.Name,PrivateIpAddress,Tags[?Key==`Name`].Value|[0]]' \
   --output table
 
-aws ec2 start-instances --instance-ids i-1234567890abcdef0
-aws ec2 stop-instances --instance-ids i-1234567890abcdef0
-aws ec2 reboot-instances --instance-ids i-1234567890abcdef0
-aws ec2 terminate-instances --instance-ids i-1234567890abcdef0
-```
-
-### Connect via SSM Session Manager (no SSH required)
-
-```bash
-aws ssm start-session --target i-1234567890abcdef0
-```
-
-### Get latest Amazon Linux 2 AMI ID
-
-```bash
+# Single scalar value — use --output text to strip quotes
 aws ssm get-parameter \
-  --name /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2 \
+  --name /myapp/prod/db-url \
+  --with-decryption \
   --query 'Parameter.Value' \
+  --output text
+
+# Filter by value
+aws ec2 describe-instances \
+  --query 'Reservations[*].Instances[?State.Name==`running`].[InstanceId,PrivateIpAddress]' \
+  --output table
+
+# First/last item
+aws ec2 describe-instances \
+  --query 'Reservations[-1].Instances[0].InstanceId' \
+  --output text
+
+# Keys of a map
+aws s3api get-bucket-tagging --bucket my-bucket \
+  --query 'TagSet[*].[Key,Value]' \
+  --output table
+```
+
+### Output formats
+
+```bash
+--output json     # default — machine-readable
+--output table    # human-readable aligned table
+--output text     # tab-delimited, good for scripting
+--output yaml     # YAML (v2 only)
+```
+
+### Pagination
+
+AWS CLI v2 auto-paginates. Override with:
+
+```bash
+--no-paginate                          # return first page only
+--page-size 50                         # items per API call (reduces throttling)
+--max-items 200                        # total items returned
+
+# Manual token-based pagination
+aws s3api list-objects-v2 --bucket my-bucket --max-keys 100 --starting-token <token>
+```
+
+### Wait — block until a condition is met
+
+```bash
+aws ec2 wait instance-running   --instance-ids i-1234567890abcdef0
+aws ec2 wait instance-stopped   --instance-ids i-1234567890abcdef0
+aws ec2 wait instance-terminated --instance-ids i-1234567890abcdef0
+
+aws rds wait db-instance-available --db-instance-identifier mydb
+aws rds wait db-snapshot-completed --db-snapshot-identifier mydb-snap
+
+aws cloudformation wait stack-create-complete --stack-name my-stack
+aws cloudformation wait stack-update-complete --stack-name my-stack
+aws cloudformation wait stack-delete-complete --stack-name my-stack
+
+aws elbv2 wait load-balancer-available --load-balancer-arns arn:aws:elasticloadbalancing:...
+```
+
+### Useful global patterns
+
+```bash
+# Dry run (EC2 supports this natively — checks permissions without acting)
+aws ec2 run-instances ... --dry-run
+
+# Debug mode
+aws s3 ls --debug 2>&1 | grep 'DEBUG'
+
+# Use a specific endpoint (LocalStack, custom, etc.)
+aws s3 ls --endpoint-url http://localhost:4566
+
+# Format JSON output with jq
+aws ec2 describe-instances | jq '.Reservations[].Instances[] | {id: .InstanceId, state: .State.Name, ip: .PrivateIpAddress}'
+
+# Find untagged resources
+aws resourcegroupstaggingapi get-resources \
+  --resource-type-filters ec2:instance \
+  --tag-filters Key=Environment \
+  --query 'ResourceTagMappingList[?Tags[?Key==`Environment`]==`[]`].ResourceARN' \
   --output text
 ```
 
@@ -137,36 +222,642 @@ aws ssm get-parameter \
 
 ## IAM
 
+### Policies — view and manage
+
 ```bash
-aws iam list-users --output table
-aws iam list-roles --output table
 aws iam list-policies --scope Local --output table   # custom policies only
+aws iam list-policies --scope AWS   --output table   # AWS-managed policies
 
-aws iam get-user --user-name myuser
-aws iam list-attached-user-policies --user-name myuser
-aws iam list-groups-for-user --user-name myuser
+aws iam get-policy --policy-arn arn:aws:iam::123456789012:policy/MyPolicy
+aws iam get-policy-version \
+  --policy-arn arn:aws:iam::123456789012:policy/MyPolicy \
+  --version-id v1
 
-aws iam create-user --user-name newuser
-aws iam delete-user --user-name olduser
+# Create a custom policy from a JSON file
+aws iam create-policy \
+  --policy-name MyPolicy \
+  --policy-document file://policy.json
 
-aws iam create-role --role-name MyRole --assume-role-policy-document file://trust-policy.json
-aws iam attach-role-policy --role-name MyRole --policy-arn arn:aws:iam::aws:policy/ReadOnlyAccess
-aws iam detach-role-policy --role-name MyRole --policy-arn arn:aws:iam::aws:policy/ReadOnlyAccess
+# Update (create a new version and set as default)
+aws iam create-policy-version \
+  --policy-arn arn:aws:iam::123456789012:policy/MyPolicy \
+  --policy-document file://policy-v2.json \
+  --set-as-default
 ```
 
-### Inline trust policy for EC2
+### Policy JSON structure
 
 ```json
 {
   "Version": "2012-10-17",
   "Statement": [
     {
+      "Sid": "AllowS3ReadOnly",
       "Effect": "Allow",
-      "Principal": { "Service": "ec2.amazonaws.com" },
-      "Action": "sts:AssumeRole"
+      "Action": [
+        "s3:GetObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::my-bucket",
+        "arn:aws:s3:::my-bucket/*"
+      ]
+    },
+    {
+      "Sid": "DenyDeleteObject",
+      "Effect": "Deny",
+      "Action": "s3:DeleteObject",
+      "Resource": "arn:aws:s3:::my-bucket/*"
     }
   ]
 }
+```
+
+### Condition operators in policies
+
+```json
+{
+  "Condition": {
+    "StringEquals": {
+      "aws:RequestedRegion": "eu-west-2"
+    },
+    "Bool": {
+      "aws:MultiFactorAuthPresent": "true"
+    },
+    "IpAddress": {
+      "aws:SourceIp": ["10.0.0.0/8", "172.16.0.0/12"]
+    },
+    "ArnLike": {
+      "aws:PrincipalArn": "arn:aws:iam::123456789012:role/Deploy*"
+    },
+    "StringLike": {
+      "s3:prefix": ["home/${aws:username}/*"]
+    }
+  }
+}
+```
+
+### Roles
+
+```bash
+# Create a role with a trust policy
+aws iam create-role \
+  --role-name MyRole \
+  --assume-role-policy-document file://trust-policy.json
+
+# Attach a managed policy
+aws iam attach-role-policy \
+  --role-name MyRole \
+  --policy-arn arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+
+# Add an inline policy
+aws iam put-role-policy \
+  --role-name MyRole \
+  --policy-name MyInlinePolicy \
+  --policy-document file://inline-policy.json
+
+# List everything attached to a role
+aws iam list-attached-role-policies --role-name MyRole
+aws iam list-role-policies --role-name MyRole   # inline
+```
+
+### Trust policies — who can assume the role
+
+#### EC2 instance profile
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": { "Service": "ec2.amazonaws.com" },
+    "Action": "sts:AssumeRole"
+  }]
+}
+```
+
+#### Lambda execution role
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": { "Service": "lambda.amazonaws.com" },
+    "Action": "sts:AssumeRole"
+  }]
+}
+```
+
+#### Cross-account role assumption
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": { "AWS": "arn:aws:iam::111111111111:root" },
+    "Action": "sts:AssumeRole",
+    "Condition": {
+      "Bool": { "aws:MultiFactorAuthPresent": "true" }
+    }
+  }]
+}
+```
+
+#### GitHub Actions — OIDC federated identity (no long-lived secrets)
+
+```bash
+# 1. Create the OIDC provider (once per account)
+aws iam create-open-id-connect-provider \
+  --url https://token.actions.githubusercontent.com \
+  --client-id-list sts.amazonaws.com \
+  --thumbprint-list 6938fd4d98bab03faadb97b34396831e3780aea1
+```
+
+Trust policy for the role:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": {
+      "Federated": "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+    },
+    "Action": "sts:AssumeRoleWithWebIdentity",
+    "Condition": {
+      "StringEquals": {
+        "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+      },
+      "StringLike": {
+        "token.actions.githubusercontent.com:sub": "repo:myorg/myrepo:*"
+      }
+    }
+  }]
+}
+```
+
+GitHub Actions workflow:
+
+```yaml
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::123456789012:role/GitHubActionsRole
+          aws-region: eu-west-2
+
+      - run: aws sts get-caller-identity
+```
+
+### Permission boundaries
+
+Limits the maximum effective permissions of an identity — useful for delegating IAM management without granting privilege escalation:
+
+```bash
+aws iam put-role-permissions-boundary \
+  --role-name DeveloperRole \
+  --permissions-boundary arn:aws:iam::123456789012:policy/DeveloperBoundary
+
+aws iam delete-role-permissions-boundary --role-name DeveloperRole
+```
+
+### IAM Access Analyzer
+
+```bash
+# List findings (unintended public or cross-account access)
+aws accessanalyzer list-findings \
+  --analyzer-arn arn:aws:access-analyzer:eu-west-2:123456789012:analyzer/MyAnalyzer \
+  --query 'findings[?status==`ACTIVE`].[id,resource,resourceType]' \
+  --output table
+
+# Validate a policy before applying it
+aws accessanalyzer validate-policy \
+  --policy-document file://policy.json \
+  --policy-type IDENTITY_POLICY
+```
+
+---
+
+## S3
+
+### Bucket operations
+
+```bash
+aws s3 mb s3://my-bucket --region eu-west-2
+aws s3 rb s3://my-bucket --force    # delete bucket and all contents
+
+aws s3 ls                            # list all buckets
+aws s3 ls s3://my-bucket/prefix/ --recursive --human-readable --summarize
+
+aws s3 cp file.txt s3://my-bucket/path/
+aws s3 cp s3://my-bucket/path/file.txt ./
+aws s3 cp s3://src-bucket/ s3://dst-bucket/ --recursive   # copy between buckets
+
+aws s3 mv s3://my-bucket/old.txt s3://my-bucket/new.txt
+
+aws s3 sync ./local/ s3://my-bucket/prefix/
+aws s3 sync s3://my-bucket/ ./local/ --delete             # mirror, remove extras
+aws s3 sync ./local/ s3://my-bucket/ --exclude "*.log" --include "*.json"
+
+aws s3 rm s3://my-bucket/file.txt
+aws s3 rm s3://my-bucket/prefix/ --recursive
+```
+
+### Bucket API (`s3api`) — fine-grained control
+
+```bash
+# Versioning
+aws s3api put-bucket-versioning \
+  --bucket my-bucket \
+  --versioning-configuration Status=Enabled
+
+# List versions
+aws s3api list-object-versions --bucket my-bucket --prefix path/to/file.txt
+
+# Get a specific version
+aws s3api get-object --bucket my-bucket --key file.txt --version-id "VERSION_ID" output.txt
+
+# Server-side encryption — enforce AES-256
+aws s3api put-bucket-encryption --bucket my-bucket --server-side-encryption-configuration '{
+  "Rules": [{
+    "ApplyServerSideEncryptionByDefault": { "SSEAlgorithm": "AES256" },
+    "BucketKeyEnabled": true
+  }]
+}'
+
+# Block all public access (should be default for new buckets)
+aws s3api put-public-access-block --bucket my-bucket \
+  --public-access-block-configuration "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
+
+# Bucket policy
+aws s3api put-bucket-policy --bucket my-bucket --policy file://bucket-policy.json
+aws s3api get-bucket-policy --bucket my-bucket
+aws s3api delete-bucket-policy --bucket my-bucket
+```
+
+### Bucket policy — enforce TLS only
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Sid": "DenyNonTLS",
+    "Effect": "Deny",
+    "Principal": "*",
+    "Action": "s3:*",
+    "Resource": [
+      "arn:aws:s3:::my-bucket",
+      "arn:aws:s3:::my-bucket/*"
+    ],
+    "Condition": {
+      "Bool": { "aws:SecureTransport": "false" }
+    }
+  }]
+}
+```
+
+### Presigned URLs
+
+```bash
+# Read — share an object for 1 hour without making it public
+aws s3 presign s3://my-bucket/my-file.zip --expires-in 3600
+# Note: aws s3 presign only generates GET URLs; presigned PUT URLs require the SDK
+# (e.g. boto3: s3.generate_presigned_url('put_object', Params={...}, ExpiresIn=900))
+```
+
+### S3 Select — query object contents with SQL
+
+```bash
+aws s3api select-object-content \
+  --bucket my-bucket \
+  --key data/records.csv \
+  --expression "SELECT * FROM S3Object WHERE _4 = 'prod'" \
+  --expression-type SQL \
+  --input-serialization '{"CSV":{"FileHeaderInfo":"USE"}}' \
+  --output-serialization '{"CSV":{}}' \
+  /dev/stdout
+```
+
+---
+
+## EC2
+
+### Instances
+
+```bash
+# Launch
+aws ec2 run-instances \
+  --image-id ami-0abc1234def5678 \
+  --instance-type t3.medium \
+  --key-name my-key \
+  --security-group-ids sg-0abc123 \
+  --subnet-id subnet-0abc123 \
+  --iam-instance-profile Name=MyInstanceProfile \
+  --user-data file://user-data.sh \
+  --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=my-server},{Key=Environment,Value=prod}]' \
+  --count 1
+
+# Describe
+aws ec2 describe-instances --output table
+aws ec2 describe-instances \
+  --filters "Name=tag:Environment,Values=prod" "Name=instance-state-name,Values=running" \
+  --query 'Reservations[*].Instances[*].[InstanceId,InstanceType,PrivateIpAddress,Tags[?Key==`Name`].Value|[0]]' \
+  --output table
+
+# Start / stop / reboot / terminate
+aws ec2 start-instances     --instance-ids i-0abc123
+aws ec2 stop-instances      --instance-ids i-0abc123
+aws ec2 reboot-instances    --instance-ids i-0abc123
+aws ec2 terminate-instances --instance-ids i-0abc123
+
+# Wait for state change
+aws ec2 wait instance-running  --instance-ids i-0abc123
+aws ec2 wait instance-stopped  --instance-ids i-0abc123
+```
+
+### Connect without SSH
+
+```bash
+# SSM Session Manager (requires SSM agent + IAM permissions)
+aws ssm start-session --target i-0abc123
+
+# Port forward via SSM (e.g., RDS on private subnet)
+aws ssm start-session \
+  --target i-0abc123 \
+  --document-name AWS-StartPortForwardingSessionToRemoteHost \
+  --parameters '{"host":["mydb.cluster-xxx.eu-west-2.rds.amazonaws.com"],"portNumber":["5432"],"localPortNumber":["5432"]}'
+```
+
+### AMIs
+
+```bash
+# List your own AMIs
+aws ec2 describe-images --owners self --output table \
+  --query 'Images[*].[ImageId,Name,CreationDate]'
+
+# Get latest Amazon Linux 2023 AMI
+aws ssm get-parameter \
+  --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64 \
+  --query 'Parameter.Value' \
+  --output text
+
+# Get latest Ubuntu 22.04 LTS AMI
+aws ec2 describe-images \
+  --owners 099720109477 \
+  --filters "Name=name,Values=ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*" "Name=state,Values=available" \
+  --query 'sort_by(Images,&CreationDate)[-1].ImageId' \
+  --output text
+
+# Create an AMI from a running instance
+aws ec2 create-image \
+  --instance-id i-0abc123 \
+  --name "my-server-$(date +%Y%m%d)" \
+  --no-reboot
+
+# Deregister and delete snapshot
+aws ec2 deregister-image --image-id ami-0abc123
+aws ec2 delete-snapshot --snapshot-id snap-0abc123
+```
+
+### Security groups
+
+```bash
+aws ec2 create-security-group \
+  --group-name my-sg \
+  --description "Application security group" \
+  --vpc-id vpc-0abc123
+
+aws ec2 authorize-security-group-ingress \
+  --group-id sg-0abc123 \
+  --protocol tcp --port 443 --cidr 0.0.0.0/0
+
+aws ec2 authorize-security-group-ingress \
+  --group-id sg-0abc123 \
+  --protocol tcp --port 5432 \
+  --source-group sg-0def456   # allow from another SG
+
+aws ec2 revoke-security-group-ingress \
+  --group-id sg-0abc123 \
+  --protocol tcp --port 22 --cidr 0.0.0.0/0
+
+aws ec2 describe-security-groups \
+  --filters "Name=group-name,Values=my-sg" \
+  --query 'SecurityGroups[*].[GroupId,GroupName,Description]' \
+  --output table
+```
+
+### EBS volumes
+
+```bash
+# List volumes
+aws ec2 describe-volumes \
+  --query 'Volumes[*].[VolumeId,State,Size,VolumeType,AvailabilityZone]' \
+  --output table
+
+# Create and attach
+aws ec2 create-volume \
+  --availability-zone eu-west-2a \
+  --size 100 \
+  --volume-type gp3 \
+  --encrypted
+
+aws ec2 attach-volume \
+  --volume-id vol-0abc123 \
+  --instance-id i-0abc123 \
+  --device /dev/xvdf
+
+# Snapshot
+aws ec2 create-snapshot \
+  --volume-id vol-0abc123 \
+  --description "Backup $(date +%Y-%m-%d)" \
+  --tag-specifications 'ResourceType=snapshot,Tags=[{Key=Name,Value=my-backup}]'
+```
+
+### Auto Scaling Groups
+
+```bash
+aws autoscaling describe-auto-scaling-groups \
+  --query 'AutoScalingGroups[*].[AutoScalingGroupName,MinSize,MaxSize,DesiredCapacity]' \
+  --output table
+
+aws autoscaling set-desired-capacity \
+  --auto-scaling-group-name my-asg \
+  --desired-capacity 5
+
+aws autoscaling update-auto-scaling-group \
+  --auto-scaling-group-name my-asg \
+  --min-size 2 --max-size 10 --desired-capacity 4
+
+# Refresh all instances (rolling update)
+aws autoscaling start-instance-refresh \
+  --auto-scaling-group-name my-asg \
+  --preferences '{"MinHealthyPercentage":90,"InstanceWarmup":60}'
+
+# Suspend/resume scaling processes
+aws autoscaling suspend-processes --auto-scaling-group-name my-asg --scaling-processes Launch Terminate
+aws autoscaling resume-processes  --auto-scaling-group-name my-asg
+```
+
+---
+
+## VPC & Networking
+
+### VPC, subnets, and gateways
+
+```bash
+# Create VPC
+VPC_ID=$(aws ec2 create-vpc \
+  --cidr-block 10.0.0.0/16 \
+  --tag-specifications 'ResourceType=vpc,Tags=[{Key=Name,Value=my-vpc}]' \
+  --query 'Vpc.VpcId' --output text)
+
+# Enable DNS hostnames
+aws ec2 modify-vpc-attribute --vpc-id $VPC_ID --enable-dns-hostnames
+
+# Create subnets
+SUBNET_PUB=$(aws ec2 create-subnet \
+  --vpc-id $VPC_ID --cidr-block 10.0.1.0/24 \
+  --availability-zone eu-west-2a \
+  --query 'Subnet.SubnetId' --output text)
+
+SUBNET_PRV=$(aws ec2 create-subnet \
+  --vpc-id $VPC_ID --cidr-block 10.0.10.0/24 \
+  --availability-zone eu-west-2a \
+  --query 'Subnet.SubnetId' --output text)
+
+# Auto-assign public IP on launch for public subnet
+aws ec2 modify-subnet-attribute --subnet-id $SUBNET_PUB --map-public-ip-on-launch
+
+# Internet Gateway
+IGW=$(aws ec2 create-internet-gateway --query 'InternetGateway.InternetGatewayId' --output text)
+aws ec2 attach-internet-gateway --internet-gateway-id $IGW --vpc-id $VPC_ID
+
+# Route table for public subnet
+RTB=$(aws ec2 create-route-table --vpc-id $VPC_ID --query 'RouteTable.RouteTableId' --output text)
+aws ec2 create-route --route-table-id $RTB --destination-cidr-block 0.0.0.0/0 --gateway-id $IGW
+aws ec2 associate-route-table --route-table-id $RTB --subnet-id $SUBNET_PUB
+
+# NAT Gateway (for private subnets to reach internet)
+EIP=$(aws ec2 allocate-address --domain vpc --query 'AllocationId' --output text)
+NGW=$(aws ec2 create-nat-gateway --subnet-id $SUBNET_PUB --allocation-id $EIP --query 'NatGateway.NatGatewayId' --output text)
+aws ec2 wait nat-gateway-available --nat-gateway-ids $NGW
+
+# Private route table → NAT
+RTB_PRV=$(aws ec2 create-route-table --vpc-id $VPC_ID --query 'RouteTable.RouteTableId' --output text)
+aws ec2 create-route --route-table-id $RTB_PRV --destination-cidr-block 0.0.0.0/0 --nat-gateway-id $NGW
+aws ec2 associate-route-table --route-table-id $RTB_PRV --subnet-id $SUBNET_PRV
+```
+
+### VPC Endpoints (private access to AWS services)
+
+```bash
+# S3 gateway endpoint (free, no data transfer charge)
+aws ec2 create-vpc-endpoint \
+  --vpc-id $VPC_ID \
+  --service-name com.amazonaws.eu-west-2.s3 \
+  --route-table-ids $RTB_PRV \
+  --vpc-endpoint-type Gateway
+
+# Secrets Manager interface endpoint
+aws ec2 create-vpc-endpoint \
+  --vpc-id $VPC_ID \
+  --service-name com.amazonaws.eu-west-2.secretsmanager \
+  --subnet-ids $SUBNET_PRV \
+  --security-group-ids $SG_ID \
+  --vpc-endpoint-type Interface \
+  --private-dns-enabled
+```
+
+---
+
+## Lambda
+
+```bash
+# Package and create
+zip function.zip lambda_function.py
+
+aws lambda create-function \
+  --function-name my-function \
+  --runtime python3.12 \
+  --role arn:aws:iam::123456789012:role/LambdaExecRole \
+  --handler lambda_function.lambda_handler \
+  --zip-file fileb://function.zip \
+  --timeout 30 \
+  --memory-size 256 \
+  --environment 'Variables={ENV=prod,LOG_LEVEL=INFO}' \
+  --vpc-config SubnetIds=subnet-0abc123,SecurityGroupIds=sg-0abc123
+
+# Update code
+aws lambda update-function-code \
+  --function-name my-function \
+  --zip-file fileb://function.zip
+
+# Update configuration
+aws lambda update-function-configuration \
+  --function-name my-function \
+  --timeout 60 \
+  --memory-size 512 \
+  --environment 'Variables={ENV=prod,DB_HOST=mydb.cluster.rds.amazonaws.com}'
+
+# Invoke synchronously
+aws lambda invoke \
+  --function-name my-function \
+  --payload '{"key":"value"}' \
+  --cli-binary-format raw-in-base64-out \
+  --log-type Tail \
+  response.json
+cat response.json
+
+# Invoke asynchronously
+aws lambda invoke \
+  --function-name my-function \
+  --invocation-type Event \
+  --payload '{"key":"value"}' \
+  --cli-binary-format raw-in-base64-out \
+  /dev/null
+
+# List functions
+aws lambda list-functions \
+  --query 'Functions[*].[FunctionName,Runtime,LastModified,MemorySize]' \
+  --output table
+
+# Aliases and versions
+aws lambda publish-version --function-name my-function
+aws lambda create-alias \
+  --function-name my-function \
+  --name prod \
+  --function-version 5
+
+# Delete
+aws lambda delete-function --function-name my-function
+```
+
+### Lambda function URL (HTTPS without API Gateway)
+
+```bash
+aws lambda create-function-url-config \
+  --function-name my-function \
+  --auth-type NONE            # or AWS_IAM for authenticated access
+
+aws lambda get-function-url-config --function-name my-function
+```
+
+### Tail Lambda logs
+
+```bash
+aws logs tail /aws/lambda/my-function --follow
+aws logs tail /aws/lambda/my-function --since 30m
+aws logs tail /aws/lambda/my-function --since 2024-06-01T00:00:00Z
 ```
 
 ---
@@ -174,14 +865,341 @@ aws iam detach-role-policy --role-name MyRole --policy-arn arn:aws:iam::aws:poli
 ## EKS
 
 ```bash
-aws eks list-clusters
+# List clusters
+aws eks list-clusters --output table
 aws eks describe-cluster --name my-cluster
 
-# Update kubeconfig to connect kubectl to a cluster
+# Update kubeconfig
 aws eks update-kubeconfig --name my-cluster --region eu-west-2
 aws eks update-kubeconfig --name my-cluster --region eu-west-2 --profile staging
+aws eks update-kubeconfig --name my-cluster --region eu-west-2 --role-arn arn:aws:iam::123456789012:role/EKSReadRole
 
-kubectl get nodes   # verify connection
+# Verify connection
+kubectl get nodes
+kubectl get pods -A
+
+# Node groups
+aws eks list-nodegroups --cluster-name my-cluster
+aws eks describe-nodegroup --cluster-name my-cluster --nodegroup-name my-ng
+
+aws eks update-nodegroup-config \
+  --cluster-name my-cluster \
+  --nodegroup-name my-ng \
+  --scaling-config minSize=2,maxSize=10,desiredSize=4
+
+# Add-ons
+aws eks list-addons --cluster-name my-cluster
+aws eks describe-addon --cluster-name my-cluster --addon-name vpc-cni
+
+aws eks create-addon \
+  --cluster-name my-cluster \
+  --addon-name aws-ebs-csi-driver \
+  --addon-version v1.28.0-eksbuild.1 \
+  --service-account-role-arn arn:aws:iam::123456789012:role/EBSCSIRole
+
+aws eks update-addon \
+  --cluster-name my-cluster \
+  --addon-name vpc-cni \
+  --addon-version v1.18.0-eksbuild.1
+
+# Fargate profiles
+aws eks create-fargate-profile \
+  --cluster-name my-cluster \
+  --fargate-profile-name my-fargate \
+  --pod-execution-role-arn arn:aws:iam::123456789012:role/FargatePodRole \
+  --selectors 'namespace=kube-system' 'namespace=default'
+
+# Access entries (EKS RBAC for IAM — replaces aws-auth ConfigMap)
+aws eks create-access-entry \
+  --cluster-name my-cluster \
+  --principal-arn arn:aws:iam::123456789012:role/DevRole \
+  --type STANDARD
+
+aws eks associate-access-policy \
+  --cluster-name my-cluster \
+  --principal-arn arn:aws:iam::123456789012:role/DevRole \
+  --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSViewPolicy \
+  --access-scope type=namespace,namespaces=default
+```
+
+---
+
+## ECR
+
+```bash
+# Authenticate Docker to ECR
+aws ecr get-login-password --region eu-west-2 \
+  | docker login --username AWS --password-stdin 123456789012.dkr.ecr.eu-west-2.amazonaws.com
+
+# Create repository
+aws ecr create-repository \
+  --repository-name my-app \
+  --image-scanning-configuration scanOnPush=true \
+  --encryption-configuration encryptionType=AES256
+
+# Tag and push
+docker tag my-app:latest 123456789012.dkr.ecr.eu-west-2.amazonaws.com/my-app:latest
+docker push 123456789012.dkr.ecr.eu-west-2.amazonaws.com/my-app:latest
+
+# List images
+aws ecr list-images --repository-name my-app --output table
+aws ecr describe-images --repository-name my-app \
+  --query 'sort_by(imageDetails,&imagePushedAt)[-5:].[imageTags[0],imagePushedAt,imageSizeInBytes]' \
+  --output table
+
+# Scan results
+aws ecr describe-image-scan-findings \
+  --repository-name my-app \
+  --image-id imageTag=latest
+
+# Delete untagged images (cleanup)
+aws ecr list-images --repository-name my-app \
+  --filter tagStatus=UNTAGGED \
+  --query 'imageIds[*]' \
+  | xargs -I{} aws ecr batch-delete-image --repository-name my-app --image-ids {}
+
+# Lifecycle policy — keep last 10 tagged images
+aws ecr put-lifecycle-policy \
+  --repository-name my-app \
+  --lifecycle-policy-text '{
+    "rules": [{
+      "rulePriority": 1,
+      "description": "Keep last 10 images",
+      "selection": {"tagStatus":"tagged","tagPrefixList":["v"],"countType":"imageCountMoreThan","countNumber":10},
+      "action": {"type":"expire"}
+    }]
+  }'
+```
+
+---
+
+## RDS & Aurora
+
+```bash
+# List instances
+aws rds describe-db-instances \
+  --query 'DBInstances[*].[DBInstanceIdentifier,DBInstanceStatus,Endpoint.Address,DBInstanceClass]' \
+  --output table
+
+# Start / stop (stops billing for the instance, not storage)
+aws rds start-db-instance --db-instance-identifier mydb
+aws rds stop-db-instance  --db-instance-identifier mydb
+aws rds wait db-instance-available --db-instance-identifier mydb
+
+# Create a snapshot
+aws rds create-db-snapshot \
+  --db-instance-identifier mydb \
+  --db-snapshot-identifier mydb-$(date +%Y%m%d-%H%M)
+
+# Restore from snapshot
+aws rds restore-db-instance-from-db-snapshot \
+  --db-instance-identifier mydb-restored \
+  --db-snapshot-identifier mydb-20240601-1200 \
+  --db-instance-class db.t3.medium \
+  --no-multi-az
+
+# Modify instance
+aws rds modify-db-instance \
+  --db-instance-identifier mydb \
+  --db-instance-class db.r6g.xlarge \
+  --apply-immediately
+
+# List Aurora clusters
+aws rds describe-db-clusters \
+  --query 'DBClusters[*].[DBClusterIdentifier,Status,Endpoint,Engine]' \
+  --output table
+
+# Failover Aurora cluster to a different AZ
+aws rds failover-db-cluster --db-cluster-identifier my-aurora-cluster
+```
+
+---
+
+## Secrets Manager & Parameter Store
+
+### Secrets Manager
+
+```bash
+# Create a secret
+aws secretsmanager create-secret \
+  --name /myapp/prod/db-credentials \
+  --secret-string '{"username":"admin","password":"sup3r-s3cr3t","host":"mydb.rds.amazonaws.com"}'
+
+# Get the secret value
+aws secretsmanager get-secret-value \
+  --secret-id /myapp/prod/db-credentials \
+  --query SecretString \
+  --output text
+
+# Parse a JSON secret with jq
+aws secretsmanager get-secret-value \
+  --secret-id /myapp/prod/db-credentials \
+  --query SecretString \
+  --output text \
+  | jq -r '.password'
+
+# Update / rotate
+aws secretsmanager put-secret-value \
+  --secret-id /myapp/prod/db-credentials \
+  --secret-string '{"username":"admin","password":"newpassword"}'
+
+# List all secrets
+aws secretsmanager list-secrets \
+  --query 'SecretList[*].[Name,LastChangedDate,RotationEnabled]' \
+  --output table
+
+# Delete (with recovery window)
+aws secretsmanager delete-secret \
+  --secret-id /myapp/prod/db-credentials \
+  --recovery-window-in-days 7
+
+# Delete immediately (no recovery)
+aws secretsmanager delete-secret \
+  --secret-id /myapp/prod/db-credentials \
+  --force-delete-without-recovery
+```
+
+### SSM Parameter Store
+
+```bash
+# Put a parameter
+aws ssm put-parameter \
+  --name /myapp/prod/db-url \
+  --value "postgres://admin:pass@mydb:5432/appdb" \
+  --type SecureString \
+  --overwrite
+
+# Get a single parameter (--with-decryption needed for SecureString)
+aws ssm get-parameter \
+  --name /myapp/prod/db-url \
+  --with-decryption \
+  --query 'Parameter.Value' \
+  --output text
+
+# Get all parameters under a path
+aws ssm get-parameters-by-path \
+  --path /myapp/prod/ \
+  --with-decryption \
+  --recursive \
+  --query 'Parameters[*].[Name,Value]' \
+  --output table
+
+# List parameters
+aws ssm describe-parameters \
+  --parameter-filters "Key=Path,Values=/myapp/prod/" \
+  --query 'Parameters[*].[Name,Type,LastModifiedDate]' \
+  --output table
+
+# Delete
+aws ssm delete-parameter --name /myapp/prod/db-url
+aws ssm delete-parameters --names /myapp/prod/db-url /myapp/prod/api-key
+```
+
+---
+
+## CloudWatch
+
+### Logs
+
+```bash
+# List log groups
+aws logs describe-log-groups \
+  --query 'logGroups[*].[logGroupName,retentionInDays,storedBytes]' \
+  --output table
+
+# Tail logs in real time (CLI v2)
+aws logs tail /aws/lambda/my-function --follow
+aws logs tail /aws/lambda/my-function --since 1h --filter-pattern "ERROR"
+
+# Filter log events manually
+aws logs filter-log-events \
+  --log-group-name /aws/lambda/my-function \
+  --filter-pattern "ERROR" \
+  --start-time $(date -d '1 hour ago' +%s000) \
+  --query 'events[*].[timestamp,message]' \
+  --output table
+
+# Set retention
+aws logs put-retention-policy \
+  --log-group-name /aws/lambda/my-function \
+  --retention-in-days 30
+
+# Delete a log group
+aws logs delete-log-group --log-group-name /aws/lambda/my-old-function
+```
+
+### CloudWatch Logs Insights
+
+```bash
+# Start a query
+QUERY_ID=$(aws logs start-query \
+  --log-group-name /aws/lambda/my-function \
+  --start-time $(date -d '1 hour ago' +%s) \
+  --end-time $(date +%s) \
+  --query-string 'fields @timestamp, @message
+    | filter @message like /ERROR/
+    | sort @timestamp desc
+    | limit 50' \
+  --query 'queryId' --output text)
+
+# Get results
+aws logs get-query-results --query-id $QUERY_ID
+
+# Common Insights queries:
+# Error rate by minute:
+#   stats count(*) as errors by bin(1m)
+#   | filter @message like /ERROR/
+
+# Lambda cold starts:
+#   filter @message like /Init Duration/
+#   | parse @message "Init Duration: * ms" as initDuration
+#   | stats avg(initDuration), max(initDuration), count() by bin(5m)
+
+# P99 duration:
+#   filter @type = "REPORT"
+#   | stats pct(@duration, 99) as p99, avg(@duration) as avg by bin(5m)
+```
+
+### Alarms
+
+```bash
+# Create an alarm (Lambda error rate)
+aws cloudwatch put-metric-alarm \
+  --alarm-name "lambda-error-rate-high" \
+  --alarm-description "Lambda errors > 5 in 5 minutes" \
+  --metric-name Errors \
+  --namespace AWS/Lambda \
+  --dimensions Name=FunctionName,Value=my-function \
+  --statistic Sum \
+  --period 300 \
+  --threshold 5 \
+  --comparison-operator GreaterThanOrEqualToThreshold \
+  --evaluation-periods 1 \
+  --alarm-actions arn:aws:sns:eu-west-2:123456789012:alerts \
+  --treat-missing-data notBreaching
+
+# List alarms in ALARM state
+aws cloudwatch describe-alarms \
+  --state-value ALARM \
+  --query 'MetricAlarms[*].[AlarmName,StateValue,StateReason]' \
+  --output table
+
+# Set alarm state manually (for testing)
+aws cloudwatch set-alarm-state \
+  --alarm-name "lambda-error-rate-high" \
+  --state-value ALARM \
+  --state-reason "Testing"
+```
+
+### Custom metrics
+
+```bash
+aws cloudwatch put-metric-data \
+  --namespace "MyApp/Deployments" \
+  --metric-name "DeploymentDuration" \
+  --unit Seconds \
+  --value 45.2 \
+  --dimensions Environment=prod,Service=api
 ```
 
 ---
@@ -189,36 +1207,256 @@ kubectl get nodes   # verify connection
 ## CloudFormation
 
 ```bash
-aws cloudformation list-stacks --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE
-aws cloudformation describe-stacks --stack-name my-stack
+# Validate template
+aws cloudformation validate-template --template-body file://template.yaml
 
+# Deploy / update (idempotent)
 aws cloudformation deploy \
   --template-file template.yaml \
   --stack-name my-stack \
-  --capabilities CAPABILITY_IAM \
-  --parameter-overrides Env=prod Region=eu-west-2
+  --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
+  --parameter-overrides Env=prod Region=eu-west-2 \
+  --tags Environment=prod ManagedBy=CloudFormation \
+  --no-fail-on-empty-changeset
 
+# Describe stack
+aws cloudformation describe-stacks --stack-name my-stack
+aws cloudformation describe-stack-events --stack-name my-stack \
+  --query 'StackEvents[?ResourceStatus==`CREATE_FAILED` || ResourceStatus==`UPDATE_FAILED`].[LogicalResourceId,ResourceStatusReason]' \
+  --output table
+
+# Get outputs
+aws cloudformation describe-stacks \
+  --stack-name my-stack \
+  --query 'Stacks[0].Outputs[*].[OutputKey,OutputValue]' \
+  --output table
+
+# Change sets — preview before applying
+aws cloudformation create-change-set \
+  --stack-name my-stack \
+  --change-set-name my-change-$(date +%s) \
+  --template-body file://template.yaml \
+  --capabilities CAPABILITY_IAM
+
+aws cloudformation describe-change-set \
+  --stack-name my-stack \
+  --change-set-name my-change-xxx
+
+aws cloudformation execute-change-set \
+  --stack-name my-stack \
+  --change-set-name my-change-xxx
+
+# Drift detection
+aws cloudformation detect-stack-drift --stack-name my-stack
+aws cloudformation describe-stack-resource-drifts \
+  --stack-name my-stack \
+  --stack-resource-drift-status-filters MODIFIED DELETED
+
+# Delete
 aws cloudformation delete-stack --stack-name my-stack
-
-# Validate a template without deploying
-aws cloudformation validate-template --template-body file://template.yaml
+aws cloudformation wait stack-delete-complete --stack-name my-stack
 ```
 
 ---
 
-## Useful Globals
+## CDK
+
+### Bootstrap and core commands
 
 ```bash
-# Get caller identity (who am I right now?)
-aws sts get-caller-identity
+# Install CDK globally
+npm install -g aws-cdk
 
-# Set output format and region for a single command
-aws ec2 describe-instances --output table --region us-east-1
+# Bootstrap — provision CDK assets bucket and roles in account/region (once per account/region pair)
+cdk bootstrap aws://123456789012/eu-west-2
+cdk bootstrap --profile prod aws://123456789012/eu-west-2
 
-# Filter JSON output with jq
-aws ec2 describe-instances | jq '.Reservations[].Instances[] | {id: .InstanceId, state: .State.Name}'
+# Synthesise CloudFormation template
+cdk synth
+cdk synth --profile prod
+cdk synth MyStack > template.yaml
 
-# Set environment variables for a session
-export AWS_DEFAULT_REGION=eu-west-2
-export AWS_PROFILE=staging
+# Diff — show what would change
+cdk diff
+cdk diff MyStack
+
+# Deploy
+cdk deploy
+cdk deploy MyStack AnotherStack
+cdk deploy --all                        # all stacks
+cdk deploy --require-approval never     # skip approval prompts (CI/CD)
+cdk deploy -O outputs.json             # write stack outputs to file
+
+# Destroy
+cdk destroy MyStack
+cdk destroy --all --force
+
+# List stacks
+cdk list
+cdk list --long
+
+# Hotswap (fast deploy for Lambda/ECS — skips CloudFormation for supported changes)
+cdk deploy --hotswap
+
+# Watch mode — auto-deploy on file change
+cdk watch
+```
+
+### CDK app structure (Python)
+
+```python
+# app.py
+import aws_cdk as cdk
+from stacks.network_stack import NetworkStack
+from stacks.app_stack import AppStack
+
+app = cdk.App()
+
+env = cdk.Environment(
+    account=app.node.try_get_context("account") or "123456789012",
+    region=app.node.try_get_context("region")  or "eu-west-2",
+)
+
+net   = NetworkStack(app, "NetworkStack", env=env)
+AppStack(app, "AppStack", vpc=net.vpc, env=env)
+
+app.synth()
+```
+
+```python
+# stacks/network_stack.py
+import aws_cdk as cdk
+from aws_cdk import aws_ec2 as ec2
+from constructs import Construct
+
+class NetworkStack(cdk.Stack):
+    def __init__(self, scope: Construct, id: str, **kwargs) -> None:
+        super().__init__(scope, id, **kwargs)
+
+        self.vpc = ec2.Vpc(self, "Vpc",
+            ip_addresses=ec2.IpAddresses.cidr("10.0.0.0/16"),
+            max_azs=3,
+            subnet_configuration=[
+                ec2.SubnetConfiguration(name="Public",  subnet_type=ec2.SubnetType.PUBLIC,  cidr_mask=24),
+                ec2.SubnetConfiguration(name="Private", subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS, cidr_mask=24),
+            ],
+        )
+
+        cdk.CfnOutput(self, "VpcId", value=self.vpc.vpc_id)
+```
+
+---
+
+## Cost & Billing
+
+```bash
+# Current month spend by service
+aws ce get-cost-and-usage \
+  --time-period Start=$(date +%Y-%m-01),End=$(date +%Y-%m-%d) \
+  --granularity MONTHLY \
+  --metrics BlendedCost \
+  --group-by Type=DIMENSION,Key=SERVICE \
+  --query 'ResultsByTime[0].Groups[*].[Keys[0],Metrics.BlendedCost.Amount]' \
+  --output table
+
+# Last 30 days by account (requires Cost Explorer enabled)
+aws ce get-cost-and-usage \
+  --time-period Start=$(date -d '30 days ago' +%Y-%m-%d),End=$(date +%Y-%m-%d) \
+  --granularity DAILY \
+  --metrics UnblendedCost \
+  --group-by Type=DIMENSION,Key=LINKED_ACCOUNT
+
+# List budgets
+aws budgets describe-budgets --account-id 123456789012 \
+  --query 'Budgets[*].[BudgetName,BudgetLimit.Amount,CalculatedSpend.ActualSpend.Amount]' \
+  --output table
+
+# Create a monthly budget with email alert at 80% and 100%
+aws budgets create-budget \
+  --account-id 123456789012 \
+  --budget '{
+    "BudgetName": "monthly-100usd",
+    "BudgetLimit": {"Amount": "100", "Unit": "USD"},
+    "TimeUnit": "MONTHLY",
+    "BudgetType": "COST"
+  }' \
+  --notifications-with-subscribers '[
+    {
+      "Notification": {"NotificationType":"ACTUAL","ComparisonOperator":"GREATER_THAN","Threshold":80},
+      "Subscribers": [{"SubscriptionType":"EMAIL","Address":"ops@example.com"}]
+    }
+  ]'
+```
+
+---
+
+## Useful Global Patterns
+
+### Find all resources with a specific tag across services
+
+```bash
+aws resourcegroupstaggingapi get-resources \
+  --tag-filters Key=Environment,Values=prod \
+  --query 'ResourceTagMappingList[*].[ResourceARN]' \
+  --output text
+```
+
+### Find untagged EC2 instances
+
+```bash
+aws ec2 describe-instances \
+  --query 'Reservations[*].Instances[?!Tags || !Tags[?Key==`Environment`]].[InstanceId,PrivateIpAddress]' \
+  --output table
+```
+
+### Bulk tag resources
+
+```bash
+aws resourcegroupstaggingapi tag-resources \
+  --resource-arn-list \
+    arn:aws:s3:::my-bucket \
+    arn:aws:lambda:eu-west-2:123456789012:function:my-function \
+  --tags Environment=prod,CostCentre=12345
+```
+
+### Script: assume role, run command, return
+
+```bash
+assume_role() {
+  local role_arn="$1"; shift
+  local creds
+  creds=$(aws sts assume-role \
+    --role-arn "$role_arn" \
+    --role-session-name "script-$(date +%s)" \
+    --query 'Credentials' \
+    --output json)
+
+  AWS_ACCESS_KEY_ID=$(echo "$creds"     | jq -r .AccessKeyId) \
+  AWS_SECRET_ACCESS_KEY=$(echo "$creds" | jq -r .SecretAccessKey) \
+  AWS_SESSION_TOKEN=$(echo "$creds"     | jq -r .SessionToken) \
+  "$@"
+}
+
+# Usage — run any command as a different role
+assume_role arn:aws:iam::123456789012:role/ReadOnlyRole \
+  aws s3 ls s3://prod-bucket/
+```
+
+### Wait for CloudFormation with live events
+
+```bash
+watch_stack() {
+  local stack="$1"
+  while true; do
+    status=$(aws cloudformation describe-stacks \
+      --stack-name "$stack" \
+      --query 'Stacks[0].StackStatus' \
+      --output text 2>/dev/null)
+    echo "$(date +%T)  $stack  $status"
+    [[ "$status" == *"COMPLETE"* || "$status" == *"FAILED"* || "$status" == *"ROLLBACK"* ]] && break
+    sleep 10
+  done
+}
+
+watch_stack my-stack
 ```

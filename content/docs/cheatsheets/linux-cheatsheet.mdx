@@ -42,7 +42,7 @@ sudo apt-get update && sudo apt-get install -y wget apt-transport-https software
 wget -q "https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/packages-microsoft-prod.deb"
 sudo dpkg -i packages-microsoft-prod.deb
 sudo apt-get update && sudo apt-get install -y powershell
-pwsh -Command Set-PSRepository -Name "PSGallery" -InstallationPolicy Trusted
+pwsh -Command "Set-PSRepository -Name 'PSGallery' -InstallationPolicy Trusted"
 sudo pwsh -Command Install-Module -Name Az -Force -AllowClobber -Scope AllUsers -Repository PSGallery
 ```
 
@@ -53,7 +53,7 @@ sudo pwsh -Command Install-Module -Name Az -Force -AllowClobber -Scope AllUsers 
 sudo cp *.crt /usr/local/share/ca-certificates/
 sudo cp *.crt /etc/ssl/certs
 mkdir -p ~/.local/share/ca-certificates/ && cp *.crt ~/.local/share/ca-certificates/
-update-ca-certificates
+sudo update-ca-certificates
 ```
 
 ### Configure Python pip to use a custom CA bundle
@@ -147,8 +147,8 @@ echo 'export PYENV_ROOT="$HOME/.pyenv"' >> ~/.bashrc
 echo 'command -v pyenv >/dev/null || export PATH="$PYENV_ROOT/bin:$PATH"' >> ~/.bashrc
 echo 'eval "$(pyenv init -)"' >> ~/.bashrc
 source ~/.bashrc
-pyenv install 3.12
-pyenv global 3.12
+pyenv install 3.12.0
+pyenv global 3.12.0
 ```
 
 ### Install tfenv, pkenv, goenv
@@ -282,7 +282,7 @@ processors=2
 
 ```powershell
 Invoke-WebRequest -Uri "https://github.com/sakai135/wsl-vpnkit/releases/latest/download/wsl-vpnkit.tar.gz" -OutFile "wsl-vpnkit.tar.gz"
-wsl --import wsl-vpnkit --version 2 "$env:USERPROFILE\wsl-vpnkit" wsl-vpnkit.tar.gz
+wsl --import wsl-vpnkit "$env:USERPROFILE\wsl-vpnkit" wsl-vpnkit.tar.gz --version 2
 wsl -d wsl-vpnkit
 wsl.exe -d wsl-vpnkit --cd /app service wsl-vpnkit start
 ```

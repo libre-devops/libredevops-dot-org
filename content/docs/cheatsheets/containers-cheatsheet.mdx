@@ -1,361 +1,1306 @@
 ---
 title: Containers Cheatsheet
-description: Docker, Podman, Docker Compose, and Kubernetes quick-reference with real-world examples.
+description: Docker, Podman, Docker Compose, Kubernetes, Helm, and container security patterns for platform engineers.
 ---
 
 # Containers Cheat Sheet
 
-Practical reference for Docker, Podman, Docker Compose, and Kubernetes — including setup scripts, Dockerfiles, and pod definitions.
+Docker, Podman, Compose, Kubernetes, and Helm patterns for platform engineers. Covers images, networking, volumes, security, debugging, and production deployment patterns.
 
 ---
 
 ## Docker
 
-### Install Docker (moby) on Ubuntu with a GitHub Actions runner
-
-Installs the Microsoft-hosted `moby-engine` package and then downloads and registers a self-hosted GitHub Actions runner.
+### Core container lifecycle
 
 ```bash
-#!/usr/bin/env bash
-set -euo pipefail
+# Run
+docker run -d \
+  --name        my-app \
+  --restart     unless-stopped \
+  -p            8080:8080 \
+  -e            APP_ENV=production \
+  --memory      512m \
+  --cpus        "1.5" \
+  --read-only \
+  --user        1000:1000 \
+  --cap-drop    ALL \
+  myregistry.io/my-app:1.2.3
 
-LSB_RELEASE=$(lsb_release -rs)
+# Exec into running container
+docker exec -it my-app /bin/sh
 
-# Add Microsoft package repository
-wget -q "https://packages.microsoft.com/config/ubuntu/${LSB_RELEASE}/packages-microsoft-prod.deb"
-sudo dpkg -i packages-microsoft-prod.deb
-sudo apt-get install -y apt-transport-https ca-certificates curl software-properties-common
+# Logs
+docker logs my-app --follow --tail 100
+docker logs my-app --since 10m
 
-# Install moby (Docker-compatible engine)
-docker_package=moby
-if ! dpkg -l | grep -q "$docker_package"; then
-    sudo apt-get remove -y moby-engine moby-cli 2>/dev/null || true
-    sudo apt-get update
-    sudo apt-get install -y moby-engine moby-cli moby-buildx moby-compose
-fi
+# Lifecycle
+docker stop  my-app && docker rm my-app
+docker kill  my-app           # SIGKILL immediately
+docker pause my-app           # freeze
+docker unpause my-app
 
-sudo systemctl enable --now docker.service
-sleep 10
-docker info
-docker logout   # clear any cached credentials
+# Copy files
+docker cp my-app:/etc/app/config.yaml ./config.yaml
+docker cp ./config.yaml my-app:/etc/app/config.yaml
 
-# ─── GitHub Actions runner ────────────────────────────────────────────────────
-USER="actions"
-REPO="runner"
-OS="linux"
-ARCH="x64"
-ACTIONS_URL="https://github.com/libre-devops/azdo-agent-scale-sets"
-TOKEN="<your-registration-token>"
+# Inspect
+docker inspect my-app
+docker inspect --format '{{.NetworkSettings.IPAddress}}' my-app
+docker inspect --format '{{json .State.Health}}' my-app | jq
 
-RUNNER_VERSION=$(curl -s "https://api.github.com/repos/${USER}/${REPO}/releases/latest" | jq -r .tag_name)
-STRIPPED_VERSION="${RUNNER_VERSION#v}"
-PACKAGE_URL="https://github.com/${USER}/${REPO}/releases/download/${RUNNER_VERSION}/actions-runner-${OS}-${ARCH}-${STRIPPED_VERSION}.tar.gz"
-PACKAGE_NAME="actions-runner-${OS}-${ARCH}-${STRIPPED_VERSION}.tar.gz"
-
-curl -o "${PACKAGE_NAME}" -L "${PACKAGE_URL}"
-tar xzf "${PACKAGE_NAME}" && rm "${PACKAGE_NAME}"
-./config.sh --url "${ACTIONS_URL}" --token "${TOKEN}"
-./run.sh --unattended
+# Stats (live)
+docker stats --no-stream
+docker stats my-app
 ```
 
-### Jenkins Dockerfile with Homebrew toolchain
+### Images
 
-A Jenkins LTS image extended with PowerShell, Homebrew, tfsec, Checkov, terraform-compliance, and tfenv — ready to run Terraform pipelines.
+```bash
+# Pull / push
+docker pull nginx:1.27-alpine
+docker push myregistry.io/my-app:1.2.3
+
+# Tag
+docker tag myregistry.io/my-app:latest myregistry.io/my-app:1.2.3
+
+# List
+docker images
+docker image ls --filter dangling=true
+
+# Remove
+docker rmi myregistry.io/my-app:old
+docker image prune         # dangling only
+docker image prune -a      # all unreferenced
+
+# Save / load (for air-gapped transfers)
+docker save myregistry.io/my-app:1.2.3 | gzip > my-app-1.2.3.tar.gz
+docker load < my-app-1.2.3.tar.gz
+
+# Inspect image layers
+docker history my-app:latest
+docker image inspect my-app:latest --format '{{json .RootFS.Layers}}' | jq
+
+# Scan for vulnerabilities (Docker Scout)
+docker scout cves my-app:latest
+docker scout recommendations my-app:latest
+```
+
+### Networking
+
+```bash
+# Create networks
+docker network create --driver bridge app-net
+docker network create --driver overlay --attachable swarm-net
+
+# Connect / disconnect
+docker network connect  app-net my-app
+docker network disconnect app-net my-app
+
+# List
+docker network ls
+docker network inspect app-net
+
+# DNS between containers: use container name as hostname on shared network
+docker run -d --name db    --network app-net postgres:16
+docker run -d --name api   --network app-net -e DB_HOST=db my-api:latest
+# api container resolves "db" via Docker DNS
+
+# Host networking (no NAT — Linux only)
+docker run --network host nginx
+```
+
+### Volumes
+
+```bash
+# Named volumes
+docker volume create my-data
+docker volume ls
+docker volume inspect my-data
+docker volume rm my-data
+docker volume prune
+
+# Bind mounts
+docker run -v /host/path:/container/path:ro my-app
+
+# tmpfs (in-memory, not persisted)
+docker run --tmpfs /tmp:size=100m,noexec my-app
+
+# Backup a volume
+docker run --rm \
+  -v my-data:/data \
+  -v "$(pwd)":/backup \
+  alpine tar czf /backup/my-data-backup.tar.gz -C /data .
+
+# Restore
+docker run --rm \
+  -v my-data:/data \
+  -v "$(pwd)":/backup \
+  alpine sh -c "cd /data && tar xzf /backup/my-data-backup.tar.gz"
+```
+
+### System cleanup
+
+```bash
+docker system df                    # disk usage
+docker system prune                 # stopped containers + dangling images + unused networks
+docker system prune -a              # also removes unused images
+docker system prune --volumes       # also removes unused volumes
+docker system prune -af --volumes   # full nuclear cleanup
+```
+
+---
+
+## Dockerfile Patterns
+
+### Multi-stage build (Go)
 
 ```dockerfile
-FROM docker.io/jenkins/jenkins:lts
+# syntax=docker/dockerfile:1
+FROM golang:1.23-alpine AS builder
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /app ./cmd/server
 
-ENV NORMAL_USER=jenkins
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=builder /app /app
+EXPOSE 8080
+ENTRYPOINT ["/app"]
+```
 
-USER root
+### Multi-stage build (Node.js)
 
-LABEL org.opencontainers.image.source=https://github.com/libre-devops/azure-terraform-jenkinsfile
+```dockerfile
+# syntax=docker/dockerfile:1
+FROM node:22-alpine AS deps
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --omit=dev
 
-ARG DEBIAN_FRONTEND=noninteractive
-ENV DEBIAN_FRONTEND=noninteractive
+FROM node:22-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
 
-RUN apt-get update -y && apt-get dist-upgrade -y && apt-get install -y \
-    apt-transport-https bash ca-certificates curl gcc git sudo \
-    software-properties-common openssh-server unzip wget zip zlib1g-dev && \
-    useradd -m -s /bin/bash linuxbrew && \
-    usermod -aG sudo linuxbrew && \
-    mkdir -p /home/linuxbrew/.linuxbrew && \
-    chown -R linuxbrew: /home/linuxbrew/.linuxbrew && \
-    wget -q "https://packages.microsoft.com/config/debian/$(grep -oP '(?<=^VERSION_ID=).+' /etc/os-release | tr -d '"')/packages-microsoft-prod.deb" && \
-    dpkg -i packages-microsoft-prod.deb && \
-    apt-get update && apt-get install -y powershell
+FROM node:22-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=deps    /app/node_modules ./node_modules
+COPY --from=builder /app/dist        ./dist
+COPY --from=builder /app/package.json .
+USER node
+EXPOSE 3000
+CMD ["node", "dist/index.js"]
+```
 
-ENV PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/go/bin:/home/linuxbrew/.linuxbrew/bin:${PATH}"
-RUN echo $PATH | tee /etc/environment
+### Python with uv
 
-USER linuxbrew
+```dockerfile
+# syntax=docker/dockerfile:1
+FROM python:3.12-slim AS builder
+RUN pip install uv
+WORKDIR /app
+COPY pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev
 
-RUN /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" && \
-    echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' >> /home/linuxbrew/.bashrc && \
-    eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)" && \
-    brew install tfsec python3 tfenv tree && \
-    pip3 install terraform-compliance checkov azure-cli && \
-    tfenv install latest
+FROM python:3.12-slim
+WORKDIR /app
+COPY --from=builder /app/.venv /app/.venv
+COPY src ./src
+ENV PATH="/app/.venv/bin:$PATH"
+USER nobody
+EXPOSE 8000
+CMD ["gunicorn", "src.app:app", "-b", "0.0.0.0:8000"]
+```
 
-USER root
-RUN chown -R ${NORMAL_USER} $(brew --prefix)/*
-USER ${NORMAL_USER}
+### BuildKit secrets (no secrets in layers)
+
+```dockerfile
+# syntax=docker/dockerfile:1
+FROM alpine AS downloader
+RUN --mount=type=secret,id=gh_token \
+    GH_TOKEN=$(cat /run/secrets/gh_token) \
+    curl -H "Authorization: token $GH_TOKEN" \
+         -L https://api.github.com/repos/myorg/private/releases/latest \
+         -o /app/binary
+```
+
+```bash
+docker buildx build \
+  --secret id=gh_token,src=$HOME/.config/gh/token \
+  -t my-image:latest .
+```
+
+### .dockerignore
+
+```text
+.git
+.gitignore
+.env
+.env.*
+**/node_modules
+**/__pycache__
+**/*.pyc
+**/dist
+**/build
+**/.pytest_cache
+**/.mypy_cache
+Dockerfile*
+docker-compose*.yml
+*.md
+.github
+terraform
+tests
+```
+
+### Dockerfile best practices
+
+```dockerfile
+# syntax=docker/dockerfile:1
+
+# Pin base image by digest for reproducibility
+FROM python:3.12.4-slim@sha256:abc123... AS base
+
+# Combine RUN layers to minimise image size
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+# Use COPY --chown to avoid a separate chown layer
+COPY --chown=nobody:nogroup src/ /app/src/
+
+# Drop to non-root before CMD
+USER nobody
+
+# Use exec form for CMD/ENTRYPOINT (no shell, proper signal handling)
+ENTRYPOINT ["/app/server"]
+CMD ["--config", "/etc/app/config.yaml"]
+
+# Healthcheck
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -f http://localhost:8080/healthz || exit 1
+```
+
+---
+
+## BuildKit & Multi-Platform
+
+```bash
+# Enable BuildKit (default in Docker 23+)
+DOCKER_BUILDKIT=1 docker build .
+
+# Create a multi-platform builder
+docker buildx create --name multiarch --driver docker-container --use
+docker buildx inspect --bootstrap
+
+# Build for multiple platforms
+docker buildx build \
+  --platform linux/amd64,linux/arm64 \
+  --push \
+  -t myregistry.io/my-app:1.2.3 .
+
+# Build and load locally (single platform only)
+docker buildx build --load --platform linux/amd64 -t my-app:dev .
+
+# Bake (declarative multi-target builds)
+docker buildx bake --file docker-bake.hcl --push
+```
+
+```hcl
+# docker-bake.hcl
+group "default" {
+  targets = ["api", "worker"]
+}
+
+target "api" {
+  context    = "."
+  dockerfile = "Dockerfile.api"
+  platforms  = ["linux/amd64", "linux/arm64"]
+  tags       = ["myregistry.io/api:${GIT_SHA}"]
+}
+
+target "worker" {
+  context    = "."
+  dockerfile = "Dockerfile.worker"
+  platforms  = ["linux/amd64", "linux/arm64"]
+  tags       = ["myregistry.io/worker:${GIT_SHA}"]
+}
 ```
 
 ---
 
 ## Docker Compose
 
-### Desktop GUI tooling container
+### Production-grade compose file
 
 ```yaml
----
-version: "3.8"
+# compose.yaml (v2 format — no top-level "version" key needed)
 services:
-  rdesktop:
-    image: ghcr.io/libre-devops/gui-tooling-container:latest
-    container_name: tooling-container
-    privileged: true
-    volumes:
-      - dev-container-home:/home
-      - dev-container-opt:/opt
-    environment:
-      - TZ=Europe/London
-    ports:
-      - 3389:3389
-    shm_size: "1gb"
+  api:
+    image: myregistry.io/api:${IMAGE_TAG:-latest}
     restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - DATABASE_URL=postgresql://app:${DB_PASSWORD}@db:5432/app
+      - REDIS_URL=redis://cache:6379
+    env_file:
+      - .env.local
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout:  5s
+      retries:  3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus:   "1"
+          memory: 512M
+    networks:
+      - backend
+      - frontend
+    read_only: true
+    tmpfs:
+      - /tmp
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       app
+      POSTGRES_USER:     app
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      interval: 10s
+      timeout:  5s
+      retries:  5
+    networks:
+      - backend
+
+  cache:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    networks:
+      - backend
 
 volumes:
-  dev-container-home:
-  dev-container-opt:
+  db-data:
+  redis-data:
+
+networks:
+  backend:
+  frontend:
+```
+
+### Compose CLI patterns
+
+```bash
+# Start / stop
+docker compose up -d
+docker compose up -d --build       # rebuild images first
+docker compose down
+docker compose down -v             # also remove volumes
+
+# Scale a service
+docker compose up -d --scale worker=4
+
+# Logs
+docker compose logs -f api
+docker compose logs -f --tail 50 api db
+
+# Exec
+docker compose exec api sh
+docker compose exec db psql -U app -d app
+
+# Environment override files
+docker compose -f compose.yaml -f compose.override.prod.yaml up -d
+
+# Watch (auto-rebuild on file changes — compose 2.22+)
+docker compose watch
+
+# Run one-off command
+docker compose run --rm api python manage.py migrate
+
+# Config validation
+docker compose config
+
+# Pull all images
+docker compose pull
+```
+
+### Compose profiles (selective service startup)
+
+```yaml
+services:
+  api:
+    image: myregistry.io/api:latest
+    # no profiles key — service always starts regardless of --profile flag
+
+  docs:
+    image: myregistry.io/docs:latest
+    profiles: ["full"]           # only with --profile full
+
+  mock-server:
+    image: mockserver/mockserver
+    profiles: ["dev"]            # only in dev
+```
+
+```bash
+docker compose --profile full up -d
+docker compose --profile dev  up -d
 ```
 
 ---
 
 ## Podman
 
-### Fix WSL shared mount (required for rootless Podman in WSL2)
-
-```powershell
-wsl.exe -e sh -c 'echo "wsl.exe -u root -e mount --make-rshared /" | sudo tee /etc/profile.d/02-shared-root.sh > /dev/null && sudo chmod +x /etc/profile.d/02-shared-root.sh'
-```
-
-### Create a Podman pod with multiple services
-
-Creates a single pod containing Jenkins, Gitea, PostgreSQL, and Nexus — all sharing a network namespace.
+### Key differences from Docker
 
 ```bash
-#!/usr/bin/env bash
-set -xe
+# Rootless by default — no daemon
+podman run -d nginx
 
-POD_NAME="services"
-podman pod create "${POD_NAME}"
+# Pods (shared network namespace)
+podman pod create --name app-pod -p 8080:80
+podman run -d --pod app-pod --name nginx nginx
+podman run -d --pod app-pod --name api   my-api:latest
+podman pod start  app-pod
+podman pod stop   app-pod
+podman pod rm -f  app-pod
 
-podman create \
-  --name=jenkins --pod "${POD_NAME}" \
-  -e ACCEPT_EULA=Y \
-  -e JENKINS_SLAVE_AGENT_PORT=50001 \
-  -v craig-workspace_jenkins_home:/var/jenkins_home \
-  --restart unless-stopped \
-  docker.io/jenkins/jenkins:latest
-
-podman create \
-  --name=gitea --pod "${POD_NAME}" \
-  -e USER_UID=1000 -e USER_GID=1000 \
-  -e APP_NAME=self-hosted \
-  -e REQUIRE_SIGNIN_VIEW=false \
-  -v gitea:/data \
-  -v /etc/localtime:/etc/localtime:ro \
-  --restart unless-stopped \
-  docker.io/gitea/gitea:latest
-
-podman create \
-  --name=postgres-db --pod "${POD_NAME}" \
-  -e POSTGRES_USER=gitea \
-  -e POSTGRES_PASSWORD=gitea \
-  -e POSTGRES_DB=gitea \
-  -v postgres:/var/lib/postgresql/data \
-  --restart unless-stopped \
-  docker.io/postgres:latest
-
-podman create \
-  --name=nexus --pod "${POD_NAME}" \
-  -v nexus-data:/nexus-data \
-  --restart unless-stopped \
-  docker.io/sonatype/nexus3
+# Docker CLI compatibility
+alias docker=podman
 ```
 
-### HTTP reverse proxy config for Podman services
+### Quadlet (systemd-native containers)
 
-Nginx running on the host, proxying to Podman containers on localhost ports. See the Nginx cheatsheet for the HTTPS version.
+Quadlet replaces `podman generate systemd` in Podman 4.4+. Drop a `.container` file in `~/.config/containers/systemd/` or `/etc/containers/systemd/`.
 
-```nginx
-events { worker_connections 4096; }
+```ini
+# ~/.config/containers/systemd/my-app.container
+[Unit]
+Description=My App Container
+After=network-online.target
 
-http {
-    upstream gitea   { server 127.0.0.1:3000 fail_timeout=0; }
-    upstream jenkins { server 127.0.0.1:8080 fail_timeout=0; }
-    upstream nexus   { server 127.0.0.1:8081 fail_timeout=0; }
+[Container]
+Image=myregistry.io/my-app:latest
+ContainerName=my-app
+PublishPort=8080:8080
+Environment=APP_ENV=production
+EnvironmentFile=%h/.env.my-app
+Volume=%h/data:/data:Z
+AutoUpdate=registry
+HealthCmd=curl -f http://localhost:8080/healthz
+HealthInterval=30s
 
-    server {
-        listen 80;
-        server_name gitea.libredevops.org;
-        location / {
-            proxy_pass http://gitea;
-            proxy_http_version 1.1;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
-            proxy_set_header Upgrade $http_upgrade;
-            proxy_set_header Connection "upgrade";
-        }
-    }
+[Service]
+Restart=always
+TimeoutStartSec=60
 
-    server {
-        listen 80;
-        server_name jenkins.libredevops.org;
-        location / {
-            proxy_pass http://jenkins;
-            proxy_http_version 1.1;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
-            proxy_set_header Upgrade $http_upgrade;
-            proxy_set_header Connection "upgrade";
-            proxy_request_buffering off;
-            proxy_buffering off;
-            add_header 'X-SSH-Endpoint' 'jenkins.libredevops.org:50022' always;
-        }
-    }
+[Install]
+WantedBy=default.target
+```
 
-    server {
-        listen 80;
-        server_name nexus.libredevops.org;
-        location / {
-            proxy_pass http://nexus;
-            proxy_http_version 1.1;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
-            proxy_set_header Upgrade $http_upgrade;
-            proxy_set_header Connection "upgrade";
-        }
-    }
-}
+```bash
+# Reload and start
+systemctl --user daemon-reload
+systemctl --user enable --now my-app.service
+systemctl --user status my-app.service
+journalctl --user -u my-app.service -f
+
+# Auto-update (requires AutoUpdate=registry in .container)
+systemctl --user enable podman-auto-update.timer
+podman auto-update --dry-run
+```
+
+### Podman in WSL2
+
+```bash
+# Fix shared mount for rootless Podman
+sudo sh -c 'echo "mount --make-rshared /" > /etc/profile.d/02-shared-root.sh'
+sudo chmod +x /etc/profile.d/02-shared-root.sh
+
+# Enable socket (for Docker-compatible tools)
+systemctl --user enable --now podman.socket
+export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock
 ```
 
 ---
 
-## Kubernetes
+## Kubernetes (kubectl)
 
-### Multi-container pod definition (Podman-generated)
-
-A Kubernetes pod YAML with Jenkins, Gitea, PostgreSQL, and Nexus — equivalent to the Podman pod above, suitable for `kubectl apply`.
-
-```yaml
-apiVersion: v1
-kind: Pod
-metadata:
-  labels:
-    app: services
-  name: services
-spec:
-  hostname: services
-  restartPolicy: Never
-
-  containers:
-  - name: jenkins
-    image: docker.io/jenkins/jenkins:latest
-    ports:
-      - containerPort: 8080
-      - containerPort: 50001
-    env:
-      - name: ACCEPT_EULA
-        value: "Y"
-      - name: JENKINS_SLAVE_AGENT_PORT
-        value: "50001"
-    volumeMounts:
-      - mountPath: /var/jenkins_home
-        name: jenkins-home-pvc
-
-  - name: gitea
-    image: docker.io/gitea/gitea:latest
-    ports:
-      - containerPort: 3000
-      - containerPort: 3222
-    env:
-      - name: USER_UID
-        value: "1000"
-      - name: USER_GID
-        value: "1000"
-      - name: APP_NAME
-        value: self-hosted
-      - name: REQUIRE_SIGNIN_VIEW
-        value: "false"
-    volumeMounts:
-      - mountPath: /data
-        name: gitea-pvc
-      - mountPath: /etc/localtime
-        name: etc-localtime
-        readOnly: true
-
-  - name: postgres-db
-    image: docker.io/library/postgres:latest
-    ports:
-      - containerPort: 5432
-    env:
-      - name: POSTGRES_USER
-        value: gitea
-      - name: POSTGRES_PASSWORD
-        value: gitea
-      - name: POSTGRES_DB
-        value: gitea
-    volumeMounts:
-      - mountPath: /var/lib/postgresql/data
-        name: postgres-pvc
-
-  - name: nexus
-    image: docker.io/sonatype/nexus3:latest
-    ports:
-      - containerPort: 8081
-    volumeMounts:
-      - mountPath: /nexus-data
-        name: nexus-data-pvc
-
-  volumes:
-  - name: jenkins-home-pvc
-    persistentVolumeClaim:
-      claimName: jenkins_home
-  - name: gitea-pvc
-    persistentVolumeClaim:
-      claimName: gitea
-  - name: postgres-pvc
-    persistentVolumeClaim:
-      claimName: postgres
-  - name: nexus-data-pvc
-    persistentVolumeClaim:
-      claimName: nexus-data
-  - name: etc-localtime
-    hostPath:
-      path: /etc/localtime
-      type: File
-```
-
-### Common kubectl one-liners
+### Context and namespace
 
 ```bash
-kubectl get pods -A                            # all pods, all namespaces
-kubectl get pods -n my-namespace -o wide       # with node/IP info
-kubectl describe pod my-pod -n my-namespace    # full detail
-kubectl logs my-pod -n my-namespace --follow   # stream logs
-kubectl exec -it my-pod -- /bin/bash           # interactive shell
+# Contexts
+kubectl config get-contexts
+kubectl config use-context aks-myapp-prod-admin
+kubectl config current-context
 
-kubectl apply -f manifest.yaml
+# Namespace shorthand (set default)
+kubectl config set-context --current --namespace=my-namespace
+
+# All namespaces flag
+kubectl get pods -A
+kubectl get pods --all-namespaces
+
+# kubens / kubectx (krew plugin)
+kubens my-namespace
+kubectx aks-prod
+```
+
+### Core resources — get, describe, delete
+
+```bash
+kubectl get pods          -n my-namespace -o wide
+kubectl get deployments   -n my-namespace
+kubectl get services      -n my-namespace
+kubectl get ingress        -n my-namespace
+kubectl get configmaps    -n my-namespace
+kubectl get secrets        -n my-namespace
+kubectl get pvc            -n my-namespace
+kubectl get nodes          -o wide
+kubectl get events         -n my-namespace --sort-by=.lastTimestamp
+
+# Describe (full detail + events)
+kubectl describe pod my-pod              -n my-namespace
+kubectl describe node my-node
+kubectl describe deployment my-app       -n my-namespace
+
+# Delete
+kubectl delete pod       my-pod          -n my-namespace
+kubectl delete pod       my-pod          -n my-namespace --grace-period=0 --force
+kubectl delete -f        manifest.yaml
+```
+
+### Logs and debugging
+
+```bash
+# Logs
+kubectl logs my-pod          -n my-namespace --follow --tail 100
+kubectl logs my-pod          -n my-namespace -c my-container   # multi-container pod
+kubectl logs -l app=my-app   -n my-namespace --follow           # label selector
+
+# Previous container (if crashed)
+kubectl logs my-pod -n my-namespace --previous
+
+# Exec
+kubectl exec -it my-pod -n my-namespace -- /bin/sh
+kubectl exec -it my-pod -n my-namespace -c my-container -- bash
+
+# Port forward
+kubectl port-forward pod/my-pod          8080:8080 -n my-namespace
+kubectl port-forward deployment/my-app   8080:8080 -n my-namespace
+kubectl port-forward svc/my-service      8080:80   -n my-namespace
+
+# Copy files
+kubectl cp my-pod:/tmp/debug.log ./debug.log -n my-namespace
+kubectl cp ./local-file my-pod:/tmp/local-file -n my-namespace
+
+# Ephemeral debug container (Kubernetes 1.23+)
+kubectl debug -it my-pod --image=busybox --target=my-container -n my-namespace
+
+# Node shell (via privileged debug pod)
+kubectl debug node/aks-nodepool1-abc123 -it --image=mcr.microsoft.com/cbl-mariner/busybox:2.0
+```
+
+### Apply and rollouts
+
+```bash
+# Apply / delete
+kubectl apply  -f manifest.yaml
+kubectl apply  -f ./manifests/         # directory
+kubectl apply  -k ./kustomize/         # kustomize
 kubectl delete -f manifest.yaml
-kubectl rollout restart deployment/my-app      # rolling restart
-kubectl rollout status deployment/my-app       # watch rollout
+
+# Diff before applying
+kubectl diff -f manifest.yaml
+
+# Rollouts
+kubectl rollout status  deployment/my-app -n my-namespace
+kubectl rollout history deployment/my-app -n my-namespace
+kubectl rollout undo    deployment/my-app -n my-namespace
+kubectl rollout undo    deployment/my-app --to-revision=3 -n my-namespace
+kubectl rollout restart deployment/my-app -n my-namespace   # rolling restart
+
+# Scale
+kubectl scale deployment my-app --replicas=5 -n my-namespace
+
+# Autoscale (HPA)
+kubectl autoscale deployment my-app --cpu-percent=70 --min=2 --max=10 -n my-namespace
+kubectl get hpa -n my-namespace
+```
+
+### ConfigMaps and Secrets
+
+```bash
+# ConfigMap from literal / file / directory
+kubectl create configmap app-config \
+  --from-literal=LOG_LEVEL=info \
+  --from-literal=PORT=8080
+
+kubectl create configmap nginx-conf --from-file=nginx.conf
+
+# Secret from literal (base64 encoded automatically)
+kubectl create secret generic db-creds \
+  --from-literal=username=app \
+  --from-literal=password=super-secret
+
+# Secret from file (e.g., TLS cert)
+kubectl create secret tls my-tls-secret \
+  --cert=tls.crt --key=tls.key
+
+# Docker registry secret (for private image pull)
+kubectl create secret docker-registry regcred \
+  --docker-server=myregistry.io \
+  --docker-username=myuser \
+  --docker-password="$REGISTRY_TOKEN"
+
+# Decode a secret
+kubectl get secret db-creds -n my-namespace -o jsonpath='{.data.password}' | base64 -d
+
+# Edit live
+kubectl edit configmap app-config -n my-namespace
+```
+
+### Namespaces and RBAC
+
+```bash
+# Namespaces
+kubectl create namespace my-namespace
+kubectl get namespace
+kubectl delete namespace my-namespace
+
+# Service account
+kubectl create serviceaccount my-sa -n my-namespace
+
+# Role and RoleBinding (namespace-scoped)
+kubectl create role pod-reader \
+  --verb=get,list,watch \
+  --resource=pods \
+  -n my-namespace
+
+kubectl create rolebinding read-pods \
+  --role=pod-reader \
+  --serviceaccount=my-namespace:my-sa \
+  -n my-namespace
+
+# ClusterRole and ClusterRoleBinding
+kubectl create clusterrole node-reader --verb=get,list,watch --resource=nodes
+kubectl create clusterrolebinding node-reader-binding \
+  --clusterrole=node-reader \
+  --serviceaccount=my-namespace:my-sa
+
+# Check permissions
+kubectl auth can-i list pods --as=system:serviceaccount:my-namespace:my-sa -n my-namespace
+kubectl auth can-i '*' '*' -n my-namespace    # is current user cluster-admin?
+```
+
+### Resource definitions (YAML patterns)
+
+```yaml
+# Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+  namespace: my-namespace
+  labels:
+    app: my-app
+    version: "1.2.3"
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: my-app
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge:       1
+  template:
+    metadata:
+      labels:
+        app: my-app
+    spec:
+      serviceAccountName: my-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser:    1000
+        fsGroup:      2000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: my-app
+          image: myregistry.io/my-app:1.2.3
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem:   true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu:    "100m"
+              memory: "128Mi"
+            limits:
+              cpu:    "500m"
+              memory: "512Mi"
+          envFrom:
+            - configMapRef:
+                name: app-config
+          env:
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db-creds
+                  key:  password
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds:       20
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds:       10
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      topologySpreadConstraints:
+        - maxSkew:           1
+          topologyKey:       kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: my-app
+```
+
+```yaml
+# Service
+apiVersion: v1
+kind: Service
+metadata:
+  name:      my-app
+  namespace: my-namespace
+spec:
+  selector:
+    app: my-app
+  ports:
+    - name:       http
+      port:       80
+      targetPort: 8080
+      protocol:   TCP
+  type: ClusterIP
+```
+
+```yaml
+# Ingress (nginx-ingress)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name:      my-app
+  namespace: my-namespace
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    cert-manager.io/cluster-issuer:             letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:       [myapp.example.com]
+      secretName:  myapp-tls
+  rules:
+    - host: myapp.example.com
+      http:
+        paths:
+          - path:     /
+            pathType: Prefix
+            backend:
+              service:
+                name: my-app
+                port:
+                  number: 80
+```
+
+```yaml
+# HorizontalPodAutoscaler (with custom metrics)
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name:      my-app
+  namespace: my-namespace
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind:       Deployment
+    name:       my-app
+  minReplicas: 2
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type:               Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type:          AverageValue
+          averageValue:  400Mi
+```
+
+```yaml
+# CronJob
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name:      db-backup
+  namespace: my-namespace
+spec:
+  schedule:          "0 2 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit:     1
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name:  backup
+              image: myregistry.io/db-backup:latest
+              env:
+                - name: DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: db-creds
+                      key:  password
+```
+
+```yaml
+# PersistentVolumeClaim
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name:      my-app-data
+  namespace: my-namespace
+spec:
+  accessModes:      [ReadWriteOnce]
+  storageClassName: managed-csi-premium
+  resources:
+    requests:
+      storage: 50Gi
+```
+
+```yaml
+# NetworkPolicy — default deny all ingress, allow only from same namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name:      default-deny-ingress
+  namespace: my-namespace
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name:      allow-same-namespace
+  namespace: my-namespace
+spec:
+  podSelector: {}
+  ingress:
+    - from:
+        - podSelector: {}
+```
+
+---
+
+## Helm
+
+### Installation and repo management
+
+```bash
+# Install Helm (Linux)
+curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+# Repos
+helm repo add stable       https://charts.helm.sh/stable
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+helm repo add cert-manager  https://charts.jetstack.io
+helm repo add bitnami       https://charts.bitnami.com/bitnami
+helm repo update
+
+helm repo list
+helm search repo nginx
+helm search hub  nginx     # Artifact Hub
+```
+
+### Install, upgrade, rollback
+
+```bash
+# Install
+helm install my-release ingress-nginx/ingress-nginx \
+  --namespace ingress-nginx \
+  --create-namespace \
+  --version 4.10.0 \
+  --values    values.yaml \
+  --set       controller.replicaCount=2
+
+# Upgrade (or install if missing)
+helm upgrade --install my-release ingress-nginx/ingress-nginx \
+  --namespace ingress-nginx \
+  --create-namespace \
+  --values    values.yaml \
+  --atomic \
+  --timeout   5m0s \
+  --wait
+
+# Diff before upgrade (requires helm-diff plugin)
+helm diff upgrade my-release ingress-nginx/ingress-nginx --values values.yaml
+
+# Status / history
+helm status   my-release -n ingress-nginx
+helm history  my-release -n ingress-nginx
+
+# Rollback
+helm rollback my-release 2 -n ingress-nginx
+
+# Uninstall
+helm uninstall my-release -n ingress-nginx
+
+# List all releases
+helm list -A
+helm list -n ingress-nginx
+
+# Show chart values / README
+helm show values  ingress-nginx/ingress-nginx
+helm show readme  ingress-nginx/ingress-nginx
+helm show chart   ingress-nginx/ingress-nginx
+```
+
+### Render templates (dry-run)
+
+```bash
+# Render to stdout
+helm template my-release ingress-nginx/ingress-nginx --values values.yaml
+
+# Render and apply (GitOps pattern)
+helm template my-release ./charts/my-app --values values.prod.yaml | kubectl apply -f -
+
+# Server-side dry-run
+helm upgrade --install my-release ./charts/my-app \
+  --values values.yaml \
+  --dry-run=server
+```
+
+### Writing a Helm chart
+
+```bash
+# Scaffold
+helm create my-chart
+# Structure:
+# my-chart/
+#   Chart.yaml
+#   values.yaml
+#   templates/
+#     deployment.yaml
+#     service.yaml
+#     ingress.yaml
+#     _helpers.tpl    ← named template definitions
+
+# Lint
+helm lint ./my-chart
+
+# Package
+helm package ./my-chart --version 1.2.3
+
+# Push to OCI registry (Helm 3.8+)
+helm push my-chart-1.2.3.tgz oci://myregistry.io/helm
+helm install my-release      oci://myregistry.io/helm/my-chart --version 1.2.3
+```
+
+```yaml
+# values.yaml
+replicaCount: 2
+image:
+  repository: myregistry.io/my-app
+  tag:        ""    # defaults to Chart.AppVersion
+  pullPolicy: IfNotPresent
+resources:
+  limits:
+    cpu:    500m
+    memory: 512Mi
+  requests:
+    cpu:    100m
+    memory: 128Mi
+ingress:
+  enabled: true
+  host:    myapp.example.com
+```
+
+```yaml
+# templates/deployment.yaml (excerpt)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "my-chart.fullname" . }}
+  labels:
+    {{- include "my-chart.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  template:
+    spec:
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+```
+
+### Useful Helm plugins
+
+```bash
+helm plugin install https://github.com/databus23/helm-diff
+helm plugin install https://github.com/jkroepke/helm-secrets
+helm plugin install https://github.com/quintush/helm-unittest
+```
+
+---
+
+## Container Security
+
+### Pod Security Standards
+
+```yaml
+# Apply Pod Security Admission to a namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: my-namespace
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn:    restricted
+    pod-security.kubernetes.io/audit:   restricted
+```
+
+### Minimal secure pod spec
+
+```yaml
+spec:
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot:   true
+    runAsUser:      65534    # nobody
+    runAsGroup:     65534
+    fsGroup:        65534
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: app
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem:   true
+        capabilities:
+          drop: [ALL]
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+  volumes:
+    - name: tmp
+      emptyDir: {}
+```
+
+### Image scanning
+
+```bash
+# Trivy (most common)
+trivy image myregistry.io/my-app:latest
+trivy image --severity HIGH,CRITICAL myregistry.io/my-app:latest
+trivy image --ignore-unfixed myregistry.io/my-app:latest
+trivy fs --scanners vuln,config .           # scan local filesystem + Dockerfile
+
+# Grype
+grype myregistry.io/my-app:latest
+grype dir:.
+
+# Docker Scout
+docker scout cves myregistry.io/my-app:latest
+docker scout compare myregistry.io/my-app:latest myregistry.io/my-app:1.2.2
+
+# Syft (SBOM generation)
+syft myregistry.io/my-app:latest -o spdx-json > sbom.spdx.json
+syft myregistry.io/my-app:latest -o cyclonedx-json > sbom.cyclonedx.json
+```
+
+### OPA / Gatekeeper policies
+
+```yaml
+# Constraint template — deny latest tag
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8snolatesttag
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sNoLatestTag
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8snolatesttag
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          endswith(container.image, ":latest")
+          msg := sprintf("Container '%v' uses :latest tag", [container.name])
+        }
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sNoLatestTag
+metadata:
+  name: no-latest-tag
+spec:
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Pod"]
+    namespaces: ["production"]
+```
+
+---
+
+## AKS-Specific Patterns
+
+### Workload identity for pods
+
+```yaml
+# Service account annotated with UAMI client ID
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name:      my-sa
+  namespace: my-namespace
+  annotations:
+    azure.workload.identity/client-id: "<UAMI-CLIENT-ID>"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+  namespace: my-namespace
+spec:
+  template:
+    metadata:
+      labels:
+        azure.workload.identity/use: "true"   # inject OIDC token
+    spec:
+      serviceAccountName: my-sa
+      containers:
+        - name: my-app
+          image: myregistry.io/my-app:latest
+          env:
+            - name: AZURE_CLIENT_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['azure.workload.identity/client-id']
+```
+
+### Cluster access entries (replaces aws-auth ConfigMap — AKS equivalent: Azure RBAC)
+
+```bash
+# Enable Azure RBAC for Kubernetes
+az aks update -n aks-myapp-prod -g rg-myapp-prod-uksouth --enable-azure-rbac
+
+# Grant cluster access to a user
+az role assignment create \
+  --role "Azure Kubernetes Service Cluster User Role" \
+  --assignee user@example.com \
+  --scope "/subscriptions/$SUB/resourceGroups/rg-myapp-prod-uksouth/providers/Microsoft.ContainerService/managedClusters/aks-myapp-prod"
+
+# Grant admin
+az role assignment create \
+  --role "Azure Kubernetes Service RBAC Cluster Admin" \
+  --assignee user@example.com \
+  --scope "..."
+```
+
+---
+
+## Useful One-Liners
+
+```bash
+# Delete all evicted pods across all namespaces
+kubectl get pods -A | grep Evicted | awk '{print $1, $2}' | \
+  xargs -n2 kubectl delete pod -n
+
+# Force delete all pods in Terminating state
+kubectl get pods -A | grep Terminating | awk '{print $1, $2}' | \
+  xargs -n2 bash -c 'kubectl delete pod -n $0 $1 --grace-period=0 --force'
+
+# Get resource requests vs limits for all pods in a namespace
+kubectl get pods -n my-namespace -o json | jq -r '
+  .items[] | .metadata.name as $name |
+  .spec.containers[] |
+  [$name, .name, (.resources.requests.cpu // "none"), (.resources.limits.cpu // "none")] |
+  @tsv'
+
+# List all images running in a namespace
+kubectl get pods -n my-namespace -o jsonpath='{range .items[*]}{range .spec.containers[*]}{.image}{"\n"}{end}{end}' | sort -u
+
+# Watch pods with auto-refresh
+watch -n2 kubectl get pods -n my-namespace
+
+# Get all non-running pods
+kubectl get pods -A --field-selector=status.phase!=Running
+
+# Drain a node (evicts pods gracefully)
+kubectl drain my-node --ignore-daemonsets --delete-emptydir-data --force
+kubectl uncordon my-node
+
+# Top (resource usage — requires metrics-server)
+kubectl top pods  -n my-namespace --sort-by=memory
+kubectl top nodes
+
+# Apply a patch without editing YAML
+kubectl patch deployment my-app -n my-namespace \
+  --type=json \
+  -p='[{"op":"replace","path":"/spec/replicas","value":5}]'
+
+# Annotate / label
+kubectl label   pod my-pod app=my-app -n my-namespace
+kubectl annotate pod my-pod my-annotation=value -n my-namespace
 ```

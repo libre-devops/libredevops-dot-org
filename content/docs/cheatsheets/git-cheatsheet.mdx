@@ -344,7 +344,7 @@ Uses the `az` CLI with the `azure-devops` extension. The script logs in if neede
 $Org  = "https://dev.azure.com/your_org"
 $Proj = "your_project"
 
-if ($Org -notmatch '^https?://dev.azure.com/\w+') {
+if ($Org -notmatch '^https?://dev\.azure\.com/[\w-]+') {
     $Org = "https://dev.azure.com/$Org"
 }
 
@@ -397,6 +397,6 @@ git log --all --full-history -- "**/my-file.ts"
 
 ```bash
 git cherry-pick abc1234             # apply a single commit to the current branch
-git cherry-pick abc1234..def5678    # apply a range of commits
+git cherry-pick abc1234^..def5678   # apply a range inclusive of abc1234 through def5678
 git cherry-pick --no-commit abc1234 # apply changes without committing
 ```

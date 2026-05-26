@@ -17,7 +17,7 @@ Kusto Query Language (KQL) is used across Microsoft Sentinel, Defender XDR, Azur
 TableName
 | where TimeGenerated > ago(24h)
 | where ColumnName == "value"
-| project Column1, Column2, Column3
+| project TimeGenerated, Column1, Column2, Column3
 | sort by TimeGenerated desc
 | take 100
 ```
@@ -238,7 +238,7 @@ DeviceNetworkEvents
     Count    = count()
   by DeviceName, RemoteIP
 | where StdDev > 0
-| extend ZScore = (AvgBytes - StdDev) / StdDev
+| extend CoV = StdDev / AvgBytes  // coefficient of variation — high = erratic, low = regular
 ```
 
 ### Count distinct (approximate for large datasets)
@@ -464,13 +464,20 @@ DeviceNetworkEvents
 DeviceNetworkEvents
 | where TimeGenerated > ago(24h)
 | where RemoteIPType == "Public"
+| sort by DeviceName asc, RemoteIP asc, RemotePort asc, TimeGenerated asc
+| serialize
+| extend Interval   = TimeGenerated - prev(TimeGenerated),
+         PrevDevice = prev(DeviceName),
+         PrevIP     = prev(RemoteIP),
+         PrevPort   = prev(RemotePort)
+| where PrevDevice == DeviceName and PrevIP == RemoteIP and PrevPort == RemotePort
 | summarize
     ConnectionCount = count(),
-    AvgInterval = avg(totimespan(TimeGenerated - prev(TimeGenerated))),
-    StdDevInterval = stdev(totimespan(TimeGenerated - prev(TimeGenerated)))
+    AvgInterval     = avg(Interval),
+    StdDevInterval  = stdev(Interval / 1s)  // stdev of timespan returns real (seconds)
   by DeviceName, RemoteIP, RemotePort
 | where ConnectionCount > 20
-| where StdDevInterval < 30s  // very regular = suspicious
+| where StdDevInterval < 30  // very regular = suspicious (threshold in seconds)
 ```
 
 ### DNS over HTTPS / large DNS responses (tunnelling)
@@ -561,10 +568,10 @@ SigninLogs
 ### MFA fatigue — many MFA prompts in a short period
 
 ```kql
-AADNonInteractiveUserSignInLogs
+SigninLogs
 | where TimeGenerated > ago(1h)
 | where AuthenticationRequirement == "multiFactorAuthentication"
-| where ResultType != "0"
+| where ResultType in ("50074", "50076", "500121")  // MFA denied or timed out
 | summarize MFADenials = count() by UserPrincipalName, IPAddress
 | where MFADenials > 10
 ```
@@ -691,7 +698,7 @@ SecurityIncident
 | where TimeGenerated > ago(7d)
 | where Status == "New"
 | where Severity in ("High", "Medium")
-| where isnull(Owner) or Owner == ""
+| where isnull(Owner) or isempty(tostring(Owner.assignedTo))
 | project TimeGenerated, Title, Severity, AlertIds
 ```
 
@@ -712,7 +719,7 @@ SecurityAlert
 ```kql
 SecurityAlert
 | where TimeGenerated > ago(30d)
-| summarize Count = count() by bin(TimeGenerated, 1d), SystemAlertId, ProductName
+| summarize Count = count() by bin(TimeGenerated, 1d), ProductName
 | render timechart
 ```
 
@@ -798,7 +805,7 @@ let BlockedDomains = externaldata(Domain: string)
     with (format="txt", ignoreFirstRecord=false);
 DeviceNetworkEvents
 | where TimeGenerated > ago(1d)
-| join kind=inner BlockedDomains on $left.RemoteUrl contains $right.Domain
+| where RemoteUrl has_any (BlockedDomains)
 ```
 
 ### Watchlist lookup (Sentinel)

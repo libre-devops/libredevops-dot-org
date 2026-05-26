@@ -1,167 +1,1137 @@
 ---
 title: PowerShell Cheatsheet
-description: PowerShell strict mode, Azure auth helpers, Terraform tooling functions, module management, and Sentinel watchlist export.
+description: Advanced PowerShell 7+ patterns for Azure, DevOps, scripting, Pester testing, REST APIs, and automation.
 ---
 
 # PowerShell Cheat Sheet
 
-Practical PowerShell snippets for Azure, Terraform, and general scripting. Most examples work cross-platform on PowerShell 7+.
+PowerShell 7+ patterns for Azure automation, DevOps pipelines, scripting, and general systems administration. All examples are cross-platform unless noted.
 
 ---
 
 ## Script Boilerplate
 
-### Strict mode and debug tracing
+### Strict mode and error preferences
 
 ```powershell
 #!/usr/bin/env pwsh
-Set-StrictMode -Version 2
+#Requires -Version 7.2
+#Requires -Modules @{ ModuleName = 'Az'; ModuleVersion = '12.0.0' }
+
+Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-# Set-PSDebug -Trace 2   # uncomment for line-by-line trace
+$WarningPreference     = 'Continue'
+$VerbosePreference     = 'SilentlyContinue'
+# Set-PSDebug -Trace 2   # line-by-line trace for debugging
 ```
 
-### Version and module constraints
-
-Prevent the script from running if requirements aren't met.
+### Standard script parameter block
 
 ```powershell
-#Requires -Version 7.2
-#Requires -Modules @{ ModuleName="Az"; ModuleVersion="7.5.0" }
-#Requires -Modules @{ ModuleName="Microsoft.Graph"; ModuleVersion="1.9.6" }
+[CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
+param (
+    [Parameter(Mandatory, HelpMessage = 'Azure subscription ID')]
+    [ValidatePattern('^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$')]
+    [string]$SubscriptionId,
+
+    [Parameter(Mandatory)]
+    [ValidateNotNullOrEmpty()]
+    [string]$ResourceGroupName,
+
+    [Parameter()]
+    [ValidateSet('dev', 'staging', 'prod')]
+    [string]$Environment = 'dev',
+
+    [Parameter()]
+    [switch]$Force
+)
+```
+
+### Trap and cleanup pattern
+
+```powershell
+$script:CleanupActions = [System.Collections.Generic.List[scriptblock]]::new()
+
+function Register-Cleanup ([scriptblock]$Action) {
+    $script:CleanupActions.Add($Action)
+}
+
+trap {
+    Write-Error "Unhandled error: $_"
+    foreach ($action in $script:CleanupActions) { & $action }
+    exit 1
+}
+```
+
+---
+
+## Core Language
+
+### String formatting
+
+```powershell
+$name    = 'World'
+$count   = 42
+$pi      = 3.14159
+
+# f-string style (PowerShell 7+, not real f-strings — just expression interpolation)
+"Hello, $name! Count: $count"
+"Pi is $($pi.ToString('F2'))"
+
+# -f operator (format string)
+"Hello, {0}! Count: {1:N0}" -f $name, $count
+"Hex: 0x{0:X4}" -f 255
+
+# Here-string (preserves whitespace and newlines)
+$json = @"
+{
+  "name": "$name",
+  "count": $count
+}
+"@
+
+# Single-quoted here-string (no interpolation)
+$literal = @'
+No $interpolation here
+'@
+```
+
+### Null coalescing and ternary
+
+```powershell
+# Null-coalescing (PS 7+)
+$value = $env:MY_VAR ?? 'default'
+
+# Null-coalescing assignment
+$config ??= [hashtable]::new()
+
+# Ternary
+$label = ($count -gt 10) ? 'many' : 'few'
+
+# Null conditional member access
+$length = $someString?.Length
+$item   = $array?[0]
+```
+
+### Collections
+
+```powershell
+# Typed arrays
+[int[]]$numbers  = 1, 2, 3, 4, 5
+[string[]]$names = @('Alice', 'Bob', 'Charlie')
+
+# ArrayList (mutable)
+$list = [System.Collections.Generic.List[string]]::new()
+$list.Add('item1')
+$list.AddRange([string[]]@('item2', 'item3'))
+$list.Remove('item1')
+
+# Hashtable
+$map = @{
+    Key1 = 'Value1'
+    Key2 = 42
+}
+$map['Key3'] = 'added'
+$map.Remove('Key1')
+
+# Ordered hashtable (preserves insertion order)
+$ordered = [ordered]@{
+    First  = 1
+    Second = 2
+    Third  = 3
+}
+
+# Dictionary
+$dict = [System.Collections.Generic.Dictionary[string, int]]::new()
+$dict['a'] = 1
+$dict.TryGetValue('b', [ref]$null)
+```
+
+### PSCustomObject
+
+```powershell
+# Literal
+$obj = [PSCustomObject]@{
+    Name   = 'myresource'
+    Region = 'uksouth'
+    Tags   = @{ env = 'prod' }
+}
+
+# Add members dynamically
+$obj | Add-Member -NotePropertyName 'Id' -NotePropertyValue 'abc123'
+$obj | Add-Member -MemberType ScriptProperty -Name 'Upper' -Value { $this.Name.ToUpper() }
+
+# From hashtable list
+$rows = @(
+    @{ Name = 'rg-prod'; Location = 'uksouth' }
+    @{ Name = 'rg-dev';  Location = 'ukwest' }
+) | ForEach-Object { [PSCustomObject]$_ }
+```
+
+### Pipeline patterns
+
+```powershell
+# Where-Object short forms (PS 3+)
+Get-Process | Where-Object CPU -gt 100
+Get-Process | Where-Object { $_.CPU -gt 100 -and $_.Name -ne 'Idle' }
+
+# ForEach-Object
+1..5 | ForEach-Object { $_ * 2 }
+
+# Select-Object
+Get-Process | Select-Object Name, CPU, @{ Name = 'MemMB'; Expression = { [math]::Round($_.WorkingSet / 1MB, 1) } }
+
+# Group-Object / Sort-Object
+Get-Process | Group-Object -Property Name | Sort-Object Count -Descending | Select-Object -First 10
+
+# Measure-Object
+1..100 | Measure-Object -Sum -Average -Maximum -Minimum
+
+# Parallel pipeline (PS 7+)
+1..20 | ForEach-Object -Parallel {
+    Start-Sleep -Milliseconds (Get-Random -Maximum 500)
+    "Done: $_"
+} -ThrottleLimit 5
+```
+
+### Error handling
+
+```powershell
+try {
+    $result = Get-AzResourceGroup -Name 'non-existent' -ErrorAction Stop
+}
+catch {
+    if ($_.Exception.Message -match 'ResourceGroupNotFound|was not found') {
+        Write-Warning "Resource group not found: $($_.Exception.Message)"
+    } else { throw }
+}
+catch {
+    Write-Error "Unexpected error [$($_.Exception.GetType().Name)]: $_"
+    throw
+}
+finally {
+    Write-Verbose 'Cleanup complete'
+}
+
+# Non-terminating error to terminating
+Get-Item 'missing.txt' -ErrorAction Stop
+
+# Capture non-terminating errors
+$errs = @()
+Get-ChildItem 'C:\windows\system32' -Recurse -ErrorAction SilentlyContinue -ErrorVariable errs
+Write-Warning "$($errs.Count) access errors suppressed"
+
+# $? and $LASTEXITCODE
+git status
+if (-not $?) { throw "git exited with code $LASTEXITCODE" }
+```
+
+### Switch statement
+
+```powershell
+switch ($Environment) {
+    'prod'    { $sku = 'Standard_D4s_v5'; break }
+    'staging' { $sku = 'Standard_D2s_v5'; break }
+    default   { $sku = 'Standard_B2ms' }
+}
+
+# -Regex and -Wildcard switches
+switch -Regex ($message) {
+    '^ERROR'   { Write-Error $_; break }
+    '^WARN'    { Write-Warning $_; break }
+    '^INFO'    { Write-Verbose $_ }
+}
+
+# Switch on type
+switch ($value) {
+    { $_ -is [int] }    { "Integer: $_" }
+    { $_ -is [string] } { "String: $_" }
+}
+```
+
+### Regular expressions
+
+```powershell
+# Match and capture
+if ('rg-myapp-prod-uksouth' -match '^rg-(?<app>[^-]+)-(?<env>[^-]+)-(?<region>.+)$') {
+    $Matches['app']    # myapp
+    $Matches['env']    # prod
+    $Matches['region'] # uksouth
+}
+
+# Replace
+'hello-world_foo' -replace '[-_]', ' '
+
+# Select-String (grep)
+Get-Content 'deploy.log' | Select-String -Pattern 'ERROR|FATAL' -CaseSensitive
+
+# Extract all matches
+[regex]::Matches('ip:10.0.0.1 ip:192.168.1.1', '\d+\.\d+\.\d+\.\d+') |
+    ForEach-Object { $_.Value }
+```
+
+---
+
+## Advanced Functions
+
+### Full advanced function template
+
+```powershell
+function Invoke-MyOperation {
+    [CmdletBinding(SupportsShouldProcess, DefaultParameterSetName = 'ByName')]
+    [OutputType([PSCustomObject])]
+    param (
+        [Parameter(Mandatory, ParameterSetName = 'ByName', ValueFromPipelineByPropertyName)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Name,
+
+        [Parameter(Mandatory, ParameterSetName = 'ById')]
+        [ValidatePattern('^\d+$')]
+        [string]$Id,
+
+        [Parameter()]
+        [ValidateRange(1, 100)]
+        [int]$Retries = 3,
+
+        [Parameter()]
+        [ValidateSet('JSON', 'CSV', 'Table')]
+        [string]$OutputFormat = 'Table',
+
+        [Parameter(ValueFromPipeline)]
+        [object[]]$InputObject
+    )
+
+    begin {
+        Write-Verbose "Starting $($MyInvocation.MyCommand.Name)"
+        $results = [System.Collections.Generic.List[PSCustomObject]]::new()
+    }
+
+    process {
+        foreach ($item in $InputObject) {
+            if ($PSCmdlet.ShouldProcess($item, 'Process')) {
+                $results.Add([PSCustomObject]@{ Item = $item; Status = 'OK' })
+            }
+        }
+    }
+
+    end {
+        switch ($OutputFormat) {
+            'JSON'  { $results | ConvertTo-Json -Depth 5 }
+            'CSV'   { $results | Export-Csv -Path 'output.csv' -NoTypeInformation }
+            default { $results | Format-Table -AutoSize }
+        }
+    }
+}
+```
+
+### Retry helper
+
+```powershell
+function Invoke-WithRetry {
+    param (
+        [Parameter(Mandatory)][scriptblock]$ScriptBlock,
+        [int]$MaxRetries   = 3,
+        [int]$DelaySeconds = 5
+    )
+    $attempt = 0
+    while ($true) {
+        try {
+            return & $ScriptBlock
+        }
+        catch {
+            $attempt++
+            if ($attempt -ge $MaxRetries) { throw }
+            Write-Warning "Attempt $attempt failed: $_. Retrying in ${DelaySeconds}s..."
+            Start-Sleep -Seconds $DelaySeconds
+        }
+    }
+}
+
+# Usage
+Invoke-WithRetry -MaxRetries 5 -DelaySeconds 10 -ScriptBlock {
+    Invoke-RestMethod -Uri 'https://api.example.com/data' -TimeoutSec 30
+}
+```
+
+---
+
+## File & I/O
+
+### CSV and JSON
+
+```powershell
+# CSV round-trip
+$data = Import-Csv -Path 'input.csv' -Delimiter ','
+$data | Where-Object { $_.Status -eq 'Active' } |
+    Select-Object Name, Email |
+    Export-Csv -Path 'active.csv' -NoTypeInformation -Encoding UTF8
+
+# JSON
+$json = Get-Content 'config.json' -Raw | ConvertFrom-Json
+$json.settings.timeout = 60
+$json | ConvertTo-Json -Depth 10 | Set-Content 'config.json' -Encoding UTF8
+
+# Pretty-print arbitrary JSON string
+'{"a":1,"b":2}' | ConvertFrom-Json | ConvertTo-Json
+```
+
+### Path manipulation
+
+```powershell
+# Join paths safely (handles separators)
+$config = Join-Path $PSScriptRoot 'config' 'app.json'
+
+# Resolve (must exist)
+Resolve-Path '~/Documents'
+
+# Test existence
+Test-Path $config -PathType Leaf
+Test-Path (Split-Path $config) -PathType Container
+
+# Temp file
+$tmp = [System.IO.Path]::GetTempFileName()
+try {
+    # use $tmp
+} finally {
+    Remove-Item $tmp -ErrorAction SilentlyContinue
+}
+
+# Enumerate recursively
+Get-ChildItem -Path '.' -Recurse -Filter '*.tf' -File |
+    Where-Object { $_.Length -gt 10KB }
+```
+
+### Compression
+
+```powershell
+# Create zip
+Compress-Archive -Path 'dist/*' -DestinationPath 'release.zip' -Force
+
+# Extract zip
+Expand-Archive -Path 'release.zip' -DestinationPath './extracted' -Force
+
+# .NET for streaming (large files)
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+[System.IO.Compression.ZipFile]::CreateFromDirectory('./dist', 'release.zip')
+```
+
+---
+
+## REST APIs
+
+### Invoke-RestMethod patterns
+
+```powershell
+# GET with headers and query params
+$response = Invoke-RestMethod `
+    -Uri    'https://api.github.com/repos/owner/repo/releases' `
+    -Method GET `
+    -Headers @{
+        Authorization = "Bearer $env:GITHUB_TOKEN"
+        Accept        = 'application/vnd.github+json'
+    } `
+    -TimeoutSec 30
+
+# POST JSON body
+$body = @{ name = 'new-branch'; sha = 'abc123' } | ConvertTo-Json
+Invoke-RestMethod `
+    -Uri         'https://api.github.com/repos/owner/repo/git/refs' `
+    -Method      POST `
+    -Headers     @{ Authorization = "Bearer $env:GITHUB_TOKEN" } `
+    -Body        $body `
+    -ContentType 'application/json'
+
+# Handle pagination (Link header)
+function Get-AllPages {
+    param ([string]$Url, [hashtable]$Headers)
+    do {
+        $response = Invoke-WebRequest -Uri $Url -Headers $Headers
+        $Url      = $null
+        if ($response.Headers['Link'] -match '<([^>]+)>;\s*rel="next"') {
+            $Url = $Matches[1]
+        }
+        $response.Content | ConvertFrom-Json | Select-Object -ExpandProperty items
+    } while ($Url)
+}
+```
+
+### Invoke-AzRestMethod (Azure Resource Manager)
+
+```powershell
+# Direct ARM call — useful for preview APIs or operations without cmdlets
+function Invoke-ArmApi {
+    param (
+        [string]$Method = 'GET',
+        [Parameter(Mandatory)][string]$ResourceId,
+        [string]$ApiVersion = '2023-07-01',
+        [object]$Body
+    )
+    $uri = "https://management.azure.com${ResourceId}?api-version=${ApiVersion}"
+    $params = @{ Method = $Method; Uri = $uri }
+    if ($Body) { $params['Payload'] = ($Body | ConvertTo-Json -Depth 10) }
+    (Invoke-AzRestMethod @params).Content | ConvertFrom-Json
+}
+
+# Get resource locks
+Invoke-ArmApi -ResourceId "/subscriptions/$subId/resourceGroups/$rgName/providers/Microsoft.Authorization/locks" -ApiVersion '2016-09-01'
+```
+
+---
+
+## Jobs & Parallelism
+
+### Start-ThreadJob (parallel, in-process)
+
+```powershell
+# Requires: Install-Module ThreadJob (built-in PS 7+)
+$jobs = 'rg-dev', 'rg-staging', 'rg-prod' | ForEach-Object {
+    $rg = $_
+    Start-ThreadJob -ScriptBlock {
+        param($Name)
+        Get-AzResourceGroup -Name $Name | Select-Object ResourceGroupName, Location, ProvisioningState
+    } -ArgumentList $rg
+}
+
+$results = $jobs | Wait-Job | Receive-Job
+$jobs    | Remove-Job
+$results | Format-Table
+```
+
+### Background jobs
+
+```powershell
+$job = Start-Job -ScriptBlock {
+    param($Uri)
+    Invoke-RestMethod $Uri
+} -ArgumentList 'https://api.example.com/slow-endpoint'
+
+# Poll
+while ($job.State -eq 'Running') {
+    Write-Host "Waiting..." -NoNewline
+    Start-Sleep -Seconds 2
+}
+
+$result = Receive-Job $job -ErrorAction Stop
+Remove-Job $job
+```
+
+### ForEach-Object -Parallel
+
+```powershell
+$subscriptions = Get-AzSubscription
+
+$report = $subscriptions | ForEach-Object -Parallel {
+    Import-Module Az.Resources -ErrorAction Stop
+    Set-AzContext -SubscriptionId $_.Id | Out-Null
+    $rgs = Get-AzResourceGroup
+    [PSCustomObject]@{
+        Subscription = $_.Name
+        RGCount      = $rgs.Count
+    }
+} -ThrottleLimit 10 -TimeoutSeconds 120
+
+$report | Sort-Object RGCount -Descending | Format-Table
 ```
 
 ---
 
 ## Azure Authentication
 
-### Connect with Service Principal (client secret)
+### Service principal (client secret)
 
 ```powershell
-function Connect-AzAccountWithServicePrincipal {
+function Connect-AzSP {
     param (
         [Parameter(Mandatory)][string]$ApplicationId,
         [Parameter(Mandatory)][string]$TenantId,
-        [Parameter(Mandatory)][string]$Secret,
+        [Parameter(Mandatory)][string]$ClientSecret,
         [string]$SubscriptionId
     )
-
-    $SecureSecret = $Secret | ConvertTo-SecureString -AsPlainText -Force
-    $Credential   = New-Object System.Management.Automation.PSCredential($ApplicationId, $SecureSecret)
-
-    Connect-AzAccount -ServicePrincipal -Credential $Credential -Tenant $TenantId -ErrorAction Stop
-
-    if (-not [string]::IsNullOrEmpty($SubscriptionId)) {
-        Set-AzContext -SubscriptionId $SubscriptionId
-    }
-
-    Write-Host "Logged in to Azure." -ForegroundColor Cyan
+    $cred = [System.Management.Automation.PSCredential]::new(
+        $ApplicationId,
+        ($ClientSecret | ConvertTo-SecureString -AsPlainText -Force)
+    )
+    Connect-AzAccount -ServicePrincipal -Credential $cred -Tenant $TenantId -ErrorAction Stop
+    if ($SubscriptionId) { Set-AzContext -SubscriptionId $SubscriptionId | Out-Null }
 }
 ```
 
-### Register a resource provider if not already registered
-
-Some resource providers aren't registered by default on new subscriptions. This helper blocks until registration completes.
+### Managed identity (IMDS / workload identity)
 
 ```powershell
-function Register-ResourceProviderIfNecessary {
-    param ([Parameter(Mandatory)][string]$ProviderNamespace)
+# System-assigned MI (no credentials needed)
+Connect-AzAccount -Identity
 
-    $provider = Get-AzResourceProvider -ProviderNamespace $ProviderNamespace
-
-    if ($provider.RegistrationState -ne "Registered") {
-        Write-Host "Registering '$ProviderNamespace'..." -ForegroundColor Yellow
-        Register-AzResourceProvider -ProviderNamespace $ProviderNamespace | Out-Null
-
-        do {
-            Start-Sleep -Seconds 10
-            $provider = Get-AzResourceProvider -ProviderNamespace $ProviderNamespace
-        } while ($provider.RegistrationState -ne "Registered")
-
-        Write-Host "'$ProviderNamespace' registered." -ForegroundColor Green
-    } else {
-        Write-Host "'$ProviderNamespace' already registered." -ForegroundColor Green
-    }
-}
+# User-assigned MI
+Connect-AzAccount -Identity -AccountId '<client-id-of-uami>'
 ```
 
-### Convert a string to SecureString
-
-Required when passing secrets to Azure APIs that expect `SecureString`.
+### Federated / OIDC (GitHub Actions)
 
 ```powershell
-$SubId        = $(Get-AzContext | Select-Object -ExpandProperty Subscription)
-$SecureSubId  = ConvertTo-SecureString "$SubId" -AsPlainText -Force
+# In a GitHub Actions workflow, ACTIONS_ID_TOKEN_REQUEST_URL and ACTIONS_ID_TOKEN_REQUEST_TOKEN are set
+$token = (Invoke-RestMethod `
+    -Uri     "$env:ACTIONS_ID_TOKEN_REQUEST_URL&audience=api://AzureADTokenExchange" `
+    -Headers @{ Authorization = "Bearer $env:ACTIONS_ID_TOKEN_REQUEST_TOKEN" }
+).value
+
+Connect-AzAccount `
+    -ApplicationId $env:AZURE_CLIENT_ID `
+    -TenantId      $env:AZURE_TENANT_ID `
+    -FederatedToken $token
+```
+
+### Switch subscription context
+
+```powershell
+# List all subscriptions
+Get-AzSubscription | Format-Table Name, Id, State
+
+# Set by name or ID
+Set-AzContext -SubscriptionName 'Production'
+Set-AzContext -SubscriptionId  '00000000-0000-0000-0000-000000000000'
+
+# Save and restore context
+$ctx = Get-AzContext
+# ... do stuff on another subscription ...
+Set-AzContext -Context $ctx
 ```
 
 ---
 
-## Terraform Helpers
+## Azure Resources
 
-### `tfbuild` and `tfdestroy` profile functions
-
-Add these to your `$PROFILE` to run `Run-AzTerraform.ps1` from any module directory with sensible defaults. Override any parameter at the call site.
+### Resource groups and tags
 
 ```powershell
-function tfbuild {
-    param(
-        [string]$TerraformCodeLocation     = 'examples',
-        [string]$TerraformWorkspace        = 'dev',
-        [string]$TerraformStackToRunJson   = '["module-development"]',
-        [string]$RunTerraformInit          = 'true',
-        [string]$RunTerraformValidate      = 'true',
-        [string]$RunTerraformPlan          = 'true',
-        [string]$RunTerraformPlanDestroy   = 'false',
-        [string]$RunTerraformDestroy       = 'false',
-        [string]$RunTerraformApply         = 'true',
-        [string]$TerraformInitExtraArgsJson = '["-reconfigure","-upgrade"]',
-        [string]$DebugMode                 = 'false',
-        [string]$InstallCheckov            = 'false'
-    )
-    $wd = $(Get-Location).Path
-    & pwsh -File "$wd\Run-AzTerraform.ps1" `
-        -TerraformCodeLocation    $TerraformCodeLocation `
-        -TerraformWorkspace       $TerraformWorkspace `
-        -TerraformStackToRunJson  $TerraformStackToRunJson `
-        -RunTerraformInit         $RunTerraformInit `
-        -RunTerraformValidate     $RunTerraformValidate `
-        -RunTerraformPlan         $RunTerraformPlan `
-        -RunTerraformPlanDestroy  $RunTerraformPlanDestroy `
-        -RunTerraformDestroy      $RunTerraformDestroy `
-        -RunTerraformApply        $RunTerraformApply `
-        -TerraformInitExtraArgsJson $TerraformInitExtraArgsJson `
-        -DebugMode                $DebugMode `
-        -InstallCheckov           $InstallCheckov
+# Create RG
+New-AzResourceGroup -Name 'rg-myapp-prod-uksouth' -Location 'uksouth' -Tag @{
+    Environment = 'prod'
+    Owner       = 'platform-team'
+    CostCentre  = 'CC-1234'
 }
 
-function tfdestroy {
-    param(
-        [string]$TerraformCodeLocation     = 'examples',
-        [string]$TerraformWorkspace        = 'dev',
-        [string]$TerraformStackToRunJson   = '["module-development"]',
-        [string]$RunTerraformInit          = 'true',
-        [string]$RunTerraformValidate      = 'true',
-        [string]$RunTerraformPlan          = 'false',
-        [string]$RunTerraformPlanDestroy   = 'true',
-        [string]$RunTerraformDestroy       = 'true',
-        [string]$RunTerraformApply         = 'false',
-        [string]$TerraformInitExtraArgsJson = '["-reconfigure","-upgrade"]',
-        [string]$DebugMode                 = 'false',
-        [string]$InstallCheckov            = 'false'
+# Update tags (merge, don't overwrite)
+$rg   = Get-AzResourceGroup -Name 'rg-myapp-prod-uksouth'
+$tags = $rg.Tags + @{ NewTag = 'value' }
+Set-AzResourceGroup -Name $rg.ResourceGroupName -Tag $tags
+
+# Tag all resources in an RG
+Get-AzResource -ResourceGroupName 'rg-myapp-prod-uksouth' | ForEach-Object {
+    Update-AzTag -ResourceId $_.Id -Tag @{ Environment = 'prod' } -Operation Merge
+}
+
+# Find resources missing a tag
+Get-AzResource | Where-Object { -not $_.Tags.ContainsKey('Environment') } |
+    Select-Object Name, ResourceType, ResourceGroupName
+```
+
+### Key Vault secrets
+
+```powershell
+# Set secret
+$secretValue = ConvertTo-SecureString 'my-super-secret' -AsPlainText -Force
+Set-AzKeyVaultSecret -VaultName 'kv-myapp-prod' -Name 'db-password' -SecretValue $secretValue
+
+# Get secret (as plain text — only in memory)
+$secret = (Get-AzKeyVaultSecret -VaultName 'kv-myapp-prod' -Name 'db-password' -AsPlainText)
+
+# List secrets
+Get-AzKeyVaultSecret -VaultName 'kv-myapp-prod' | Select-Object Name, Enabled, Expires
+
+# Rotate — create new version
+$newVal = ConvertTo-SecureString (New-Guid).Guid -AsPlainText -Force
+Set-AzKeyVaultSecret -VaultName 'kv-myapp-prod' -Name 'api-key' -SecretValue $newVal
+
+# Grant access (RBAC model)
+New-AzRoleAssignment `
+    -SignInName      'user@example.com' `
+    -RoleDefinitionName 'Key Vault Secrets User' `
+    -Scope "/subscriptions/$subId/resourceGroups/rg-myapp-prod-uksouth/providers/Microsoft.KeyVault/vaults/kv-myapp-prod"
+```
+
+### RBAC assignments
+
+```powershell
+# Assign role to service principal
+$sp = Get-AzADServicePrincipal -DisplayName 'myapp-deploy-sp'
+New-AzRoleAssignment `
+    -ObjectId           $sp.Id `
+    -RoleDefinitionName 'Contributor' `
+    -Scope              "/subscriptions/$subId/resourceGroups/rg-myapp-prod-uksouth"
+
+# List assignments on a scope
+Get-AzRoleAssignment -Scope "/subscriptions/$subId" |
+    Select-Object DisplayName, RoleDefinitionName, SignInName, ObjectType |
+    Sort-Object RoleDefinitionName
+
+# Remove assignment
+Remove-AzRoleAssignment `
+    -ObjectId           $sp.Id `
+    -RoleDefinitionName 'Contributor' `
+    -Scope              "/subscriptions/$subId/resourceGroups/rg-myapp-prod-uksouth"
+```
+
+### Register resource provider (with wait)
+
+```powershell
+function Register-AzProviderWithWait {
+    param ([Parameter(Mandatory)][string]$ProviderNamespace)
+    # Get-AzResourceProvider returns one object per resource type — use [0] for a scalar state
+    $state = (Get-AzResourceProvider -ProviderNamespace $ProviderNamespace)[0].RegistrationState
+    if ($state -eq 'Registered') {
+        Write-Verbose "$ProviderNamespace already registered."
+        return
+    }
+    Write-Host "Registering $ProviderNamespace..." -ForegroundColor Yellow
+    Register-AzResourceProvider -ProviderNamespace $ProviderNamespace | Out-Null
+    do {
+        Start-Sleep -Seconds 10
+        $state = (Get-AzResourceProvider -ProviderNamespace $ProviderNamespace)[0].RegistrationState
+        Write-Host "  State: $state"
+    } while ($state -ne 'Registered')
+    Write-Host "$ProviderNamespace registered." -ForegroundColor Green
+}
+
+Register-AzProviderWithWait 'Microsoft.ContainerService'
+Register-AzProviderWithWait 'Microsoft.KeyVault'
+```
+
+### Storage operations
+
+```powershell
+# Get storage account context
+$storageCtx = (Get-AzStorageAccount -ResourceGroupName 'rg-data' -Name 'stdataprod').Context
+
+# Upload file
+Set-AzStorageBlobContent `
+    -File      'local-file.parquet' `
+    -Container 'raw' `
+    -Blob      "data/$(Get-Date -Format 'yyyy/MM/dd')/file.parquet" `
+    -Context   $storageCtx `
+    -Force
+
+# List blobs with prefix
+Get-AzStorageBlob -Container 'raw' -Prefix 'data/2025/' -Context $storageCtx |
+    Sort-Object LastModified -Descending |
+    Select-Object Name, Length, LastModified
+
+# Generate SAS URL (1-hour read access)
+New-AzStorageBlobSASToken `
+    -Container  'raw' `
+    -Blob       'data/file.parquet' `
+    -Permission 'r' `
+    -ExpiryTime (Get-Date).AddHours(1) `
+    -FullUri `
+    -Context    $storageCtx
+```
+
+---
+
+## App Registrations & Service Principals
+
+```powershell
+# Create app registration
+$app = New-AzADApplication -DisplayName 'myapp-ci' -SignInAudience 'AzureADMyOrg'
+
+# Create SP linked to app
+$sp = New-AzADServicePrincipal -ApplicationId $app.AppId
+
+# Add client secret (auto-generated)
+$cred = New-AzADAppCredential -ApplicationId $app.AppId -EndDate (Get-Date).AddYears(1)
+# $cred.SecretText contains the secret — capture immediately, not retrievable again
+
+# Add federated credential (for GitHub Actions OIDC)
+$fedCred = @{
+    Audiences = @('api://AzureADTokenExchange')
+    Issuer    = 'https://token.actions.githubusercontent.com'
+    Name      = 'github-actions-main'
+    Subject   = 'repo:myorg/myrepo:ref:refs/heads/main'
+}
+New-AzADAppFederatedCredential -ApplicationId $app.Id @fedCred
+
+# Clean up expired secrets
+Get-AzADAppCredential -ApplicationId $app.AppId |
+    Where-Object { $_.EndDateTime -lt (Get-Date) } |
+    ForEach-Object { Remove-AzADAppCredential -ApplicationId $app.AppId -KeyId $_.KeyId }
+```
+
+---
+
+## Microsoft Graph
+
+```powershell
+# Connect (delegated)
+Connect-MgGraph -Scopes 'User.Read.All', 'Group.ReadWrite.All', 'Directory.Read.All'
+
+# Connect (app-only with client secret)
+$clientSecret = ConvertTo-SecureString $env:GRAPH_CLIENT_SECRET -AsPlainText -Force
+$cred         = [System.Management.Automation.PSCredential]::new($env:AZURE_CLIENT_ID, $clientSecret)
+Connect-MgGraph -TenantId $env:AZURE_TENANT_ID -ClientSecretCredential $cred
+
+# Users
+Get-MgUser -Filter "Department eq 'Engineering'" -Select 'DisplayName,Mail,JobTitle' -All |
+    Export-Csv 'engineers.csv' -NoTypeInformation
+
+# Find disabled accounts that are members of groups
+Get-MgUser -Filter "AccountEnabled eq false" -All | ForEach-Object {
+    $groups = Get-MgUserMemberOf -UserId $_.Id
+    if ($groups) {
+        [PSCustomObject]@{ User = $_.DisplayName; Groups = ($groups.AdditionalProperties['displayName'] -join ', ') }
+    }
+}
+
+# Groups
+$group = Get-MgGroup -Filter "DisplayName eq 'Platform Engineers'"
+Get-MgGroupMember -GroupId $group.Id -All | Select-Object Id
+
+# Add member
+New-MgGroupMember -GroupId $group.Id -DirectoryObjectId $userId
+
+# Remove member
+Remove-MgGroupMemberByRef -GroupId $group.Id -DirectoryObjectId $userId
+
+# App registrations via Graph
+Get-MgApplication -Filter "DisplayName eq 'myapp-ci'" |
+    Select-Object DisplayName, AppId, Id
+```
+
+---
+
+## Azure Policy
+
+```powershell
+# List non-compliant resources
+Get-AzPolicyState -Filter "ComplianceState eq 'NonCompliant'" |
+    Select-Object ResourceId, PolicyDefinitionName, ComplianceState |
+    Sort-Object PolicyDefinitionName |
+    Format-Table -AutoSize
+
+# Assign built-in policy
+$definition = Get-AzPolicyDefinition -BuiltIn | Where-Object { $_.DisplayName -match 'Require a tag' }
+New-AzPolicyAssignment `
+    -Name               'require-env-tag' `
+    -DisplayName        'Require Environment tag' `
+    -Scope              "/subscriptions/$subId" `
+    -PolicyDefinition   $definition `
+    -PolicyParameterObject @{ tagName = @{ value = 'Environment' } }
+
+# Trigger compliance scan
+Start-AzPolicyComplianceScan -ResourceGroupName 'rg-myapp-prod-uksouth' -AsJob
+```
+
+---
+
+## Logging & Output
+
+### Structured logging helper
+
+```powershell
+function Write-Log {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)][string]$Message,
+        [ValidateSet('INFO', 'WARN', 'ERROR', 'DEBUG')][string]$Level = 'INFO',
+        [hashtable]$Properties
     )
-    $wd = $(Get-Location).Path
-    & pwsh -File "$wd\Run-AzTerraform.ps1" `
-        -TerraformCodeLocation    $TerraformCodeLocation `
-        -TerraformWorkspace       $TerraformWorkspace `
-        -TerraformStackToRunJson  $TerraformStackToRunJson `
-        -RunTerraformInit         $RunTerraformInit `
-        -RunTerraformValidate     $RunTerraformValidate `
-        -RunTerraformPlan         $RunTerraformPlan `
-        -RunTerraformPlanDestroy  $RunTerraformPlanDestroy `
-        -RunTerraformDestroy      $RunTerraformDestroy `
-        -RunTerraformApply        $RunTerraformApply `
-        -TerraformInitExtraArgsJson $TerraformInitExtraArgsJson `
-        -DebugMode                $DebugMode `
-        -InstallCheckov           $InstallCheckov
+    $entry = [ordered]@{
+        Timestamp = (Get-Date -Format 'o')
+        Level     = $Level
+        Message   = $Message
+    }
+    if ($Properties) { $Properties.GetEnumerator() | ForEach-Object { $entry[$_.Key] = $_.Value } }
+
+    switch ($Level) {
+        'WARN'  { Write-Warning  ($entry | ConvertTo-Json -Compress) }
+        'ERROR' { Write-Error    ($entry | ConvertTo-Json -Compress) }
+        'DEBUG' { Write-Debug    ($entry | ConvertTo-Json -Compress) }
+        default { Write-Host     ($entry | ConvertTo-Json -Compress) }
+    }
+}
+
+Write-Log 'Deployment started' -Properties @{ Environment = 'prod'; Region = 'uksouth' }
+```
+
+### Progress bar
+
+```powershell
+$items = Get-AzResourceGroup
+$total = $items.Count
+$i     = 0
+
+foreach ($rg in $items) {
+    $i++
+    Write-Progress `
+        -Activity        'Auditing resource groups' `
+        -Status          "$i of $total — $($rg.ResourceGroupName)" `
+        -PercentComplete (($i / $total) * 100)
+
+    # ... do work ...
+}
+Write-Progress -Activity 'Auditing resource groups' -Completed
+```
+
+### Output formatting
+
+```powershell
+# Table
+$data | Format-Table -AutoSize -Wrap
+
+# Custom columns
+$data | Format-Table `
+    @{ Label = 'Name'; Expression = { $_.ResourceGroupName }; Width = 30 },
+    @{ Label = 'Region'; Expression = { $_.Location } },
+    @{ Label = 'Resources'; Expression = { (Get-AzResource -ResourceGroupName $_.ResourceGroupName).Count } }
+
+# List (vertical key-value)
+$data | Select-Object -First 1 | Format-List *
+
+# Out-GridView (Windows / interactive only)
+$data | Out-GridView -Title 'Resource Groups' -PassThru
+```
+
+---
+
+## CI/CD & Pipeline Integration
+
+### GitHub Actions integration
+
+```powershell
+# Set output for downstream steps
+function Set-GitHubOutput {
+    param ([string]$Name, [string]$Value)
+    "$Name=$Value" | Add-Content -Path $env:GITHUB_OUTPUT -Encoding UTF8
+}
+
+# Set environment variable for downstream steps
+function Set-GitHubEnv {
+    param ([string]$Name, [string]$Value)
+    "$Name=$Value" | Add-Content -Path $env:GITHUB_ENV -Encoding UTF8
+}
+
+# Group log output
+function Write-GitHubGroup {
+    param ([string]$Title, [scriptblock]$Body)
+    Write-Host "::group::$Title"
+    & $Body
+    Write-Host '::endgroup::'
+}
+
+# Mask secret from logs
+function Hide-GitHubSecret {
+    param ([string]$Value)
+    Write-Host "::add-mask::$Value"
+}
+
+# Usage in a workflow step
+Set-GitHubOutput -Name 'image-tag' -Value "v$(Get-Date -Format 'yyyyMMddHHmmss')"
+Write-GitHubGroup 'Deploying infrastructure' {
+    terraform apply -auto-approve
+}
+```
+
+### Azure DevOps integration
+
+```powershell
+# Set variable for downstream tasks
+function Set-AzDOVariable {
+    param ([string]$Name, [string]$Value, [switch]$IsSecret, [switch]$IsOutput)
+    $flags  = if ($IsSecret) { ';issecret=true' } else { '' }
+    $flags += if ($IsOutput) { ';isoutput=true' } else { '' }
+    Write-Host "##vso[task.setvariable variable=$Name$flags]$Value"
+}
+
+# Set task result
+function Set-AzDOResult {
+    param ([ValidateSet('Succeeded', 'SucceededWithIssues', 'Failed')][string]$Result, [string]$Message)
+    Write-Host "##vso[task.complete result=$Result;]$Message"
+}
+
+# Detect pipeline vs local
+$inPipeline = ($env:TF_BUILD -eq 'True') -or ($env:GITHUB_ACTIONS -eq 'true')
+if ($inPipeline) {
+    Set-AzDOVariable -Name 'DeployVersion' -Value '1.2.3' -IsOutput
+}
+```
+
+### Exit codes and error propagation
+
+```powershell
+$ErrorActionPreference = 'Stop'
+
+# Native commands — check $LASTEXITCODE
+function Invoke-Native {
+    param ([scriptblock]$Command)
+    & $Command
+    if ($LASTEXITCODE -ne 0) {
+        throw "Command failed with exit code $LASTEXITCODE"
+    }
+}
+
+Invoke-Native { terraform init }
+Invoke-Native { terraform plan -out=tfplan }
+Invoke-Native { terraform apply tfplan }
+```
+
+---
+
+## Pester Testing
+
+### Basic test structure
+
+```powershell
+# tests/Deploy.Tests.ps1
+BeforeAll {
+    . "$PSScriptRoot/../src/Deploy.ps1"
+
+    # Mock Azure commands
+    Mock Connect-AzAccount {}
+    Mock Get-AzResourceGroup { return [PSCustomObject]@{ ResourceGroupName = 'rg-test'; Location = 'uksouth' } }
+    Mock New-AzResourceGroup {}
+}
+
+Describe 'Deploy-Infrastructure' {
+    Context 'When resource group does not exist' {
+        BeforeEach {
+            Mock Get-AzResourceGroup { return $null }
+        }
+
+        It 'creates the resource group' {
+            Deploy-Infrastructure -Name 'rg-test' -Location 'uksouth'
+            Should -Invoke New-AzResourceGroup -Times 1 -Exactly -ParameterFilter {
+                $Name -eq 'rg-test' -and $Location -eq 'uksouth'
+            }
+        }
+    }
+
+    Context 'When resource group already exists' {
+        It 'does not create a duplicate' {
+            Deploy-Infrastructure -Name 'rg-test' -Location 'uksouth'
+            Should -Invoke New-AzResourceGroup -Times 0
+        }
+    }
+
+    Context 'Parameter validation' {
+        It 'throws on empty name' {
+            { Deploy-Infrastructure -Name '' -Location 'uksouth' } | Should -Throw
+        }
+
+        It 'throws on invalid location' {
+            { Deploy-Infrastructure -Name 'rg-test' -Location 'mars-central' } | Should -Throw -ExceptionType ([System.Management.Automation.ParameterBindingException])
+        }
+    }
+}
+```
+
+### Pester configuration and running
+
+```powershell
+# Run all tests
+Invoke-Pester -Path './tests'
+
+# With coverage
+$config = New-PesterConfiguration
+$config.Run.Path         = './tests'
+$config.CodeCoverage.Enabled  = $true
+$config.CodeCoverage.Path     = './src/*.ps1'
+$config.Output.Verbosity      = 'Detailed'
+$config.TestResult.Enabled    = $true
+$config.TestResult.OutputPath = 'test-results.xml'
+Invoke-Pester -Configuration $config
+
+# Tag-filtered run
+$config.Filter.Tag = @('Unit')
+Invoke-Pester -Configuration $config
+```
+
+### Mocking patterns
+
+```powershell
+Describe 'Invoke-RestMethod mocking' {
+    BeforeAll {
+        Mock Invoke-RestMethod {
+            return [PSCustomObject]@{ status = 'ok'; id = '12345' }
+        } -ParameterFilter { $Uri -match 'api\.example\.com' }
+
+        Mock Invoke-RestMethod {
+            throw 'Network error'
+        } -ParameterFilter { $Uri -match 'bad\.host' }
+    }
+
+    It 'returns the mocked response' {
+        $result = Invoke-RestMethod -Uri 'https://api.example.com/data'
+        $result.id | Should -Be '12345'
+    }
+
+    It 'retries on failure' {
+        { Invoke-WithRetry -MaxRetries 2 -ScriptBlock { Invoke-RestMethod 'https://bad.host' } } |
+            Should -Throw 'Network error'
+        Should -Invoke Invoke-RestMethod -Times 2 -ParameterFilter { $Uri -match 'bad\.host' }
+    }
+}
+```
+
+---
+
+## Microsoft Sentinel
+
+### Export watchlist to CSV
+
+```powershell
+function Export-SentinelWatchlist {
+    [CmdletBinding()]
+    param (
+        [string]$SubscriptionId    = (Get-AzContext).Subscription.Id,
+        [Parameter(Mandatory)][string]$ResourceGroupName,
+        [Parameter(Mandatory)][string]$WorkspaceName,
+        [Parameter(Mandatory)][string]$WatchlistName,
+        [string]$OutputPath = 'watchlist.csv'
+    )
+    $uri = "https://management.azure.com/subscriptions/$SubscriptionId" +
+           "/resourceGroups/$ResourceGroupName" +
+           "/providers/Microsoft.OperationalInsights/workspaces/$WorkspaceName" +
+           "/providers/Microsoft.SecurityInsights/watchlists/$WatchlistName" +
+           "/watchlistItems?api-version=2023-02-01"
+
+    $items = @()
+    do {
+        $response = (Invoke-AzRestMethod -Method GET -Uri $uri).Content | ConvertFrom-Json
+        $items   += $response.value.properties.itemsKeyValue
+        $uri      = $response.nextLink
+    } while ($uri)
+
+    $items | Export-Csv -Path $OutputPath -NoTypeInformation -Encoding UTF8
+    Write-Host "Exported $($items.Count) items to $OutputPath" -ForegroundColor Green
+}
+```
+
+### Bulk update watchlist items
+
+```powershell
+function Add-SentinelWatchlistItem {
+    param (
+        [string]$SubscriptionId = (Get-AzContext).Subscription.Id,
+        [Parameter(Mandatory)][string]$ResourceGroupName,
+        [Parameter(Mandatory)][string]$WorkspaceName,
+        [Parameter(Mandatory)][string]$WatchlistName,
+        [Parameter(Mandatory)][hashtable]$ItemProperties
+    )
+    $uri  = "https://management.azure.com/subscriptions/$SubscriptionId" +
+            "/resourceGroups/$ResourceGroupName" +
+            "/providers/Microsoft.OperationalInsights/workspaces/$WorkspaceName" +
+            "/providers/Microsoft.SecurityInsights/watchlists/$WatchlistName" +
+            "/watchlistItems/$(New-Guid)?api-version=2023-02-01"
+    $body = @{ properties = @{ itemsKeyValue = $ItemProperties } } | ConvertTo-Json -Depth 5
+    (Invoke-AzRestMethod -Method PUT -Uri $uri -Payload $body).Content | ConvertFrom-Json
+}
+
+# Bulk import from CSV
+Import-Csv 'new-indicators.csv' | ForEach-Object {
+    Add-SentinelWatchlistItem `
+        -ResourceGroupName 'rg-sentinel' `
+        -WorkspaceName     'law-sentinel-prod' `
+        -WatchlistName     'BlockedIPs' `
+        -ItemProperties    @{ IPAddress = $_.IPAddress; Reason = $_.Reason; AddedDate = (Get-Date -Format 'o') }
 }
 ```
 
@@ -169,78 +1139,220 @@ function tfdestroy {
 
 ## Module Management
 
-### Install a set of modules in one line
+### Install and update modules
 
 ```powershell
-Install-Module -Name @(
-    "Microsoft.Graph",
-    "Az",
-    "Pester",
-    "LibreDevOpsHelpers",
-    "Microsoft.PowerShell.PSResourceGet"
-) -Force -AllowClobber -Scope CurrentUser -Repository PSGallery
+# Install multiple modules
+$modules = @(
+    @{ Name = 'Az';                     RequiredVersion = '12.0.0' }
+    @{ Name = 'Microsoft.Graph';        Version = '[2,3)' }
+    @{ Name = 'Pester';                 RequiredVersion = '5.6.0' }
+    @{ Name = 'PSScriptAnalyzer' }
+)
+foreach ($mod in $modules) {
+    Install-PSResource @mod -Scope CurrentUser -TrustRepository -Repository PSGallery
+}
+
+# Update all installed modules
+Get-InstalledPSResource | Where-Object { -not $_.Prerelease } | ForEach-Object {
+    Update-PSResource -Name $_.Name -Scope CurrentUser -TrustRepository -ErrorAction SilentlyContinue
+}
+
+# Check for outdated modules
+Get-InstalledPSResource | ForEach-Object {
+    $latest = Find-PSResource -Name $_.Name -Repository PSGallery -ErrorAction SilentlyContinue
+    if ($latest -and $latest.Version -gt $_.Version) {
+        [PSCustomObject]@{ Module = $_.Name; Installed = $_.Version; Latest = $latest.Version }
+    }
+} | Format-Table
+
+# PSScriptAnalyzer
+Invoke-ScriptAnalyzer -Path './src' -Recurse -Settings PSGallery |
+    Where-Object { $_.Severity -ne 'Information' } |
+    Format-Table ScriptName, Line, Severity, RuleName, Message
+```
+
+### Module boilerplate
+
+```powershell
+# MyModule/MyModule.psm1
+$Public  = @(Get-ChildItem -Path "$PSScriptRoot/Public/*.ps1"  -ErrorAction SilentlyContinue)
+$Private = @(Get-ChildItem -Path "$PSScriptRoot/Private/*.ps1" -ErrorAction SilentlyContinue)
+
+foreach ($file in ($Public + $Private)) {
+    try { . $file.FullName }
+    catch { Write-Error "Failed to import $($file.FullName): $_" }
+}
+
+Export-ModuleMember -Function $Public.BaseName
+
+# MyModule/MyModule.psd1 (manifest)
+# New-ModuleManifest -Path ./MyModule.psd1 -RootModule MyModule.psm1 -FunctionsToExport @('Get-Thing','Set-Thing')
 ```
 
 ---
 
-## Starship Prompt (Windows)
+## Profile & Shell Setup
+
+### $PROFILE locations
 
 ```powershell
-choco install -y starship
+# Show all profile paths
+$PROFILE | Select-Object *
 
-@"
+# Create profile directory and file if missing
+if (-not (Test-Path $PROFILE)) {
+    New-Item -Path $PROFILE -ItemType File -Force | Out-Null
+}
+
+# Reload profile
+. $PROFILE
+```
+
+### Useful profile additions
+
+```powershell
+# In $PROFILE:
+
+Set-StrictMode -Version Latest
+
+# Aliases
+Set-Alias -Name 'k'   -Value 'kubectl'
+Set-Alias -Name 'tf'  -Value 'terraform'
+Set-Alias -Name 'g'   -Value 'git'
+
+# Auto-complete for common tools
+if (Get-Command kubectl -ErrorAction SilentlyContinue) {
+    kubectl completion powershell | Out-String | Invoke-Expression
+}
+if (Get-Command terraform -ErrorAction SilentlyContinue) {
+    terraform -install-autocomplete 2>$null
+}
+if (Get-Command az -ErrorAction SilentlyContinue) {
+    Register-ArgumentCompleter -Native -CommandName az -ScriptBlock {
+        param($commandName, $wordToComplete, $cursorPosition)
+        $completion_file = New-TemporaryFile
+        $env:ARGCOMPLETE_USE_TEMPFILES = 1
+        $env:_ARGCOMPLETE_STDOUT_FILENAME = $completion_file
+        $env:COMP_LINE = $wordToComplete
+        $env:COMP_POINT = $cursorPosition
+        $env:_ARGCOMPLETE = 1
+        $env:_ARGCOMPLETE_SUPPRESS_SPACE = 0
+        $env:_ARGCOMPLETE_IFS = "`n"
+        $env:_ARGCOMPLETE_SHELL = 'powershell'
+        az 2>&1 | Out-Null
+        Get-Content $completion_file | ForEach-Object { [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_) }
+        Remove-Item $completion_file, Env:\_ARGCOMPLETE_STDOUT_FILENAME, Env:\ARGCOMPLETE_USE_TEMPFILES
+    }
+}
+
+# Starship prompt
+if (Get-Command starship -ErrorAction SilentlyContinue) {
+    Invoke-Expression (&starship init powershell)
+}
+
+# Set Az context from env if set
+if ($env:AZURE_SUBSCRIPTION_ID) {
+    Set-AzContext -SubscriptionId $env:AZURE_SUBSCRIPTION_ID -ErrorAction SilentlyContinue | Out-Null
+}
+```
+
+### Starship config (Windows/cross-platform)
+
+```powershell
+$starshipConfig = @'
 command_timeout = 10000
-"`$schema" = "https://starship.rs/config-schema.json"
-
-[azure]
-disabled = false
-format = 'on [``$symbol(``$subscription)](``$style) '
-symbol = '# '
-style = 'blue bold'
+"$schema" = "https://starship.rs/config-schema.json"
 
 add_newline = true
 
+[azure]
+disabled = false
+format   = 'on [$symbol($subscription)]($style) '
+symbol   = '☁ '
+style    = 'blue bold'
+
+[kubernetes]
+disabled = false
+format   = 'on [⛵ $context\($namespace\)]($style) '
+style    = 'cyan bold'
+
+[terraform]
+disabled = false
+format   = 'via [$symbol$workspace]($style) '
+
 [character]
 success_symbol = '[➜](bold green)'
+error_symbol   = '[✗](bold red)'
 
 [package]
 disabled = true
-"@ | Set-Content -Path "$env:APPDATA\starship.toml"
+'@
 
-# Add to your $PROFILE:
-# Invoke-Expression (&starship init powershell)
+$starshipConfig | Set-Content -Path "$env:USERPROFILE\.config\starship.toml" -Encoding UTF8
+# Linux/macOS: ~/.config/starship.toml
 ```
 
 ---
 
-## Microsoft Sentinel
+## Useful Global Patterns
 
-### Export a watchlist to CSV
+### Confirm before destructive action
 
 ```powershell
-function Export-SentinelWatchlist {
-    [CmdletBinding()]
-    param (
-        [string]$SubscriptionId   = (Get-AzContext).Subscription.Id,
-        [Parameter(Mandatory)][string]$ResourceGroupName,
-        [Parameter(Mandatory)][string]$WorkspaceName,
-        [Parameter(Mandatory)][string]$WatchlistName,
-        [string]$OutputFilePath   = 'watchlist.csv'
-    )
-
-    $uri = "https://management.azure.com/subscriptions/${SubscriptionId}" +
-           "/resourceGroups/${ResourceGroupName}" +
-           "/providers/Microsoft.OperationalInsights/workspaces/${WorkspaceName}" +
-           "/providers/Microsoft.SecurityInsights/watchlists/${WatchlistName}" +
-           "/watchlistItems?api-version=2022-12-01-preview"
-
-    $response = Invoke-AzRestMethod -Method Get -Uri $uri |
-        Select-Object -ExpandProperty Content |
-        ConvertFrom-Json
-
-    $response.value.properties.itemsKeyValue |
-        Export-Csv -Encoding UTF8 -Path $OutputFilePath -QuoteFields:$false
-
-    Write-Host "Watchlist exported to $OutputFilePath" -ForegroundColor Green
+function Confirm-Action {
+    param ([string]$Message, [switch]$Force)
+    if ($Force) { return $true }
+    $response = Read-Host "$Message [y/N]"
+    return $response -match '^[Yy]$'
 }
+
+if (Confirm-Action 'Delete all resources in rg-old-prod?') {
+    Remove-AzResourceGroup -Name 'rg-old-prod' -Force
+}
+```
+
+### Environment variable helper
+
+```powershell
+function Get-RequiredEnv {
+    param ([Parameter(Mandatory, ValueFromRemainingArguments)][string[]]$Names)
+    $missing = $Names | Where-Object { -not (Get-Item "Env:\$_" -ErrorAction SilentlyContinue) }
+    if ($missing) { throw "Missing required environment variables: $($missing -join ', ')" }
+    $Names | ForEach-Object { [Environment]::GetEnvironmentVariable($_) }
+}
+
+$clientId, $secret, $tenantId = Get-RequiredEnv AZURE_CLIENT_ID AZURE_CLIENT_SECRET AZURE_TENANT_ID
+```
+
+### Script execution time
+
+```powershell
+$stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+
+# ... your script logic ...
+
+$stopwatch.Stop()
+Write-Host "Completed in $($stopwatch.Elapsed.ToString('mm\:ss\.ff'))" -ForegroundColor Cyan
+```
+
+### Bulk parallel ARM deployments
+
+```powershell
+$templates = Get-ChildItem './templates' -Filter '*.bicep'
+
+$jobs = $templates | ForEach-Object {
+    $file = $_
+    Start-ThreadJob -ScriptBlock {
+        param($Template, $RG)
+        az deployment group create `
+            --resource-group $RG `
+            --template-file  $Template `
+            --output         json | ConvertFrom-Json
+    } -ArgumentList $file.FullName, 'rg-myapp-prod-uksouth'
+}
+
+$results = $jobs | Wait-Job | Receive-Job
+$jobs    | Remove-Job
+$results | Format-Table name, properties
 ```

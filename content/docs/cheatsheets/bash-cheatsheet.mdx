@@ -129,11 +129,11 @@ set -euo pipefail
 
 START=$(pwd)
 
-for dir in $(find . -maxdepth 2 -mindepth 1 -type d); do
+while IFS= read -r dir; do
     cd "$dir"
     ./my-script.sh || echo "Script not in $dir, skipping"
     cd "$START"
-done
+done < <(find . -maxdepth 1 -mindepth 1 -type d)
 ```
 
 ### Run a command across multiple Terraform module directories
@@ -169,6 +169,7 @@ Appends a reusable `tfrel` function to `.bashrc` that formats, generates docs, a
 
 function tfrel() {
     local curdir build_file=""
+    curdir=$(pwd)
 
     if [ -f build.tf ]; then
         build_file="build.tf"

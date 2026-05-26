@@ -16,6 +16,8 @@
   --radius-sm:     10px;
   --radius-md:     16px;
   --radius-lg:     22px;
+  --cb-bg:         #0d1117;
+  --cb-header-bg:  #161b22;
 }
 
 /* Light theme overrides */
@@ -27,6 +29,8 @@
   --text-secondary:#424a53;
   --text-tertiary: #656d76;
   --border-color:  #d0d7de;
+  --cb-bg:         #0d1117;
+  --cb-header-bg:  #161b22;
 }
 
 /* ── Base ──────────────────────────────────────────────────────── */
@@ -536,7 +540,7 @@ a {
   border: 1px solid var(--border-color);
   overflow: hidden;
   box-shadow: var(--shadow-md);
-  background: #0d1117;
+  background: var(--cb-bg);
 }
 
 .cb-header {
@@ -544,7 +548,7 @@ a {
   align-items: center;
   gap: 0.5rem;
   padding: 0.55rem 0.85rem;
-  background: #161b22;
+  background: var(--cb-header-bg);
   border-bottom: 1px solid var(--border-color);
   min-height: 36px;
 }
@@ -608,11 +612,12 @@ a {
   padding: 1rem 1.1rem !important;
   font-size: 0.85rem;
   line-height: 1.65;
-  background: #0d1117 !important;
+  background: var(--cb-bg) !important;
   /* Always show horizontal scrollbar track on mobile so users know it scrolls */
   scrollbar-width: thin;
   scrollbar-color: var(--border-color) transparent;
 }
+
 
 .cb-pre::-webkit-scrollbar {
   height: 5px;

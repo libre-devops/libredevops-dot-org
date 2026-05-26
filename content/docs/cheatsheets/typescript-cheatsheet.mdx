@@ -1,0 +1,780 @@
+---
+title: TypeScript Cheatsheet
+description: TypeScript setup, core types, generics, classes, async patterns, Next.js App Router, and testing with Vitest.
+---
+
+# TypeScript Cheat Sheet
+
+TypeScript setup, language fundamentals, and Next.js App Router patterns. Targets TypeScript 5.x and Next.js 14+.
+
+---
+
+## Tooling & Setup
+
+### nvm — Node Version Manager
+
+```bash
+# Install nvm (Linux/macOS)
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+source ~/.bashrc
+
+# Install and use a Node version
+nvm install 22
+nvm use 22
+nvm alias default 22
+
+# List installed versions
+nvm ls
+
+# Use .nvmrc in a project directory
+echo "22" > .nvmrc
+nvm use          # reads .nvmrc automatically
+
+# Install nvm on Windows (nvm-windows)
+# winget install CoreyButler.NVMforWindows
+# nvm install 22 && nvm use 22
+```
+
+### Project bootstrap
+
+```bash
+# New Next.js project (TypeScript by default)
+npx create-next-app@latest my-app --typescript --tailwind --eslint --app --src-dir
+
+# Plain TypeScript project
+mkdir my-lib && cd my-lib
+npm init -y
+npm install -D typescript @types/node ts-node
+npx tsc --init
+
+# Run TypeScript without compiling
+npx ts-node src/index.ts
+npx tsx src/index.ts          # faster alternative (no type checking)
+
+# Type-check only (no emit)
+npx tsc --noEmit
+
+# Watch mode
+npx tsc --watch
+```
+
+### tsconfig.json — recommended base
+
+```json
+{
+  "compilerOptions": {
+    "target":           "ES2022",
+    "module":           "ESNext",
+    "moduleResolution": "Bundler",
+    "lib":              ["ES2022", "DOM", "DOM.Iterable"],
+    "outDir":           "./dist",
+    "rootDir":          "./src",
+    "strict":           true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck":     true,
+    "esModuleInterop":  true,
+    "resolveJsonModule": true,
+    "declaration":      true,
+    "declarationMap":   true,
+    "sourceMap":        true,
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": ["src"],
+  "exclude": ["node_modules", "dist"]
+}
+```
+
+### Package management
+
+```bash
+# pnpm (faster, strict node_modules)
+npm install -g pnpm
+pnpm install
+pnpm add express
+pnpm add -D @types/express vitest
+
+# Useful scripts in package.json
+# "typecheck": "tsc --noEmit"
+# "lint":      "eslint src --ext .ts,.tsx"
+# "build":     "tsc"
+# "dev":       "tsx watch src/index.ts"
+```
+
+---
+
+## Core Types
+
+### Primitives and literals
+
+```typescript
+const name:    string  = 'Alice'
+const age:     number  = 30
+const active:  boolean = true
+const id:      bigint  = 9007199254740993n
+const sym:     symbol  = Symbol('key')
+
+// Literal types
+type Direction = 'north' | 'south' | 'east' | 'west'
+type StatusCode = 200 | 201 | 400 | 401 | 403 | 404 | 500
+
+// Template literal types
+type EventName = `on${Capitalize<string>}`
+type CSSUnit = `${number}px` | `${number}rem` | `${number}%`
+type ApiPath = `/api/${string}`
+```
+
+### Arrays and tuples
+
+```typescript
+// Arrays
+const names:  string[]       = ['Alice', 'Bob']
+const ids:    Array<number>  = [1, 2, 3]
+const matrix: number[][]     = [[1, 2], [3, 4]]
+
+// Readonly array
+const frozen: ReadonlyArray<string> = ['x', 'y']
+
+// Tuples
+type Point   = [number, number]
+type Entry   = [string, number, boolean?]   // optional third element
+type Rest    = [string, ...number[]]        // rest element
+
+const point: Point = [10, 20]
+const [x, y] = point
+```
+
+### Objects and interfaces
+
+```typescript
+// Interface (extendable, declaration-mergeable)
+interface User {
+  readonly id:   string
+  name:          string
+  email:         string
+  role?:         'admin' | 'user'   // optional
+}
+
+// Extend
+interface AdminUser extends User {
+  permissions: string[]
+}
+
+// Type alias (can express unions, intersections, mapped types)
+type ApiResponse<T> =
+  | { success: true;  data: T }
+  | { success: false; error: string }
+
+// Intersection
+type WithTimestamps = { createdAt: Date; updatedAt: Date }
+type UserRecord = User & WithTimestamps
+
+// Index signature
+interface StringMap {
+  [key: string]: string
+}
+
+// Record shorthand
+type Env = Record<string, string | undefined>
+```
+
+### Unknown, never, any
+
+```typescript
+// unknown — safe alternative to any; must narrow before use
+function parse(raw: unknown): User {
+  if (typeof raw !== 'object' || raw === null) throw new Error('Not an object')
+  const obj = raw as Record<string, unknown>
+  if (typeof obj.id !== 'string') throw new Error('Bad id')
+  return raw as User
+}
+
+// never — exhaustive checks
+type Shape = { kind: 'circle'; r: number } | { kind: 'rect'; w: number; h: number }
+
+function area(s: Shape): number {
+  switch (s.kind) {
+    case 'circle': return Math.PI * s.r ** 2
+    case 'rect':   return s.w * s.h
+    default:
+      const _exhaustive: never = s
+      throw new Error(`Unhandled: ${_exhaustive}`)
+  }
+}
+```
+
+---
+
+## Type Narrowing & Guards
+
+```typescript
+// typeof guard
+function double(x: string | number) {
+  if (typeof x === 'string') return x.repeat(2)
+  return x * 2
+}
+
+// instanceof guard
+function formatDate(d: Date | string) {
+  if (d instanceof Date) return d.toISOString()
+  return new Date(d).toISOString()
+}
+
+// in operator
+interface Cat { meow(): void }
+interface Dog { bark(): void }
+function speak(animal: Cat | Dog) {
+  if ('meow' in animal) animal.meow()
+  else                  animal.bark()
+}
+
+// Type predicate (user-defined guard)
+function isUser(value: unknown): value is User {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'id'   in value && typeof (value as User).id   === 'string' &&
+    'name' in value && typeof (value as User).name === 'string'
+  )
+}
+
+// Assertion function (throws if not valid)
+function assertString(val: unknown): asserts val is string {
+  if (typeof val !== 'string') throw new TypeError(`Expected string, got ${typeof val}`)
+}
+```
+
+---
+
+## Generics
+
+```typescript
+// Basic generic function
+function first<T>(arr: T[]): T | undefined {
+  return arr[0]
+}
+
+// Constraints
+function getProperty<T, K extends keyof T>(obj: T, key: K): T[K] {
+  return obj[key]
+}
+
+// Default type parameter
+function createState<T = string>(): { value: T | null; set: (v: T) => void } {
+  let value: T | null = null
+  return { value, set: (v) => { value = v } }
+}
+
+// Generic interface
+interface Repository<T, ID = string> {
+  findById(id: ID):    Promise<T | null>
+  findAll():           Promise<T[]>
+  save(entity: T):     Promise<T>
+  delete(id: ID):      Promise<void>
+}
+
+// Conditional types
+type Flatten<T> = T extends Array<infer Item> ? Item : T
+type IsString<T> = T extends string ? true : false
+
+// Infer
+type ReturnType<T> = T extends (...args: any[]) => infer R ? R : never
+type Awaited<T> = T extends Promise<infer V> ? V : T
+```
+
+---
+
+## Utility Types
+
+```typescript
+interface User {
+  id:       string
+  name:     string
+  email:    string
+  password: string
+  role:     'admin' | 'user'
+}
+
+type PartialUser   = Partial<User>          // all fields optional
+type RequiredUser  = Required<User>         // all fields required
+type ReadonlyUser  = Readonly<User>         // all fields readonly
+type PublicUser    = Omit<User, 'password'> // exclude a key
+type LoginFields   = Pick<User, 'email' | 'password'>  // only these keys
+type UserRole      = User['role']           // index access type
+
+// NonNullable
+type MaybeString   = string | null | undefined
+type DefiniteStr   = NonNullable<MaybeString>   // string
+
+// Parameters and ReturnType
+function createUser(name: string, role: User['role']): User { /* ... */ }
+type CreateArgs    = Parameters<typeof createUser>   // [string, User['role']]
+type CreatedUser   = ReturnType<typeof createUser>   // User
+
+// Extract / Exclude
+type AdminOrUser = Extract<'admin' | 'user' | 'guest', 'admin' | 'user'>  // 'admin' | 'user'
+type NonAdmin    = Exclude<'admin' | 'user' | 'guest', 'admin'>            // 'user' | 'guest'
+
+// Mapped type
+type Optional<T> = { [K in keyof T]?: T[K] }
+type Mutable<T>  = { -readonly [K in keyof T]: T[K] }
+```
+
+---
+
+## Classes
+
+```typescript
+abstract class BaseRepository<T> {
+  protected readonly tableName: string
+
+  constructor(tableName: string) {
+    this.tableName = tableName
+  }
+
+  abstract findById(id: string): Promise<T | null>
+
+  protected log(msg: string): void {
+    console.log(`[${this.tableName}] ${msg}`)
+  }
+}
+
+class UserRepository extends BaseRepository<User> {
+  constructor(private readonly db: DatabaseClient) {
+    super('users')
+  }
+
+  async findById(id: string): Promise<User | null> {
+    this.log(`findById ${id}`)
+    return this.db.query<User>(`SELECT * FROM users WHERE id = $1`, [id])
+  }
+
+  // Static factory
+  static create(db: DatabaseClient): UserRepository {
+    return new UserRepository(db)
+  }
+}
+
+// Class implementing an interface
+interface Serializable {
+  serialize():            string
+  deserialize(s: string): this
+}
+
+class Config implements Serializable {
+  constructor(public readonly data: Record<string, string> = {}) {}
+
+  serialize(): string { return JSON.stringify(this.data) }
+
+  deserialize(s: string): this {
+    return new (this.constructor as typeof Config)(JSON.parse(s)) as this
+  }
+}
+```
+
+---
+
+## Enums & Discriminated Unions
+
+```typescript
+// Const enum (inlined at compile time — no runtime object)
+const enum Direction {
+  Up    = 'UP',
+  Down  = 'DOWN',
+  Left  = 'LEFT',
+  Right = 'RIGHT',
+}
+
+// Discriminated union (prefer over enum for extensibility)
+type LoadingState = { status: 'idle' }
+type LoadState    = { status: 'loading' }
+type SuccessState<T> = { status: 'success'; data: T }
+type ErrorState   = { status: 'error';   error: Error }
+type AsyncState<T> = LoadingState | LoadState | SuccessState<T> | ErrorState
+
+function render<T>(state: AsyncState<T>): string {
+  switch (state.status) {
+    case 'idle':    return 'Waiting...'
+    case 'loading': return 'Loading...'
+    case 'success': return `Data: ${JSON.stringify(state.data)}`
+    case 'error':   return `Error: ${state.error.message}`
+  }
+}
+```
+
+---
+
+## Async & Error Handling
+
+```typescript
+// Result type — avoids throwing across boundaries
+type Result<T, E = Error> =
+  | { ok: true;  value: T }
+  | { ok: false; error: E }
+
+async function fetchUser(id: string): Promise<Result<User>> {
+  try {
+    const res = await fetch(`/api/users/${id}`)
+    if (!res.ok) return { ok: false, error: new Error(`HTTP ${res.status}`) }
+    return { ok: true, value: await res.json() as User }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err : new Error(String(err)) }
+  }
+}
+
+// Usage
+const result = await fetchUser('123')
+if (result.ok) {
+  console.log(result.value.name)
+} else {
+  console.error(result.error.message)
+}
+
+// Promise combinators
+const [users, posts] = await Promise.all([
+  fetch('/api/users').then(r => r.json()),
+  fetch('/api/posts').then(r => r.json()),
+])
+
+// Settle all (never rejects)
+const results = await Promise.allSettled([fetchUser('1'), fetchUser('2')])
+for (const r of results) {
+  if (r.status === 'fulfilled') console.log(r.value)
+  else                          console.error(r.reason)
+}
+
+// Typed fetch wrapper
+async function apiFetch<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, { ...init, headers: { 'Content-Type': 'application/json', ...init?.headers } })
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}: ${url}`)
+  return res.json() as Promise<T>
+}
+```
+
+---
+
+## Modules & Declarations
+
+```typescript
+// Re-export pattern (barrel file: src/index.ts)
+export { UserRepository } from './user-repository'
+export type { User, AdminUser } from './types'
+export * from './utils'
+
+// Namespace import
+import * as Utils from './utils'
+
+// Dynamic import (code splitting)
+const { heavy } = await import('./heavy-module')
+
+// Ambient declarations (for untyped JS packages)
+// src/types/globals.d.ts
+declare module '*.svg' {
+  const content: string
+  export default content
+}
+
+declare global {
+  interface Window {
+    analytics: { track(event: string, props?: object): void }
+  }
+}
+
+// Augment an existing module
+declare module 'express' {
+  interface Request {
+    user?: User
+  }
+}
+```
+
+---
+
+## Next.js — App Router
+
+### Layouts and pages
+
+```typescript
+// app/layout.tsx — root layout (server component)
+import type { Metadata } from 'next'
+
+export const metadata: Metadata = {
+  title:       { default: 'My App', template: '%s | My App' },
+  description: 'My application',
+}
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <body>{children}</body>
+    </html>
+  )
+}
+```
+
+```typescript
+// app/users/[id]/page.tsx — dynamic page (server component)
+import { notFound } from 'next/navigation'
+
+interface Props {
+  params:      { id: string }
+  searchParams: { tab?: string }
+}
+
+// Generate static params for SSG
+export async function generateStaticParams() {
+  const users = await fetchUsers()
+  return users.map(u => ({ id: u.id }))
+}
+
+// Page-level metadata
+export async function generateMetadata({ params }: Props) {
+  const user = await fetchUser(params.id)
+  return { title: user?.name ?? 'Not found' }
+}
+
+export default async function UserPage({ params, searchParams }: Props) {
+  const user = await fetchUser(params.id)
+  if (!user) notFound()
+  return <UserProfile user={user} tab={searchParams.tab} />
+}
+```
+
+### Server Actions
+
+```typescript
+// app/users/actions.ts
+'use server'
+
+import { revalidatePath } from 'next/cache'
+import { redirect }       from 'next/navigation'
+import { z }              from 'zod'
+
+const CreateUserSchema = z.object({
+  name:  z.string().min(1).max(100),
+  email: z.string().email(),
+  role:  z.enum(['admin', 'user']),
+})
+
+export async function createUser(
+  prevState: { error?: string },
+  formData: FormData
+) {
+  const parsed = CreateUserSchema.safeParse(Object.fromEntries(formData))
+  if (!parsed.success) {
+    return { error: parsed.error.flatten().fieldErrors.name?.[0] ?? 'Invalid input' }
+  }
+
+  await db.user.create({ data: parsed.data })
+  revalidatePath('/users')
+  redirect('/users')
+}
+```
+
+```typescript
+// app/users/create/page.tsx — form using useFormState
+'use client'
+
+import { useFormState, useFormStatus } from 'react-dom'
+import { createUser } from '../actions'
+
+function SubmitButton() {
+  const { pending } = useFormStatus()
+  return <button type="submit" disabled={pending}>{pending ? 'Creating...' : 'Create'}</button>
+}
+
+export default function CreateUserPage() {
+  const [state, action] = useFormState(createUser, {})
+  return (
+    <form action={action}>
+      <input name="name"  required />
+      <input name="email" type="email" required />
+      <select name="role">
+        <option value="user">User</option>
+        <option value="admin">Admin</option>
+      </select>
+      {state.error && <p>{state.error}</p>}
+      <SubmitButton />
+    </form>
+  )
+}
+```
+
+### Route Handlers (API routes)
+
+```typescript
+// app/api/users/[id]/route.ts
+import { type NextRequest, NextResponse } from 'next/server'
+
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  const user = await fetchUser(params.id)
+  if (!user) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  return NextResponse.json(user)
+}
+
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  const body = await req.json() as Partial<User>
+  const updated = await updateUser(params.id, body)
+  return NextResponse.json(updated)
+}
+
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  await deleteUser(params.id)
+  return new NextResponse(null, { status: 204 })
+}
+```
+
+### Middleware
+
+```typescript
+// middleware.ts (project root)
+import { NextResponse } from 'next/server'
+import type { NextRequest } from 'next/server'
+
+export function middleware(request: NextRequest) {
+  const token = request.cookies.get('session')?.value
+
+  if (!token && request.nextUrl.pathname.startsWith('/dashboard')) {
+    return NextResponse.redirect(new URL('/login', request.url))
+  }
+
+  // Add response headers
+  const response = NextResponse.next()
+  response.headers.set('X-Frame-Options', 'DENY')
+  response.headers.set('X-Content-Type-Options', 'nosniff')
+  return response
+}
+
+export const config = {
+  matcher: ['/dashboard/:path*', '/api/:path*'],
+}
+```
+
+### Data fetching patterns
+
+```typescript
+// Server component — fetch with cache control
+async function getPosts(): Promise<Post[]> {
+  const res = await fetch('https://api.example.com/posts', {
+    next: { revalidate: 60 },   // ISR: revalidate every 60s
+    // next: { tags: ['posts'] } // on-demand revalidation via revalidateTag
+    // cache: 'no-store'        // SSR: never cache
+  })
+  if (!res.ok) throw new Error('Failed to fetch posts')
+  return res.json()
+}
+
+// Client component — SWR
+'use client'
+import useSWR from 'swr'
+
+const fetcher = (url: string) => fetch(url).then(r => r.json())
+
+export function PostList() {
+  const { data, error, isLoading } = useSWR<Post[]>('/api/posts', fetcher)
+  if (isLoading) return <p>Loading…</p>
+  if (error)     return <p>Error: {error.message}</p>
+  return <ul>{data?.map(p => <li key={p.id}>{p.title}</li>)}</ul>
+}
+```
+
+---
+
+## Environment Variables
+
+```typescript
+// next.config.ts — validate at build time
+import { z } from 'zod'
+
+const envSchema = z.object({
+  DATABASE_URL:   z.string().url(),
+  NEXTAUTH_SECRET: z.string().min(32),
+  AZURE_CLIENT_ID: z.string().uuid().optional(),
+})
+
+const env = envSchema.parse(process.env)
+
+export default {
+  env: {
+    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
+  },
+}
+
+// Typed env module (src/env.ts)
+export const serverEnv = envSchema.parse(process.env)
+```
+
+---
+
+## Testing with Vitest
+
+```typescript
+// vitest.config.ts
+import { defineConfig } from 'vitest/config'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+  test: {
+    environment: 'jsdom',
+    globals:     true,
+    setupFiles:  ['./src/test/setup.ts'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'lcov'],
+    },
+  },
+})
+```
+
+```typescript
+// src/utils.test.ts
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { fetchUser } from './api'
+
+vi.mock('./db', () => ({
+  db: { user: { findUnique: vi.fn() } },
+}))
+
+import { db } from './db'
+
+describe('fetchUser', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('returns user when found', async () => {
+    const mockUser = { id: '1', name: 'Alice', email: 'alice@example.com' }
+    vi.mocked(db.user.findUnique).mockResolvedValue(mockUser)
+
+    const result = await fetchUser('1')
+    expect(result).toEqual(mockUser)
+    expect(db.user.findUnique).toHaveBeenCalledWith({ where: { id: '1' } })
+  })
+
+  it('returns null when not found', async () => {
+    vi.mocked(db.user.findUnique).mockResolvedValue(null)
+    const result = await fetchUser('999')
+    expect(result).toBeNull()
+  })
+})
+```
+
+```bash
+# Run tests
+pnpm vitest
+pnpm vitest --coverage
+pnpm vitest --ui         # browser UI
+pnpm vitest run          # CI (no watch)
+```
