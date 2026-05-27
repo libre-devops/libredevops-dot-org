@@ -22,6 +22,13 @@ export default function RootLayout({
 }) {
     return (
         <html lang="en" suppressHydrationWarning>
+        <head>
+            <script
+                dangerouslySetInnerHTML={{
+                    __html: `(function(){try{if(location.pathname.indexOf('/docs')===0&&localStorage.getItem('docs-banner-hidden')==='1'){document.documentElement.classList.add('banner-hidden-preload')}}catch(e){}})()`
+                }}
+            />
+        </head>
         <body>
         <ThemeProvider
             attribute="class"

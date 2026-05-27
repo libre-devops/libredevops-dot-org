@@ -634,10 +634,31 @@ a {
 
 /* ── Print / Export PDF ────────────────────────────────────────── */
 @media print {
-  /* Hide chrome that has no place in a printed doc */
+  /* Hide chrome that has no place in a printed doc.
+     Nextra's navbar / sidebar / TOC are fixed/sticky and otherwise repeat
+     on every page when sent to the print pipeline. */
   .site-header,
-  .print-btn-wrapper {
+  .print-btn-wrapper,
+  .nextra-navbar,
+  .nextra-sidebar-container,
+  .nextra-toc,
+  .nextra-breadcrumb,
+  .nextra-mobile-nav,
+  .nextra-banner-container,
+  aside[class*="nextra"],
+  nav[class*="nextra"],
+  footer {
     display: none !important;
+  }
+
+  /* Reset page padding/margins so content uses the full sheet */
+  .nextra-content,
+  main,
+  article {
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: 100% !important;
+    width: 100% !important;
   }
 
   /* Reset page background */
@@ -869,4 +890,25 @@ a {
     flex-direction: column;
     align-items: flex-start;
   }
+}
+
+/* Docs reading mode - hide the site banner when user opts out.
+   The .banner-hidden-preload class is set on <html> by an inline script in
+   app/layout.tsx so the banner never paints; the .banner-hidden class on
+   <body> is what the toggle button maintains afterwards. */
+html.banner-hidden-preload .site-header,
+body.banner-hidden .site-header {
+    display: none !important;
+    height: 0 !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    position: static !important;
+}
+
+/* Search results - Nextra defaults the wrapper text to gray-100 (near-white)
+   which is invisible on the light-mode background. Force a readable default
+   that descendants with their own colours still override. */
+.light .nextra-search-results {
+    color: var(--text-primary);
 }
