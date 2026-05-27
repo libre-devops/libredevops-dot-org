@@ -7,7 +7,7 @@
   },
   "scripts": {
     "dev": "NODE_OPTIONS=--max-old-space-size=8192 next dev",
-    "build": "next build && pagefind --site out --output-subdir _pagefind",
+    "build": "next build && npx pagefind --site out --output-subdir _pagefind",
     "serve": "npx serve out",
     "lint": "next lint",
     "postinstall": "patch-package"
