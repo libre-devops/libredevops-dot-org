@@ -1,17 +1,19 @@
 ---
 title: Python Cheatsheet
-description: Comprehensive Python reference - modern tooling, core language, data structures, concurrency, testing, Azure SDK, and DevOps patterns.
+description: Comprehensive Python reference - modern tooling, core language, async patterns, Azure SDK, and DevOps automation. Assumes Python 3.10+ / uv 0.4+ / pytest 8.x+.
 ---
 
 # Python Cheat Sheet
 
 Modern Python (3.10+) reference for DevOps and platform engineers. Covers the language deeply, standard-library patterns, Azure SDK, and real automation workflows.
 
+> **Versions:** Python 3.10+ · uv 0.4+ · pytest 8.x+ · azure-identity 1.16+ · httpx 0.27+
+
 ---
 
 ## Virtual Environments & Tooling
 
-### `uv` - the modern Python package manager
+### `uv` - the modern Python package manager ✅
 
 `uv` is a drop-in replacement for `pip`, `venv`, `pip-tools`, and `pyenv` combined. Significantly faster than pip.
 
@@ -46,7 +48,7 @@ uv run pytest
 uv pip compile pyproject.toml -o requirements.txt
 ```
 
-### `venv` - standard library
+### `venv` - standard library ⚠️ Legacy - prefer `uv` for new projects
 
 ```bash
 python3 -m venv .venv
@@ -100,7 +102,7 @@ strict = true
 asyncio_mode = "auto"
 ```
 
-### Shell helpers - `mkvenv` / `avenv`
+### Shell helpers - `mkvenv` / `avenv` 🏠 Personal workflow helpers
 
 ```bash
 function mkvenv() {
@@ -904,6 +906,8 @@ def batched(iterable, n: int):
 
 ## Logging & Output
 
+> **🛠️ Deeper reference** - this section covers structured JSON logging, context propagation via `contextvars`, `LoggerAdapter`, timing decorators, and `structlog`. It's a mini-guide, not a quick-reference snippet.
+
 ### Standard logging setup
 
 ```python
@@ -1163,6 +1167,8 @@ job_log.warning("retrying", attempt=2)
 
 ## Testing
 
+> **🛠️ Deeper reference** - this section covers project layout, fixtures, parametrize, Azure SDK mocking, monkeypatching, async tests, and temporary files. It's a mini-guide, not a quick-reference snippet.
+
 ### Project structure
 
 ```text
@@ -1340,8 +1346,8 @@ from azure.identity import (
     EnvironmentCredential,
 )
 
-# DefaultAzureCredential - tries: env vars → workload identity → managed identity → CLI → ...
-# Best choice for code that must run in both CI and locally
+# ✅ DefaultAzureCredential - tries: env vars → workload identity → managed identity → CLI
+# Best choice for code that must run in both CI and locally (as of 2026)
 credential = DefaultAzureCredential()
 
 # System-assigned managed identity (no config needed on the VM/Function)
@@ -1350,11 +1356,12 @@ credential = ManagedIdentityCredential()
 # User-assigned managed identity - must specify client_id
 credential = ManagedIdentityCredential(client_id="your-uami-client-id")
 
-# OIDC / Workload Identity Federation - GitHub Actions, Azure DevOps, etc.
+# ✅ OIDC / Workload Identity Federation - GitHub Actions, Azure DevOps, etc.
+# Current preferred CI/CD auth pattern (as of 2026)
 # Reads AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_FEDERATED_TOKEN_FILE from environment
 credential = WorkloadIdentityCredential()
 
-# Service principal with client secret
+# ⚠️ Service principal with client secret - legacy, avoid in new projects
 credential = ClientSecretCredential(
     tenant_id=os.environ["AZURE_TENANT_ID"],
     client_id=os.environ["AZURE_CLIENT_ID"],
@@ -1762,3 +1769,15 @@ class AppConfig:
             log_level=os.environ.get("LOG_LEVEL", "INFO"),
         )
 ```
+
+---
+
+## Anti-patterns
+
+- **Bare `except:`** - catches `KeyboardInterrupt`, `SystemExit`, and `BaseException`. Always catch a specific type or at minimum `except Exception`.
+- **`yaml.load()` instead of `yaml.safe_load()`** - `yaml.load()` can execute arbitrary Python via tagged objects. Always use `yaml.safe_load()` unless you control 100% of the input.
+- **`shell=True` in subprocess** - expands shell metacharacters and enables injection. Build the command as a list and omit `shell=True`.
+- **`print()` for diagnostics** - bypasses log levels, handlers, and formatters; goes to stdout and mixes with real output. Use `logging.getLogger(__name__)` in modules.
+- **f-string in structured log messages** - `log.info(f"user {uid} logged in")` builds the string even when INFO is disabled. Use lazy formatting: `log.info("user %s logged in", uid)`.
+- **Mutable default arguments** - `def process(items=[])` shares the list across all calls. Use `None` as the default and create the mutable object inside the function.
+- **Importing `*` from a module** - pollutes the namespace and makes IDE analysis and refactoring unreliable. Always import names explicitly.

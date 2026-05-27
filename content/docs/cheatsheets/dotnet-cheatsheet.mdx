@@ -1,11 +1,13 @@
 ---
 title: .NET Cheatsheet
-description: .NET CLI, C# patterns, interfaces, classes, records, LINQ, async, Azure SDK, Kusto SDK, and dependency injection. Targets .NET 10.
+description: .NET CLI, C# patterns, records, LINQ, async, Azure SDK, Kusto SDK, and dependency injection. Assumes .NET 10 / C# 14 / Azure SDK 1.13+.
 ---
 
 # .NET Cheat Sheet
 
 .NET CLI, C# language patterns, and Azure SDK integration. Targets .NET 10 and C# 14.
+
+> **Versions:** .NET 10 · C# 14 · Azure.Identity 1.13+ · xUnit 2.x · Moq 4.x
 
 ---
 
@@ -569,6 +571,8 @@ public class DatabaseService(IOptions<DatabaseOptions> opts)
 
 ## Logging
 
+> **🛠️ Deeper reference** - this section covers JSON logging setup, log levels, structured logging, source-generated `[LoggerMessage]`, scopes, and the decorator pattern with Scrutor. It's a mini-guide, not a quick-reference snippet.
+
 `Microsoft.Extensions.Logging` is the standard abstraction; back it with a real sink (Serilog, OpenTelemetry, or the built-in console). The default `WebApplication.CreateBuilder` already wires console + debug + event source providers - the rules below cover what to do with that.
 
 ### Sensible defaults in `Program.cs`
@@ -796,22 +800,23 @@ Avoid decorators when:
 using Azure.Identity;
 using Azure.Core;
 
-// DefaultAzureCredential - tries: env vars → workload identity → managed identity → CLI → VS
+// ✅ DefaultAzureCredential - tries: env vars → workload identity → managed identity → CLI → VS
+// Best choice for code that must run in both CI and locally (as of 2026)
 var credential = new DefaultAzureCredential();
 
-// Managed identity (system-assigned)
+// ✅ Managed identity (system-assigned) - preferred auth for Azure-hosted workloads (as of 2026)
 var credential = new ManagedIdentityCredential();
 
 // Managed identity (user-assigned)
 var credential = new ManagedIdentityCredential(clientId: "YOUR-UAMI-CLIENT-ID");
 
-// Service principal (client secret - prefer federated in production)
+// ⚠️ Service principal (client secret) - legacy, avoid in new projects; use federated credentials
 var credential = new ClientSecretCredential(
     tenantId:     Environment.GetEnvironmentVariable("AZURE_TENANT_ID")!,
     clientId:     Environment.GetEnvironmentVariable("AZURE_CLIENT_ID")!,
     clientSecret: Environment.GetEnvironmentVariable("AZURE_CLIENT_SECRET")!);
 
-// Workload identity (GitHub Actions / AKS pod)
+// ✅ Workload identity (GitHub Actions / AKS pod) - current preferred CI/CD auth pattern (as of 2026)
 var credential = new WorkloadIdentityCredential();
 
 // Get token manually (for raw HTTP calls)
@@ -1198,6 +1203,8 @@ await ingestClient.IngestFromStorageAsync(
 
 ## Testing with xUnit
 
+> **🛠️ Deeper reference** - this section covers xUnit patterns with Moq, FluentAssertions, Theory/InlineData, NullLogger, and coverage reporting.
+
 ```csharp
 // MyApp.Tests/UserServiceTests.cs
 using Xunit;
@@ -1337,3 +1344,15 @@ public static class EnumerableExtensions
               .Select(g => (IReadOnlyList<T>)g.Select(t => t.x).ToList());
 }
 ```
+
+---
+
+## Anti-patterns
+
+- **`Console.WriteLine` in service code** - bypasses the logging pipeline with no levels, no structured fields, and no redaction. Use `ILogger<T>` everywhere.
+- **`async void`** - exceptions are unobservable and crash the process; the only valid use is event handlers. Use `async Task` for everything else.
+- **Logging and rethrowing at every layer** - log once at the boundary that owns the user-facing failure (controller, worker). Inner methods throw; the boundary logs once with full context.
+- **Not propagating `CancellationToken`** - passing `default` or `CancellationToken.None` silently opts out of cancellation. Accept and forward `ct` through every async call.
+- **`IFoo` with a single `Foo` and no tests substituting it** - premature abstraction with real costs (extra file, DI registration, harder to read). Inject the concrete type; add the interface when you have a second implementation or a test fake.
+- **`ConfigureAwait(false)` in ASP.NET Core** - the synchronisation context is absent in ASP.NET Core; `ConfigureAwait(false)` is a no-op there and misleads readers. Remove it from ASP.NET Core project code; keep it in library code that may be consumed outside of ASP.NET Core.
+- **Swallowing exceptions with empty `catch {}`** - silently absorbs failures that should propagate. Always log with `logger.LogError(ex, ...)` or rethrow, never swallow.

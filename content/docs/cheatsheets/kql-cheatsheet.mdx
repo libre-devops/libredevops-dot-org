@@ -1,11 +1,13 @@
 ---
 title: KQL / Microsoft Defender Cheatsheet
-description: Kusto Query Language fundamentals plus threat hunting queries for Microsoft Defender XDR, Microsoft Sentinel, and Azure Data Explorer.
+description: KQL fundamentals plus threat hunting queries for Microsoft Defender XDR, Microsoft Sentinel, and Azure Data Explorer. Assumes Sentinel / Defender XDR (2024+).
 ---
 
 # KQL / Microsoft Defender Cheat Sheet
 
 Kusto Query Language (KQL) is used across Microsoft Sentinel, Defender XDR, Azure Monitor, and Azure Data Explorer (ADX). Queries pipe data through operators left-to-right - each `|` feeds the result of the previous step into the next.
+
+> **Versions:** Microsoft Sentinel (2024+) · Defender XDR · Azure Data Explorer · Azure Monitor Logs
 
 ---
 
@@ -376,7 +378,7 @@ GetFailedLogons(1d, 20)
 
 ---
 
-## Threat Hunting - Processes
+## Threat Hunting - Processes 🔬
 
 ### Suspicious PowerShell - encoded commands or download cradles
 
@@ -444,7 +446,7 @@ DeviceEvents
 
 ---
 
-## Threat Hunting - Network
+## Threat Hunting - Network 🔬
 
 ### Connections to uncommon ports (potential C2 or exfiltration)
 
@@ -521,7 +523,7 @@ ThreatIntelligenceIndicator
 
 ---
 
-## Threat Hunting - Identity & Authentication
+## Threat Hunting - Identity & Authentication 🔬
 
 ### Failed logins - brute-force or password spray
 
@@ -622,7 +624,7 @@ AuditLogs
 
 ---
 
-## Threat Hunting - Email
+## Threat Hunting - Email 🔬
 
 ### Emails with malicious verdicts delivered to inbox
 
@@ -826,3 +828,14 @@ DeviceNetworkEvents
 | render table        // explicit table (default)
 | render scatterchart // scatter plot (good for anomalies)
 ```
+
+---
+
+## Anti-patterns
+
+- **No time filter on queries** - a query without `| where TimeGenerated > ago(...)` scans the entire table (potentially months of data), is extremely slow, and can exhaust query limits. Always scope the time range first.
+- **`contains` over `has` for whole-word matches** - `contains` does a character-level substring scan; `has` uses the inverted index and is orders of magnitude faster for whole-token matching. Use `has` for single words and `has_any` for sets.
+- **`take N` as a "sample"** - `take` returns arbitrary rows in no guaranteed order; it is not a random or representative sample. Use `sample N` for random sampling or `top N by` for intentional ranking.
+- **String concatenation to build KQL** - building query strings by concatenating user input enables KQL injection. Use `declare query_parameters` with typed parameters for any dynamic values.
+- **Joining two large unfiltered tables** - joining unfiltered high-volume tables can produce enormous intermediate datasets and time out. Filter both sides with time and column predicates before the `join`.
+- **`mv-expand` on a high-cardinality array without subsequent scoping** - `mv-expand` on a large array column multiplies row count dramatically. Always add a `where`, `take`, or `top` after `mv-expand` to bound the result set.

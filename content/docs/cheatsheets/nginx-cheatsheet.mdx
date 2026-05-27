@@ -1,6 +1,6 @@
 ---
 title: Nginx Cheatsheet
-description: Nginx reverse proxy configurations for HTTPS termination, WebSocket proxying, and service-specific headers.
+description: Nginx reverse proxy configurations for HTTPS termination, WebSocket proxying, and service-specific headers. Assumes nginx 1.24+.
 ---
 
 # Nginx Cheat Sheet
@@ -9,9 +9,11 @@ Production-ready Nginx configurations for running as a reverse proxy in front of
 
 You can format and validate your Nginx config at [nginxbeautifier.github.io](https://nginxbeautifier.github.io/).
 
+> **Versions:** nginx 1.24+ · OpenSSL 3.x
+
 ---
 
-## HTTPS Reverse Proxy with Podman endpoints
+## HTTPS Reverse Proxy with Podman endpoints 🏠 Personal homelab config
 
 Nginx running on the host terminates TLS and forwards to services running in Podman containers on localhost. Each service gets its own `server` block - replace the certificate paths and domain names to match your setup.
 
@@ -115,7 +117,7 @@ http
 
 ---
 
-## HTTP redirect to HTTPS
+## HTTP redirect to HTTPS ✅ Required - always redirect plaintext HTTP to HTTPS
 
 Force all HTTP traffic to HTTPS with a 301 redirect. Add this server block alongside your SSL blocks.
 
@@ -140,3 +142,14 @@ systemctl status nginx      # service status
 tail -f /var/log/nginx/access.log   # stream access log
 tail -f /var/log/nginx/error.log    # stream error log
 ```
+
+---
+
+## Anti-patterns
+
+- **No HTTP→HTTPS redirect** - without a port 80 block returning 301, browsers and crawlers will be served plaintext. Always add the redirect block.
+- **`ssl_protocols` including `TLSv1` or `TLSv1.1`** - deprecated protocols with known weaknesses (BEAST, POODLE). Use only `ssl_protocols TLSv1.2 TLSv1.3;`.
+- **No `proxy_read_timeout` / `proxy_send_timeout`** - without these, a hung upstream holds a worker connection open indefinitely and exhausts the connection pool under load. Set explicit timeouts.
+- **No security response headers** - missing `X-Frame-Options`, `X-Content-Type-Options`, and `Content-Security-Policy` exposes the app to clickjacking and MIME-sniffing attacks without any browser-level mitigation.
+- **Wildcard `server_name _` on an SSL vhost** - SSL requires SNI matching; a catchall HTTPS block will serve the wrong certificate for unrecognised hostnames. Use explicit `server_name` values for every TLS block.
+- **Buffering enabled for streaming responses** - when proxying SSE, WebSocket upgrades, or chunked transfer responses, `proxy_buffering on` (the default) delays delivery. Set `proxy_buffering off` for those locations.

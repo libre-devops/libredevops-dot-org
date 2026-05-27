@@ -1,11 +1,13 @@
 ---
 title: Go Cheatsheet
-description: Go toolchain, modules, types, concurrency, interfaces, error handling, HTTP, and Azure SDK. Targets Go 1.22+.
+description: Go toolchain, modules, types, concurrency, interfaces, error handling, HTTP, and Azure SDK. Assumes Go 1.22+ / azure-sdk-for-go v1.7+ / golang.org/x/sync v0.7+.
 ---
 
 # Go Cheat Sheet
 
 Go toolchain, language patterns, and standard library. Targets Go 1.22+ and C# developers moving to Go.
+
+> **Versions:** Go 1.22+ · azure-sdk-for-go v1.7+ · golang.org/x/sync v0.7+ · Go 1.21+ for `slices`/`maps`/`slog`
 
 ---
 
@@ -808,6 +810,8 @@ func (d *Duration) UnmarshalJSON(b []byte) error {
 
 ## Structured Logging (slog)
 
+> **🛠️ Deeper reference** - this section covers slog setup, structured fields, context propagation, `ReplaceAttr` redaction, `LogValuer`, and the logger decorator pattern. It's a mini-guide, not a quick-reference snippet.
+
 `log/slog` (Go 1.21+) is the standard structured logger. Use it instead of `log.Println` / `fmt.Println` for anything you'd ever read in a log aggregator. JSON in prod, text in dev, levels and context propagation built in.
 
 ### Sensible defaults
@@ -1094,15 +1098,16 @@ go get github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azsecrets
 ```go
 import "github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 
-// DefaultAzureCredential - env vars → workload identity → managed identity → CLI
+// ✅ DefaultAzureCredential - env vars → workload identity → managed identity → CLI
+// Best choice for code that must run in both CI and locally (as of 2026)
 cred, err := azidentity.NewDefaultAzureCredential(nil)
 
-// Managed identity (user-assigned)
+// ✅ Managed identity (user-assigned) - preferred auth for Azure-hosted workloads (as of 2026)
 cred, err = azidentity.NewManagedIdentityCredential(&azidentity.ManagedIdentityCredentialOptions{
     ID: azidentity.ClientID("YOUR-UAMI-CLIENT-ID"),
 })
 
-// Service principal (client secret)
+// ⚠️ Service principal (client secret) - legacy, avoid in new projects
 cred, err = azidentity.NewClientSecretCredential(
     os.Getenv("AZURE_TENANT_ID"),
     os.Getenv("AZURE_CLIENT_ID"),
@@ -1110,7 +1115,7 @@ cred, err = azidentity.NewClientSecretCredential(
     nil,
 )
 
-// Workload identity (GitHub Actions / AKS pod)
+// ✅ Workload identity (GitHub Actions / AKS pod) - current preferred CI/CD auth pattern (as of 2026)
 cred, err = azidentity.NewWorkloadIdentityCredential(nil)
 ```
 
@@ -1456,4 +1461,16 @@ ctx := context.Background()
 for v := range square(ctx, generate(ctx, 1, 2, 3, 4, 5)) {
     fmt.Println(v)  // 1 4 9 16 25
 }
+
+---
+
+## Anti-patterns
+
+- **`log.Println` / `fmt.Println` in production code** - unstructured output with no levels, no fields, and no redaction. Use `log/slog` with `slog.Info(...)` and structured attrs.
+- **`fmt.Sprintf` in slog messages** - `slog.Info(fmt.Sprintf("order %s processed", id))` destroys structure and runs even when the level is disabled. Pass fields as attrs: `slog.Info("order processed", "order_id", id)`.
+- **Writing to a nil map** - `var m map[string]int; m["key"] = 1` panics at runtime. Always initialise with `make(map[K]V)` or a map literal before writing.
+- **Ignoring errors with `_`** - `result, _ := doSomething()` silently discards failures that may corrupt downstream state. Handle or explicitly wrap every error.
+- **Goroutine leak** - launching `go func()` without a termination signal (context cancellation, channel close, or WaitGroup) leaks goroutines indefinitely. Always provide a way to stop.
+- **Copying a `sync.Mutex`** - a `sync.Mutex` embedded in a struct must never be copied after first use; copying breaks the lock invariant. Pass structs containing mutexes by pointer.
+- **`interface{}` instead of `any`** - `interface{}` is the pre-Go 1.18 spelling; `any` is the canonical alias. Use `any` in all new code.
 ```

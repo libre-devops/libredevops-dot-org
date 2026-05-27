@@ -1,11 +1,13 @@
 ---
 title: TypeScript Cheatsheet
-description: TypeScript setup, core types, generics, classes, async patterns, Next.js App Router, and testing with Vitest.
+description: TypeScript setup, core types, generics, async patterns, Next.js App Router, and Vitest testing. Assumes TypeScript 5.x / Next.js 14+ / Node 22+ / pnpm 9+.
 ---
 
 # TypeScript Cheat Sheet
 
 TypeScript setup, language fundamentals, and Next.js App Router patterns. Targets TypeScript 5.x and Next.js 14+.
+
+> **Versions:** TypeScript 5.x · Next.js 14+ · Node 22+ · pnpm 9+ · Vitest 1.x · pino 8.x+
 
 ---
 
@@ -460,9 +462,11 @@ async function apiFetch<T>(url: string, init?: RequestInit): Promise<T> {
 
 ## Logging
 
+> **🛠️ Deeper reference** - this section covers structured JSON logging with pino, child loggers, `AsyncLocalStorage` for request-scoped context, the decorator pattern, and log-level guidance. It's a mini-guide, not a quick-reference snippet.
+
 `console.log` is fine for scripts and the dev loop, but in any server-side TypeScript (Next.js Route Handlers, Node services, AWS Lambda, Azure Functions) it's the wrong tool: no levels, no structured fields, no redaction, and synchronous I/O on the event loop. The de-facto Node logger is **pino** - fast, JSON-by-default, and integrates cleanly with Next.js, Fastify, NestJS, and OpenTelemetry.
 
-### `pino` - structured JSON logging
+### `pino` - structured JSON logging ✅ Current preferred logger for server-side TypeScript (as of 2026)
 
 ```bash
 pnpm add pino
@@ -649,7 +653,7 @@ Requires `"target": "ES2022"` (or later) and **not** `"experimentalDecorators": 
 - Redact secret-y keys (`authorization`, `cookie`, `password`, `token`) globally.
 - Use `logger.child(...)` to bind context; never string-concat fields into the message.
 - Pass `Error` objects as `{ err }` - pino has a custom serialiser that captures stack + name + message.
-- Don't `console.log` in server code - it's synchronous, unstructured, and bypasses redaction.
+- Don't `console.log` in server code ⚠️ - it's synchronous, unstructured, and bypasses redaction.
 
 ### Pino + Next.js / Edge runtime caveat
 
@@ -695,6 +699,8 @@ declare module 'express' {
 ---
 
 ## Next.js - App Router
+
+> **🛠️ Deeper reference** - this section covers App Router layouts, dynamic pages, Server Actions, Route Handlers, middleware, and data-fetching patterns. It's a mini-guide, not a quick-reference snippet.
 
 ### Layouts and pages
 
@@ -978,3 +984,15 @@ pnpm vitest --coverage
 pnpm vitest --ui         # browser UI
 pnpm vitest run          # CI (no watch)
 ```
+
+---
+
+## Anti-patterns
+
+- **`any` type** - silently disables type checking for that value and everything downstream. Use `unknown` and narrow before use, or define the actual shape with an interface or type.
+- **Trusting unvalidated JSON from external sources** - `res.json() as User` is a compile-time assertion, not runtime validation. Parse with Zod or a type guard before treating the value as typed.
+- **`console.log` in server-side code** ⚠️ - synchronous, unstructured, and bypasses redaction. Use pino or another structured logger with levels.
+- **Untyped `fetch` responses** - wrapping `fetch` with `as SomeType` does not validate the shape at runtime. Use a typed wrapper with Zod parsing or explicit type guards.
+- **Numeric `enum`** - numeric enums produce surprising reverse-mappings at runtime (`Direction[0] === 'Up'`). Prefer `const enum` (inlined, no runtime object) or discriminated unions for domain modelling.
+- **Ignoring settled results in `Promise.allSettled`** - iterating without checking `r.status === 'fulfilled'` silently drops errors. Always handle both `fulfilled` and `rejected` cases.
+- **Barrel files with circular re-exports** - `index.ts` that re-exports everything can create circular dependency chains and slow down tree-shaking. Import from the source file directly in performance-sensitive paths.

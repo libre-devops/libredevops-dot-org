@@ -1,17 +1,23 @@
 ---
 title: Azure Cheatsheet
-description: Advanced Azure CLI, Bicep, IAM, networking, AKS, monitoring, policy, and governance patterns for Azure platform engineers.
+description: Azure platform engineering reference - CLI, Bicep, RBAC, networking, AKS, monitoring, policy, and governance. Assumes az CLI 2.55+ / AzureRM provider 4.x / Bicep 0.28+.
 ---
 
 # Azure Cheat Sheet
 
-Azure CLI, Bicep, and platform engineering patterns. Covers auth, IAM, compute, networking, AKS, storage, monitoring, policy, and governance. Most CLI examples require `az` 2.55+ and `jq`.
+Azure CLI, Bicep, and platform engineering patterns. Covers auth, RBAC, compute, networking, AKS, storage, monitoring, policy, and governance.
+
+> **Versions:** az CLI 2.55+ / AzureRM provider 4.x / Bicep 0.28+ / AKS 1.30+. Most CLI examples require `jq`. PowerShell examples assume Az module 12+ / PowerShell 7+. Examples target `uksouth` - adjust location as needed.
 
 ---
 
 ## Auth & Context
 
 ### Login methods
+
+> ✅ **Managed identity** (VM/container) or **OIDC federation** (GitHub Actions, Azure Pipelines) - no stored secrets, preferred for all automation (as of 2026)
+> ⚠️ **Client secret** - acceptable for legacy systems or where OIDC isn't supported; rotate regularly
+> ⚠️ **Interactive login** - development and ad-hoc use only, not for automation
 
 ```bash
 # Interactive browser login
@@ -281,7 +287,7 @@ az ad app create --display-name "myapp-deploy" --sign-in-audience AzureADMyOrg
 APP_ID=$(az ad app list --display-name "myapp-deploy" --query '[0].appId' -o tsv)
 az ad sp create --id "$APP_ID"
 
-# Create SP with auto-generated secret (legacy shortcut)
+# Create SP with auto-generated secret ⚠️ Quick shortcut - creates broad Contributor role by default, scope it down
 az ad sp create-for-rbac \
   --name     "myapp-deploy" \
   --role     "Contributor" \
@@ -295,7 +301,7 @@ az ad app credential reset \
   --display-name "ci-secret"
 # Output contains clientSecret - capture immediately
 
-# Add federated credential (GitHub Actions OIDC)
+# Add federated credential (GitHub Actions OIDC) ✅ Preferred over client secrets for CI/CD
 az ad app federated-credential create --id "$APP_ID" --parameters '{
   "name":        "github-main",
   "issuer":      "https://token.actions.githubusercontent.com",
@@ -368,7 +374,7 @@ az ad group member check --group "$GROUP_ID" --member-id "$USER_OID" --query val
 ## Key Vault
 
 ```bash
-# Create (with RBAC authorization model)
+# Create with RBAC authorization model ✅ - prefer over access policies (access policies are legacy)
 az keyvault create \
   --name              kv-myapp-prod \
   --resource-group    rg-myapp-prod-uksouth \
@@ -629,7 +635,7 @@ az aks create \
 # Get credentials
 az aks get-credentials -n aks-myapp-prod -g rg-myapp-prod-uksouth --overwrite-existing
 
-# Admin credentials (bypass RBAC - emergency only)
+# 🚨 Admin credentials (bypasses all RBAC - emergency break-glass only, never for automation)
 az aks get-credentials -n aks-myapp-prod -g rg-myapp-prod-uksouth --admin
 
 # Add node pool
@@ -1104,6 +1110,8 @@ $result.Subscriptions | Format-Table -AutoSize
 
 ## Bicep & ARM Deployments
 
+> 🛠️ Deeper reference - covers Bicep CLI, all deployment scopes (resource group, subscription, management group, tenant), what-if dry runs, deployment stacks, and a minimal Bicep starter. For quick deploys, jump to "Deployment patterns".
+
 ### Bicep CLI
 
 ```bash
@@ -1381,3 +1389,24 @@ alias azswitch='az account set --subscription'
 # Get bearer token for debugging ARM API calls
 alias aztoken='az account get-access-token --query accessToken -o tsv'
 ```
+
+
+---
+
+## Anti-patterns
+
+- ⚠️ **Client secrets for CI/CD pipelines** - when OIDC federation or managed identity is available, prefer those instead. Client secrets have expiry dates, get stored in pipeline variables, and create rotation burden. Use `az ad app federated-credential create` instead.
+
+- 🚨 **`az aks get-credentials --admin` in automated pipelines** - admin kubeconfig bypasses all Kubernetes RBAC and is a break-glass credential. Use workload identity or Entra ID RBAC integration for normal operations.
+
+- ⚠️ **`az ad sp create-for-rbac` without scoping the role** - it defaults to `Contributor` at subscription scope, which is far broader than most workloads need.
+
+- 🚨 **Storing storage account keys in code or pipeline variables** - use managed identity with RBAC (`--auth-mode login`) or SAS tokens scoped to the minimum permissions and duration needed.
+
+- ⚠️ **Key Vault access policies for new deployments** - the RBAC authorization model (`--enable-rbac-authorization`) is the current standard and integrates with Entra ID role assignments rather than vault-local policies.
+
+- 🚨 **`az group delete` without double-checking the group name** - it deletes all resources inside with no undo. The `--yes --no-wait` flags suppress confirmation and return immediately.
+
+- ⚠️ **`az deployment group create` without `what-if` in production** - always run `az deployment group what-if` first to preview changes, especially for Bicep templates touching networking or IAM.
+
+- 🔬 **Parsing `az` output with `grep` or `cut`** - use `--query` (JMESPath) or pipe to `jq`. Text parsing breaks across CLI versions and output format changes.

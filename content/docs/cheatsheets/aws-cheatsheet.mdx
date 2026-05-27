@@ -1,17 +1,19 @@
 ---
 title: AWS Cheatsheet
-description: Comprehensive AWS reference - CLI mastery, IAM, S3, EC2, VPC, Lambda, EKS, RDS, Secrets Manager, CloudWatch, CloudFormation, and CDK.
+description: AWS platform engineering reference - CLI mastery, IAM patterns, core services, and operational workflows. Assumes AWS CLI v2 / CDK v2 / boto3 1.34+.
 ---
 
 # AWS Cheat Sheet
 
 Advanced AWS reference for platform and DevOps engineers. Covers CLI patterns, IAM deeply, core services, and real operational workflows.
 
+> **Versions:** AWS CLI v2 / boto3 1.34+ / CDK v2. CLI v1 behaviour differs significantly on auto-pagination and `--cli-binary-format`. Examples target `eu-west-2` as default region - adjust as needed.
+
 ---
 
 ## Authentication & Credentials
 
-### Named profiles
+### Named profiles ⚠️ Static long-lived credentials - use SSO or instance profiles wherever possible
 
 ```bash
 aws configure                          # configure the default profile
@@ -47,7 +49,7 @@ role_arn       = arn:aws:iam::123456789012:role/DeployRole
 source_profile = default          # assume role from default credentials
 ```
 
-### AWS SSO / IAM Identity Center (recommended for organisations)
+### AWS SSO / IAM Identity Center ✅ Current preferred auth pattern for human access (as of 2026)
 
 ```bash
 # One-time setup
@@ -71,7 +73,7 @@ aws sso logout
 aws s3 ls --profile my-sso
 ```
 
-### Assume a role (cross-account or elevated)
+### Assume a role (cross-account or elevated) 🛠️ Operational pattern
 
 ```bash
 # Export temporary credentials into the current shell
@@ -222,6 +224,8 @@ aws resourcegroupstaggingapi get-resources \
 
 ## IAM
 
+> 🛠️ Deeper reference - IAM is the most consequential surface in AWS. The sections below cover policy structure, trust policies, OIDC federation, and permission boundaries. For quick lookups, jump to a specific subsection.
+
 ### Policies - view and manage
 
 ```bash
@@ -365,7 +369,7 @@ aws iam list-role-policies --role-name MyRole   # inline
 }
 ```
 
-#### GitHub Actions - OIDC federated identity (no long-lived secrets)
+#### GitHub Actions - OIDC federated identity ✅ Current preferred CI/CD auth pattern (as of 2026)
 
 ```bash
 # 1. Create the OIDC provider (once per account)
@@ -431,7 +435,7 @@ aws iam put-role-permissions-boundary \
 aws iam delete-role-permissions-boundary --role-name DeveloperRole
 ```
 
-### IAM Access Analyzer
+### IAM Access Analyzer 🔬 Validate policies and find unintended public/cross-account access
 
 ```bash
 # List findings (unintended public or cross-account access)
@@ -495,7 +499,7 @@ aws s3api put-bucket-encryption --bucket my-bucket --server-side-encryption-conf
   }]
 }'
 
-# Block all public access (should be default for new buckets)
+# Block all public access 🔐 - enable on every bucket unless explicitly serving public content
 aws s3api put-public-access-block --bucket my-bucket \
   --public-access-block-configuration "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
 
@@ -1460,3 +1464,24 @@ watch_stack() {
 
 watch_stack my-stack
 ```
+
+
+---
+
+## Anti-patterns
+
+- ⚠️ **Hardcoded AWS credentials** - in source code, environment files checked into git, or CI/CD pipeline variables as plaintext. Use IAM roles, SSO, or Secrets Manager.
+
+- ⚠️ **`AdministratorAccess` for CI/CD pipelines** - scope the policy to the exact actions the pipeline needs. Broad permissions turn a compromised pipeline into a full account takeover.
+
+- 🚨 **`"Resource": "*"` in IAM policies unless genuinely necessary** - wildcards break the principle of least privilege and make policy auditing meaningless.
+
+- 🚨 **Sharing `~/.aws/credentials` across team members or machines** - each principal should have its own credentials. Use SSO with per-person sessions instead.
+
+- 🚨 **Database passwords in SSM Parameter Store as `String` type** - use `SecureString` (KMS-encrypted). Plain strings are readable by anyone with `ssm:GetParameter`.
+
+- ⚠️ **`aws s3 sync --delete` without testing first** - it will remove files from the destination that don't exist in the source. Always dry-run with `--dryrun` first.
+
+- ⚠️ **`aws ec2 terminate-instances` without confirming the instance ID** - there is no undo. Use `--dry-run` to check permissions first.
+
+- 🔬 **`--output json` piped to `grep`** - use `--query` (JMESPath) or pipe to `jq` instead. Grepping JSON is fragile and breaks on whitespace changes.

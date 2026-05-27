@@ -1,17 +1,19 @@
 ---
 title: Bash Cheatsheet
-description: Bash strict mode, colour helpers, argument parsing, PATH management, and common one-liners.
+description: Bash scripting patterns - strict mode, logging, argument parsing, bats-core testing, and workflow helpers. Assumes Bash 4.4+ / bats-core 1.10+.
 ---
 
 # Bash Cheat Sheet
 
 Practical snippets for writing robust shell scripts and maintaining a productive Bash environment.
 
+> **Versions:** Bash 4.4+. `declare -A` (associative arrays) and some string ops require Bash 4+; macOS ships Bash 3.2 by default - install via Homebrew (`brew install bash`). `bats-core` testing examples use bats-core 1.10+.
+
 ---
 
 ## Script Boilerplate
 
-### Strict mode
+### Strict mode ✅ Use at the top of every script
 
 Always start scripts with this. `set -e` exits on error, `set -u` treats unset variables as errors, `set -o pipefail` propagates failures through pipelines, and `set -x` prints each command before running it (useful for debugging - remove for production).
 
@@ -267,7 +269,7 @@ done
 
 ---
 
-## Terraform Module Release Helper
+## Terraform Module Release Helper 🏠 Personal workflow helper
 
 Appends a reusable `tfrel` function to `.bashrc` that formats, generates docs, and publishes a module in one shot.
 
@@ -312,6 +314,8 @@ echo "tfrel appended to ~/.bashrc"
 ---
 
 ## Testing with bats
+
+> 🛠️ Deeper reference - covers install, test structure, assertions, setup/teardown, command mocking via PATH override, and CI integration. For quick test execution, jump to "Running tests".
 
 **bats-core** (Bash Automated Testing System) is the de-facto unit test runner for bash. Tests are plain `.bats` files that look like bash with `@test` blocks. Companion libraries (`bats-assert`, `bats-support`, `bats-file`) give you readable assertions.
 
@@ -519,7 +523,7 @@ kcov --include-pattern=lib/ coverage ./test/bats/bin/bats test/
 
 ---
 
-## Quick One-Liners
+## Quick One-Liners ⚡️
 
 ```bash
 # Upgrade all outdated pip packages (Linux)
@@ -540,3 +544,24 @@ du -sh */ | sort -rh | head -20
 # Watch a command every 2 seconds
 watch -n2 'kubectl get pods'
 ```
+
+
+---
+
+## Anti-patterns
+
+- 🚨 **Unquoted variables** - `rm -rf $DIR` with `DIR=""` expands to `rm -rf` (and then whatever follows). Always quote: `rm -rf "$DIR"`. The same applies to `$@` in argument passing - use `"$@"`, not `$@`.
+
+- 🚨 **Parsing JSON, YAML, or XML with `grep`, `sed`, or `awk`** - these tools operate on lines and break on multi-line values, escaped characters, and whitespace. Use `jq` for JSON, `yq` for YAML, `xmllint` for XML.
+
+- ⚠️ **Logging to stdout inside functions that may be captured** - `result=$(my_func)` captures all stdout including log lines, silently mixing data with diagnostics. Log to stderr (`>&2`); keep stdout for data only.
+
+- ⚠️ **`#!/bin/bash` in shebangs** - `/bin/bash` doesn't exist on all systems (notably NixOS, some containers). Use `#!/usr/bin/env bash` for portability.
+
+- 🚨 **Skipping `set -euo pipefail`** - without it, commands can fail silently mid-script and execution continues with corrupt state. Every script should start with `set -Eeuo pipefail`.
+
+- ⚠️ **`ls` output in scripts** - filenames can contain spaces, newlines, and glob characters that break word-splitting. Use glob patterns (`for f in *.tf`) or `find ... -print0 | xargs -0` instead.
+
+- ⚠️ **`cat file | grep pattern`** - unnecessary fork. Use `grep pattern file` directly. The same applies to `cat file | wc -l` → `wc -l < file`.
+
+- 🔬 **Ignoring `$?` after native commands** - with `set -e`, a failed command exits immediately, but commands in conditionals (`if cmd; then`) don't trigger the exit. Explicitly check: `cmd || { log_error "cmd failed"; exit 1; }`.

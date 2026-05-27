@@ -1,11 +1,19 @@
 ---
 title: Security Cheatsheet
-description: Fast-reference commands for nmap, netcat, curl, openssl, PowerShell, and browser JavaScript - the essentials for security assessments and CTFs.
+description: Security engineering reference - not purely blue-team. Split into Offensive (recon, enumeration, exploitation) and Defensive (hardening, monitoring, incident response). Covers protocol inspection, reverse shells, and diagnostic tooling alongside hardening guides.
 ---
 
 # Security Cheat Sheet
 
-Fast-reference commands for recon, enumeration, pivoting, and quick probing. Covers nmap, netcat, curl, openssl, PowerShell, and browser JavaScript console tricks.
+Security engineering reference - not purely blue-team. Split into Offensive (recon, enumeration, exploitation tooling) and Defensive (hardening, monitoring, incident response).
+
+> **Scope:** Useful for pentesters, platform engineers doing defensive work, and CTF. Assumes Linux/Kali tooling for offensive sections, Linux/Windows for defensive.
+>
+> **Versions:** nmap 7.x+, ffuf 2.x+, sqlmap 1.8+, socat 1.7.x+, PowerShell 7+ for defensive sections, Windows Server 2019/2022 for hardening content.
+
+---
+
+# Offensive Security
 
 ---
 
@@ -819,7 +827,7 @@ ssh user@<target> 'cat /etc/passwd'
 socat TCP-LISTEN:4444,reuseaddr,fork -
 ```
 
-### TLS-encrypted reverse shell - attacker listener
+### TLS-encrypted reverse shell - attacker listener 🔐 Requires explicit authorisation
 
 ```bash
 # Generate cert first
@@ -896,3 +904,800 @@ sqlmap -r request.txt --level 5 --risk 3 --dbs --batch
 ```bash
 sqlmap -u "https://<target>/page?id=1" --os-shell --batch
 ```
+
+---
+
+# Defensive Security
+
+---
+
+## Windows Hardening
+
+### Disable SMBv1 ✅ (common ransomware vector - should be off on all modern Windows)
+
+```powershell
+Set-SmbServerConfiguration -EnableSMB1Protocol $false -Force
+Set-SmbClientConfiguration -EnableSMB1Protocol $false -Force
+# Verify
+Get-SmbServerConfiguration | Select-Object EnableSMB1Protocol
+```
+
+### Disable SMBv1 via Windows Features
+
+```powershell
+Disable-WindowsOptionalFeature -Online -FeatureName smb1protocol -NoRestart
+```
+
+### Enable and configure Windows Firewall on all profiles
+
+```powershell
+Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled True
+# Block inbound by default, allow outbound
+Set-NetFirewallProfile -Profile Domain,Public,Private `
+  -DefaultInboundAction Block -DefaultOutboundAction Allow
+```
+
+### Block inbound RDP from the internet (allow only from trusted range)
+
+```powershell
+New-NetFirewallRule -DisplayName 'Block RDP Public' `
+  -Direction Inbound -Protocol TCP -LocalPort 3389 `
+  -RemoteAddress Internet -Action Block
+New-NetFirewallRule -DisplayName 'Allow RDP Internal' `
+  -Direction Inbound -Protocol TCP -LocalPort 3389 `
+  -RemoteAddress 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16 -Action Allow
+```
+
+### Enable Windows Defender real-time protection
+
+```powershell
+Set-MpPreference -DisableRealtimeMonitoring $false
+Set-MpPreference -DisableBehaviorMonitoring $false
+Set-MpPreference -DisableBlockAtFirstSeen $false
+Set-MpPreference -DisableIOAVProtection $false
+Set-MpPreference -DisableScriptScanning $false
+Set-MpPreference -EnableNetworkProtection Enabled
+```
+
+### Force Defender signature update
+
+```powershell
+Update-MpSignature
+```
+
+### Enable attack surface reduction (ASR) rules
+
+```powershell
+# Block Office apps from creating child processes
+Add-MpPreference -AttackSurfaceReductionRules_Ids d4f940ab-401b-4efc-aadc-ad5f3c50688a `
+  -AttackSurfaceReductionRules_Actions Enabled
+# Block credential stealing from LSASS
+Add-MpPreference -AttackSurfaceReductionRules_Ids 9e6c4e1f-7d60-472f-ba1a-a39ef669e4b0 `
+  -AttackSurfaceReductionRules_Actions Enabled
+# Block untrusted/unsigned processes from USB
+Add-MpPreference -AttackSurfaceReductionRules_Ids b2b3f03d-6a65-4f7b-a9c7-1c7ef74a9ba4 `
+  -AttackSurfaceReductionRules_Actions Enabled
+```
+
+### Enable PowerShell script block logging
+
+```powershell
+$regPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging'
+New-Item -Path $regPath -Force | Out-Null
+Set-ItemProperty -Path $regPath -Name 'EnableScriptBlockLogging' -Value 1
+```
+
+### Enable PowerShell module logging
+
+```powershell
+$regPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging'
+New-Item -Path $regPath -Force | Out-Null
+Set-ItemProperty -Path $regPath -Name 'EnableModuleLogging' -Value 1
+New-Item -Path "$regPath\ModuleNames" -Force | Out-Null
+Set-ItemProperty -Path "$regPath\ModuleNames" -Name '*' -Value '*'
+```
+
+### Enable PowerShell transcription logging
+
+```powershell
+$regPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\PowerShell\Transcription'
+New-Item -Path $regPath -Force | Out-Null
+Set-ItemProperty -Path $regPath -Name 'EnableTranscripting' -Value 1
+Set-ItemProperty -Path $regPath -Name 'OutputDirectory' -Value 'C:\PSTranscripts'
+Set-ItemProperty -Path $regPath -Name 'EnableInvocationHeader' -Value 1
+```
+
+### Enable audit policies (logon, process, privilege use)
+
+```powershell
+auditpol /set /subcategory:"Logon" /success:enable /failure:enable
+auditpol /set /subcategory:"Logoff" /success:enable
+auditpol /set /subcategory:"Process Creation" /success:enable /failure:enable
+auditpol /set /subcategory:"Privilege Use" /success:enable /failure:enable
+auditpol /set /subcategory:"Security Group Management" /success:enable /failure:enable
+auditpol /set /subcategory:"User Account Management" /success:enable /failure:enable
+# Review current policy
+auditpol /get /category:*
+```
+
+### Enable Credential Guard ✅ Current preferred LSASS protection (as of 2026, requires UEFI + Secure Boot)
+
+```powershell
+# Enable via registry (reboot required)
+$regPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard'
+Set-ItemProperty -Path $regPath -Name 'EnableVirtualizationBasedSecurity' -Value 1
+Set-ItemProperty -Path $regPath -Name 'RequirePlatformSecurityFeatures' -Value 3
+$cgPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa'
+Set-ItemProperty -Path $cgPath -Name 'LsaCfgFlags' -Value 1
+```
+
+### Disable LLMNR and NetBIOS (common credential capture vectors)
+
+```powershell
+# Disable LLMNR
+$llmnrPath = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient'
+New-Item -Path $llmnrPath -Force | Out-Null
+Set-ItemProperty -Path $llmnrPath -Name 'EnableMulticast' -Value 0
+
+# Disable NetBIOS over TCP/IP on all adapters
+$adapters = Get-WmiObject Win32_NetworkAdapterConfiguration | Where-Object { $_.TcpipNetbiosOptions -ne $null }
+$adapters | ForEach-Object { $_.SetTcpipNetbios(2) }
+```
+
+### Disable WDigest authentication 🔐 Must-do - prevents cleartext credentials in LSASS memory
+
+```powershell
+Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\SecurityProviders\WDigest' `
+  -Name 'UseLogonCredential' -Value 0
+```
+
+### Enable BitLocker on the OS drive
+
+```powershell
+Enable-BitLocker -MountPoint 'C:' -EncryptionMethod XtsAes256 `
+  -UsedSpaceOnly -TpmProtector
+Add-BitLockerKeyProtector -MountPoint 'C:' -RecoveryPasswordProtector
+# Save recovery key
+(Get-BitLockerVolume -MountPoint 'C:').KeyProtector |
+  Where-Object { $_.KeyProtectorType -eq 'RecoveryPassword' } |
+  Select-Object RecoveryPassword | Out-File C:\BitLockerRecovery.txt
+```
+
+### Enforce account lockout policy
+
+```powershell
+net accounts /lockoutthreshold:5 /lockoutduration:30 /lockoutwindow:30
+net accounts /minpwlen:14 /maxpwage:90 /uniquepw:10
+```
+
+### List and disable unnecessary local services
+
+```powershell
+# View all running services
+Get-Service | Where-Object { $_.Status -eq 'Running' } | Select-Object Name, DisplayName
+
+# Disable a service (example: Print Spooler on non-print servers)
+Stop-Service -Name Spooler -Force
+Set-Service -Name Spooler -StartupType Disabled
+```
+
+### Remove unused local user accounts
+
+```powershell
+# List all local accounts
+Get-LocalUser | Select-Object Name, Enabled, LastLogon
+
+# Disable an account
+Disable-LocalUser -Name 'OldAccount'
+
+# Remove an account
+Remove-LocalUser -Name 'OldAccount'
+```
+
+### Check for missing Windows updates
+
+```powershell
+Install-Module PSWindowsUpdate -Force -Scope CurrentUser
+Get-WindowsUpdate
+# Install all missing updates
+Install-WindowsUpdate -AcceptAll -AutoReboot
+```
+
+### Show recently installed updates
+
+```powershell
+Get-HotFix | Sort-Object InstalledOn -Descending | Select-Object -First 20
+```
+
+### Enable UAC at the highest level
+
+```powershell
+Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' `
+  -Name 'ConsentPromptBehaviorAdmin' -Value 2    # Prompt for credentials
+Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' `
+  -Name 'EnableLUA' -Value 1
+Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' `
+  -Name 'PromptOnSecureDesktop' -Value 1
+```
+
+### Baseline AppLocker policy (allow signed, block unsigned in user dirs)
+
+```powershell
+# Export current policy
+Get-AppLockerPolicy -Effective | Set-AppLockerPolicy -XMLPolicy C:\applocker_backup.xml
+
+# Create default rules (run as admin)
+Get-AppLockerPolicy -Local | Test-AppLockerPolicy -Path C:\Windows\System32\cmd.exe -User Everyone
+```
+
+---
+
+## Linux Hardening
+
+### SSH daemon hardening 🔐 (`/etc/ssh/sshd_config`)
+
+```bash
+# Apply these settings then reload: systemctl reload sshd
+cat >> /etc/ssh/sshd_config << 'EOF'
+PermitRootLogin no
+PasswordAuthentication no
+ChallengeResponseAuthentication no
+UsePAM yes
+X11Forwarding no
+AllowAgentForwarding no
+AllowTcpForwarding no
+PrintMotd no
+MaxAuthTries 3
+LoginGraceTime 30
+ClientAliveInterval 300
+ClientAliveCountMax 2
+PermitEmptyPasswords no
+Protocol 2
+EOF
+systemctl reload sshd
+```
+
+### Restrict SSH to specific users/groups
+
+```bash
+echo 'AllowGroups sshusers' >> /etc/ssh/sshd_config
+groupadd sshusers
+usermod -aG sshusers <username>
+systemctl reload sshd
+```
+
+### Configure UFW (Uncomplicated Firewall)
+
+```bash
+apt install ufw -y
+ufw default deny incoming
+ufw default allow outgoing
+ufw allow 22/tcp        # SSH - tighten to a specific source if possible
+ufw allow 443/tcp       # HTTPS
+ufw enable
+ufw status verbose
+```
+
+### Configure nftables (modern iptables replacement)
+
+```bash
+# Basic stateful ruleset
+nft add table inet filter
+nft add chain inet filter input '{ type filter hook input priority 0; policy drop; }'
+nft add chain inet filter forward '{ type filter hook forward priority 0; policy drop; }'
+nft add chain inet filter output '{ type filter hook output priority 0; policy accept; }'
+
+nft add rule inet filter input ct state established,related accept
+nft add rule inet filter input iif lo accept
+nft add rule inet filter input tcp dport 22 accept
+nft add rule inet filter input tcp dport 443 accept
+
+# Save and persist
+nft list ruleset > /etc/nftables.conf
+systemctl enable nftables
+```
+
+### Kernel hardening via sysctl
+
+```bash
+cat >> /etc/sysctl.d/99-hardening.conf << 'EOF'
+# Disable IP forwarding (enable only on routers)
+net.ipv4.ip_forward = 0
+net.ipv6.conf.all.forwarding = 0
+
+# Disable ICMP redirects
+net.ipv4.conf.all.accept_redirects = 0
+net.ipv4.conf.default.accept_redirects = 0
+net.ipv6.conf.all.accept_redirects = 0
+net.ipv4.conf.all.send_redirects = 0
+
+# Enable reverse path filtering (anti-spoofing)
+net.ipv4.conf.all.rp_filter = 1
+net.ipv4.conf.default.rp_filter = 1
+
+# Ignore ICMP broadcast requests
+net.ipv4.icmp_echo_ignore_broadcasts = 1
+
+# Disable source packet routing
+net.ipv4.conf.all.accept_source_route = 0
+net.ipv6.conf.all.accept_source_route = 0
+
+# Enable SYN flood protection
+net.ipv4.tcp_syncookies = 1
+
+# Disable IPv6 if not needed
+net.ipv6.conf.all.disable_ipv6 = 1
+net.ipv6.conf.default.disable_ipv6 = 1
+
+# Restrict dmesg to root
+kernel.dmesg_restrict = 1
+
+# Hide kernel pointers
+kernel.kptr_restrict = 2
+
+# Restrict ptrace to root
+kernel.yama.ptrace_scope = 1
+
+# Disable core dumps for SUID programs
+fs.suid_dumpable = 0
+
+# Randomise memory layout (ASLR)
+kernel.randomize_va_space = 2
+EOF
+sysctl --system
+```
+
+### Set secure file permissions on critical files
+
+```bash
+chmod 600 /etc/ssh/sshd_config
+chmod 644 /etc/passwd
+chmod 640 /etc/shadow
+chmod 640 /etc/gshadow
+chmod 644 /etc/group
+chmod 700 /root
+chmod 600 /etc/crontab
+chmod 700 /etc/cron.d /etc/cron.daily /etc/cron.weekly /etc/cron.monthly
+```
+
+### Disable unused filesystems and protocols
+
+```bash
+cat >> /etc/modprobe.d/disable-unused.conf << 'EOF'
+install cramfs /bin/true
+install freevxfs /bin/true
+install jffs2 /bin/true
+install hfs /bin/true
+install hfsplus /bin/true
+install squashfs /bin/true
+install udf /bin/true
+install dccp /bin/true
+install sctp /bin/true
+install rds /bin/true
+install tipc /bin/true
+EOF
+```
+
+### Enable and configure auditd
+
+```bash
+apt install auditd audispd-plugins -y
+
+# Key audit rules
+cat >> /etc/audit/rules.d/hardening.rules << 'EOF'
+# Watch passwd/shadow changes
+-w /etc/passwd -p wa -k identity
+-w /etc/shadow -p wa -k identity
+-w /etc/group -p wa -k identity
+-w /etc/sudoers -p wa -k sudoers
+
+# Watch SSH config
+-w /etc/ssh/sshd_config -p wa -k sshd
+
+# Log all privileged command execution
+-a always,exit -F arch=b64 -S execve -F euid=0 -k root_commands
+-a always,exit -F arch=b32 -S execve -F euid=0 -k root_commands
+
+# Log failed access attempts
+-a always,exit -F arch=b64 -S open -F exit=-EACCES -k access_denied
+-a always,exit -F arch=b64 -S open -F exit=-EPERM -k access_denied
+
+# Watch /tmp and /dev/shm for executed files
+-w /tmp -p x -k tmp_exec
+-w /dev/shm -p x -k shm_exec
+
+# Log sudo usage
+-w /usr/bin/sudo -p x -k sudo_usage
+-w /etc/sudoers.d -p wa -k sudoers
+EOF
+
+augenrules --load
+systemctl enable auditd
+systemctl start auditd
+```
+
+### Query auditd logs
+
+```bash
+# Failed logins
+ausearch -m USER_FAILED_LOGIN -ts today
+# All privileged commands
+ausearch -k root_commands -ts today | aureport -f -i
+# Changes to sudoers
+ausearch -k sudoers -ts today
+```
+
+### Install and configure fail2ban ✅ Current preferred brute-force mitigation (as of 2026)
+
+```bash
+apt install fail2ban -y
+cat > /etc/fail2ban/jail.local << 'EOF'
+[DEFAULT]
+bantime  = 1h
+findtime = 10m
+maxretry = 5
+banaction = nftables-multiport
+
+[sshd]
+enabled = true
+port    = ssh
+logpath = %(sshd_log)s
+backend = %(sshd_backend)s
+maxretry = 3
+bantime = 24h
+EOF
+systemctl enable fail2ban
+systemctl start fail2ban
+# Check ban status
+fail2ban-client status sshd
+```
+
+### Configure AppArmor (Debian/Ubuntu)
+
+```bash
+apt install apparmor apparmor-utils apparmor-profiles -y
+systemctl enable apparmor
+systemctl start apparmor
+# Check status
+aa-status
+# Put a profile into enforce mode
+aa-enforce /etc/apparmor.d/usr.sbin.nginx
+# Audit mode (log violations without blocking)
+aa-audit /etc/apparmor.d/usr.bin.python3
+```
+
+### Configure SELinux (RHEL/CentOS/Fedora)
+
+```bash
+# Check current status
+sestatus
+getenforce
+
+# Enable enforcing mode
+setenforce 1
+sed -i 's/^SELINUX=.*/SELINUX=enforcing/' /etc/selinux/config
+
+# List AVC denials
+ausearch -m avc -ts recent
+# Generate a policy module from denials
+audit2allow -a -M mypolicy
+semodule -i mypolicy.pp
+
+# Restore default context on a file
+restorecon -Rv /var/www/html
+```
+
+### Lock down sudo - require password and disable NOPASSWD
+
+```bash
+# Edit sudoers safely
+visudo
+# Ensure no NOPASSWD lines remain
+grep -r 'NOPASSWD' /etc/sudoers /etc/sudoers.d/
+
+# Require re-authentication every session
+echo 'Defaults timestamp_timeout=0' >> /etc/sudoers.d/00-security
+# Log all sudo commands
+echo 'Defaults logfile=/var/log/sudo.log' >> /etc/sudoers.d/00-security
+```
+
+### Enable automatic security updates (Debian/Ubuntu)
+
+```bash
+apt install unattended-upgrades -y
+dpkg-reconfigure --priority=low unattended-upgrades
+
+# Verify configuration
+cat /etc/apt/apt.conf.d/20auto-upgrades
+# Should contain:
+# APT::Periodic::Update-Package-Lists "1";
+# APT::Periodic::Unattended-Upgrade "1";
+```
+
+### Enable automatic security updates (RHEL/CentOS)
+
+```bash
+dnf install dnf-automatic -y
+sed -i 's/^apply_updates = .*/apply_updates = yes/' /etc/dnf/automatic.conf
+sed -i 's/^upgrade_type = .*/upgrade_type = security/' /etc/dnf/automatic.conf
+systemctl enable --now dnf-automatic.timer
+```
+
+### Check for world-writable files and fix them
+
+```bash
+# Find world-writable files (excluding /proc and /sys)
+find / -xdev -type f -perm -0002 2>/dev/null | grep -v '/proc\|/sys'
+
+# Find SUID/SGID binaries and verify they are expected
+find / -xdev \( -perm -4000 -o -perm -2000 \) -type f 2>/dev/null
+
+# Remove SUID from a binary that doesn't need it
+chmod u-s /path/to/binary
+```
+
+### Disable core dumps system-wide
+
+```bash
+echo '* hard core 0' >> /etc/security/limits.conf
+echo 'fs.suid_dumpable = 0' >> /etc/sysctl.d/99-hardening.conf
+sysctl -p /etc/sysctl.d/99-hardening.conf
+```
+
+### Check for accounts with empty passwords
+
+```bash
+awk -F: '($2 == "" ) { print $1 }' /etc/shadow
+# Lock any found
+passwd -l <username>
+```
+
+### Verify no accounts have UID 0 except root
+
+```bash
+awk -F: '($3 == 0) { print $1 }' /etc/passwd
+```
+
+### Check listening services and their owning processes
+
+```bash
+ss -tlnp    # TCP
+ss -ulnp    # UDP
+# Detailed with process info
+ss -tlnp | awk 'NR>1 {print $4, $6}' | sort
+```
+
+---
+
+## Network Hardening
+
+### Inspect TLS cipher suites offered by a server
+
+```bash
+nmap --script ssl-enum-ciphers -p 443 <target>
+```
+
+### Check TLS version support (reject TLS 1.0 / 1.1)
+
+```bash
+openssl s_client -connect <target>:443 -tls1   2>&1 | grep -E 'Cipher|alert'
+openssl s_client -connect <target>:443 -tls1_1 2>&1 | grep -E 'Cipher|alert'
+openssl s_client -connect <target>:443 -tls1_2 2>&1 | grep -E 'Cipher|alert'
+openssl s_client -connect <target>:443 -tls1_3 2>&1 | grep -E 'Cipher|alert'
+```
+
+### Nginx - secure TLS configuration
+
+```nginx
+ssl_protocols TLSv1.2 TLSv1.3;
+ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305';
+ssl_prefer_server_ciphers off;
+ssl_session_timeout 1d;
+ssl_session_cache shared:SSL:10m;
+ssl_session_tickets off;
+ssl_stapling on;
+ssl_stapling_verify on;
+add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
+add_header X-Frame-Options DENY always;
+add_header X-Content-Type-Options nosniff always;
+add_header Content-Security-Policy "default-src 'self'" always;
+add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+```
+
+### Check HTTP security headers on a site
+
+```bash
+curl -sI https://<target> | grep -iE 'strict-transport|content-security|x-frame|x-content-type|referrer-policy|permissions-policy'
+```
+
+### Verify DNS over HTTPS / DNSSEC
+
+```bash
+# Check DNSSEC validation
+dig +dnssec <domain> A
+dig @8.8.8.8 +dnssec <domain> DNSKEY
+
+# Test DMARC, SPF, DKIM records
+dig TXT _dmarc.<domain>
+dig TXT <domain>          # look for v=spf1
+dig TXT <selector>._domainkey.<domain>
+```
+
+### Block outbound DNS to prevent bypass of internal resolvers (nftables)
+
+```bash
+nft add rule inet filter output udp dport 53 ip daddr != 10.0.0.53 drop
+nft add rule inet filter output tcp dport 53 ip daddr != 10.0.0.53 drop
+```
+
+---
+
+## Incident Response - Quick Triage
+
+### Linux - capture process list with full command lines
+
+```bash
+ps auxf
+# Or with network connections
+ss -tlnp
+lsof -i -n -P
+```
+
+### Linux - find recently modified files (last 24h)
+
+```bash
+find / -xdev -mtime -1 -type f 2>/dev/null | grep -v '/proc\|/sys\|/run'
+```
+
+### Linux - check for unusual cron jobs
+
+```bash
+for dir in /etc/cron.d /etc/cron.daily /etc/cron.weekly /etc/cron.hourly /etc/cron.monthly; do
+  echo "=== $dir ===" && ls -la "$dir" 2>/dev/null
+done
+crontab -l 2>/dev/null
+cat /etc/crontab
+```
+
+### Linux - identify persistence mechanisms
+
+```bash
+# Startup scripts
+ls -la /etc/rc.local /etc/init.d/ /etc/systemd/system/
+# At jobs
+atq 2>/dev/null
+# User crontabs
+for user in $(cut -d: -f1 /etc/passwd); do
+  crontab -u "$user" -l 2>/dev/null | grep -v '^#' | grep -v '^$' | sed "s/^/$user: /"
+done
+```
+
+### Linux - check for active network connections to unexpected IPs
+
+```bash
+ss -tnp state established | awk 'NR>1 {print $4, $5, $6}' | sort -k2
+# Resolve process names for suspicious connections
+lsof -i -n -P | grep ESTABLISHED
+```
+
+### Linux - list all SUID binaries (compare to known-good baseline)
+
+```bash
+find / -xdev -perm -4000 -type f 2>/dev/null | tee /tmp/suid_now.txt
+# diff against a baseline
+diff /tmp/suid_baseline.txt /tmp/suid_now.txt
+```
+
+### Windows - check recently created accounts
+
+```powershell
+Get-LocalUser | Select-Object Name, Enabled, LastLogon, PasswordLastSet |
+  Sort-Object PasswordLastSet -Descending
+```
+
+### Windows - list active network connections with process names
+
+```powershell
+Get-NetTCPConnection -State Established |
+  Select-Object LocalAddress, LocalPort, RemoteAddress, RemotePort,
+    @{N='Process';E={(Get-Process -Id $_.OwningProcess -EA SilentlyContinue).Name}} |
+  Sort-Object RemoteAddress
+```
+
+### Windows - find recently created files in temp locations
+
+```powershell
+$cutoff = (Get-Date).AddHours(-24)
+Get-ChildItem -Path C:\Windows\Temp, $env:TEMP, 'C:\Users' -Recurse -ErrorAction SilentlyContinue |
+  Where-Object { $_.CreationTime -gt $cutoff } |
+  Select-Object FullName, CreationTime, Length
+```
+
+### Windows - check for suspicious scheduled tasks
+
+```powershell
+Get-ScheduledTask | Where-Object { $_.TaskPath -notlike '\Microsoft\*' } |
+  Select-Object TaskName, TaskPath, @{N='Action';E={$_.Actions.Execute}} |
+  Sort-Object TaskPath
+```
+
+### Windows - review security event log for failed logons (Event 4625)
+
+```powershell
+Get-WinEvent -FilterHashtable @{LogName='Security'; Id=4625; StartTime=(Get-Date).AddHours(-24)} |
+  Select-Object TimeCreated,
+    @{N='Account';E={$_.Properties[5].Value}},
+    @{N='Source';E={$_.Properties[19].Value}} |
+  Group-Object Source | Sort-Object Count -Descending
+```
+
+### Windows - hunt for common persistence registry keys
+
+```powershell
+$runKeys = @(
+  'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run',
+  'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce',
+  'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run',
+  'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce'
+)
+foreach ($key in $runKeys) {
+  Write-Host "=== $key ===" -ForegroundColor Cyan
+  Get-ItemProperty -Path $key -ErrorAction SilentlyContinue
+}
+```
+
+### Windows - check WMI subscriptions (common APT persistence)
+
+```powershell
+Get-WMIObject -Namespace root\subscription -Class __EventFilter
+Get-WMIObject -Namespace root\subscription -Class __EventConsumer
+Get-WMIObject -Namespace root\subscription -Class __FilterToConsumerBinding
+```
+
+### Collect a memory dump for forensics (Linux)
+
+```bash
+# Using LiME (requires kernel module compile)
+insmod lime-$(uname -r).ko "path=/tmp/mem.lime format=lime"
+# Or with avml
+avml /tmp/memory.raw
+```
+
+### Collect a memory dump for forensics (Windows)
+
+```powershell
+# Using WinPmem
+.\winpmem_mini_x64_rc2.exe --output C:\mem.raw --format raw
+```
+
+---
+
+## Anti-patterns
+
+### Offensive
+
+- 🚨 **`curl -k` / `--insecure` in production scripts or pipelines** - it silently disables TLS validation and trains teams to ignore certificate errors.
+
+- 🚨 **`nc -lvnp` listeners running unattended on internet-facing hosts** - they accept any connection with no authentication.
+
+- 🚨 **`sqlmap --os-shell` or `--os-pwn` without explicit written authorisation** - these are destructive operations.
+
+- 🚨 **Storing payloads, reverse shell scripts, or loot in your home directory on shared or production systems**.
+
+- 🚨 **`ffuf` or `nmap` against production systems without a change window** - noisy scans trigger alerts and can cause instability on fragile services.
+
+### Defensive
+
+- 🚨 **`PasswordAuthentication yes` in `sshd_config` on internet-facing hosts** - key-only authentication is non-negotiable.
+
+- 🚨 **`PermitRootLogin yes` in `sshd_config`** - use a named admin user and `sudo`.
+
+- 🚨 **`0.0.0.0/0` inbound on port 22 or 3389 in firewall rules** - restrict to known IPs, a VPN, or a bastion host.
+
+- 🚨 **Disabling Windows Defender without a tested, deployed replacement already in place**.
+
+- 🚨 **WDigest enabled** - `UseLogonCredential=1` stores credentials in cleartext in LSASS and is the primary target of Mimikatz-style attacks.
+
+- 🚨 **Relying solely on host-based firewall** - defence in depth requires network-layer controls too.
+
+- 🚨 **`NOPASSWD` sudo rights granted broadly** - use scoped entries for specific commands if automation requires it.

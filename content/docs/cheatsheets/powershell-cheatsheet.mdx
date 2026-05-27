@@ -1,11 +1,13 @@
 ---
 title: PowerShell Cheatsheet
-description: Advanced PowerShell 7+ patterns for Azure, DevOps, scripting, Pester testing, REST APIs, and automation.
+description: PowerShell 7+ patterns for Azure automation, DevOps pipelines, scripting, and systems administration. Assumes PowerShell 7.2+ / Az module 12+ / Pester 5.6+.
 ---
 
 # PowerShell Cheat Sheet
 
-PowerShell 7+ patterns for Azure automation, DevOps pipelines, scripting, and general systems administration. All examples are cross-platform unless noted.
+PowerShell 7+ patterns for Azure automation, DevOps pipelines, scripting, and systems administration. All examples are cross-platform unless noted.
+
+> **Versions:** PowerShell 7.2+ / Az module 12+ / Pester 5.6+ / Microsoft.Graph 2.x. Windows-only cmdlets (`Out-GridView`, registry access, COM objects) are noted inline where they appear.
 
 ---
 
@@ -66,6 +68,8 @@ trap {
 ---
 
 ## Logging
+
+> 🛠️ Deeper reference - covers stream selection (`Write-Information` vs `Write-Host` vs `Write-Verbose`), levelled wrappers, JSON output for log shippers, and stream redirection for CI. For quick lookups, jump to "Use the right stream".
 
 PowerShell's `Write-*` cmdlets already form a layered logging system - the trick is using them correctly. `Write-Host` writes straight to the host (not pipeable, not capturable); for anything that should respect verbosity preferences or be captured, use the typed streams.
 
@@ -691,7 +695,7 @@ $report | Sort-Object RGCount -Descending | Format-Table
 
 ## Azure Authentication
 
-### Service principal (client secret)
+### Service principal (client secret) ⚠️ Legacy - prefer managed identity or OIDC federation
 
 ```powershell
 function Connect-AzSP {
@@ -710,7 +714,7 @@ function Connect-AzSP {
 }
 ```
 
-### Managed identity (IMDS / workload identity)
+### Managed identity (IMDS / workload identity) ✅ Current preferred auth for Azure-hosted automation (as of 2026)
 
 ```powershell
 # System-assigned MI (no credentials needed)
@@ -720,7 +724,7 @@ Connect-AzAccount -Identity
 Connect-AzAccount -Identity -AccountId '<client-id-of-uami>'
 ```
 
-### Federated / OIDC (GitHub Actions)
+### Federated / OIDC (GitHub Actions) ✅ Current preferred CI/CD auth pattern (as of 2026)
 
 ```powershell
 # In a GitHub Actions workflow, ACTIONS_ID_TOKEN_REQUEST_URL and ACTIONS_ID_TOKEN_REQUEST_TOKEN are set
@@ -1103,6 +1107,8 @@ Invoke-Native { terraform apply tfplan }
 
 ## Pester Testing
 
+> 🛠️ Deeper reference - covers test structure, configuration, mocking patterns, and tag-filtered runs. Assumes Pester 5.6+. For quick test execution, jump to "Pester configuration and running".
+
 ### Basic test structure
 
 ```powershell
@@ -1318,7 +1324,7 @@ Export-ModuleMember -Function $Public.BaseName
 
 ---
 
-## Profile & Shell Setup
+## Profile & Shell Setup 🏠 Personal workflow configuration
 
 ### $PROFILE locations
 
@@ -1395,7 +1401,7 @@ add_newline = true
 [azure]
 disabled = false
 format   = 'on [$symbol($subscription)]($style) '
-symbol   = '☁ '
+symbol   = '☁️ '
 style    = 'blue bold'
 
 [kubernetes]
@@ -1482,3 +1488,22 @@ $results = $jobs | Wait-Job | Receive-Job
 $jobs    | Remove-Job
 $results | Format-Table name, properties
 ```
+
+
+---
+
+## Anti-patterns
+
+- 🚨 **`Write-Host` in modules or automation scripts** - it bypasses the pipeline, can't be captured, redirected, or suppressed by callers. Use `Write-Information` for log lines, `Write-Verbose` for diagnostics. Reserve `Write-Host` for interactive UI output (colour, banners) only.
+
+- 🚨 **Swallowing errors with a bare `catch {}`** - an empty catch block silently hides failures. At minimum, rethrow with `throw` or `Write-Error $_ -ErrorAction Stop`. If you genuinely want to ignore an error, be explicit: `catch { Write-Verbose "Ignored: $_" }`.
+
+- ⚠️ **`-ErrorAction SilentlyContinue` used broadly** - it suppresses all errors from a cmdlet, not just expected ones. Use it surgically on specific calls where a missing resource is a known-valid state, and check `$?` or `$Error` afterwards.
+
+- ⚠️ **Piping to `Format-Table` or `Format-List` inside functions** - once formatted, objects become strings and can't be processed by downstream callers. Format only at the top-level call site or in a script's final output block.
+
+- 🚨 **`Invoke-Expression` (IEX) for dynamic strings** - it's a code injection vector. Build command arrays and use the call operator `& $cmd @args` instead.
+
+- ⚠️ **`$ErrorActionPreference = 'SilentlyContinue'` set globally** - set it to `'Stop'` at script top and adjust per-call. Global silencing turns real failures into silent no-ops that are painful to debug.
+
+- 🔬 **Checking `$?` after PowerShell cmdlet calls** - `$?` reflects the last cmdlet's success, but with `$ErrorActionPreference = 'Stop'`, errors throw before you reach the check. Use `$?` only for native executables where `$LASTEXITCODE` also applies.

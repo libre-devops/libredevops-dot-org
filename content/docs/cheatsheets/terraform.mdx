@@ -1,11 +1,13 @@
 ---
 title: Terraform Cheatsheet
-description: Advanced Terraform reference for Azure - provider auth, state, lifecycle, expressions, validation, modules, RBAC, Key Vault, and CI/CD patterns.
+description: Advanced Terraform reference for Azure - provider auth, state, lifecycle, expressions, modules, testing, and CI/CD patterns. Assumes Terraform 1.9+ / AzureRM provider 4.x.
 ---
 
 # Terraform Cheat Sheet
 
 Advanced Terraform patterns for Azure infrastructure. Covers the language deeply, common Azure-specific idioms, and real operational concerns around state and CI/CD.
+
+> **Versions:** Terraform 1.9+ / AzureRM provider 4.x / random 3.6+ / Kubernetes provider 2.30+. Ephemeral values require 1.10+, write-only arguments require 1.11+, Terraform Actions require 1.14+. These are called out inline where they apply.
 
 ---
 
@@ -34,7 +36,7 @@ provider "azurerm" {
 
 ### Authentication options
 
-#### OIDC / Workload Identity Federation (recommended for CI/CD)
+#### OIDC / Workload Identity Federation ✅ Current preferred CI/CD auth pattern (as of 2026)
 
 No secrets stored. Configure a federated credential on the service principal in Entra ID.
 
@@ -56,7 +58,7 @@ export ARM_CLIENT_ID="..."
 export ARM_SUBSCRIPTION_ID="..."
 ```
 
-#### Managed Identity (recommended for self-hosted runners)
+#### Managed Identity ✅ Current preferred auth for self-hosted runners (as of 2026)
 
 ```hcl
 provider "azurerm" {
@@ -66,7 +68,7 @@ provider "azurerm" {
 }
 ```
 
-#### Service principal with client secret (legacy - avoid in new projects)
+#### Service principal with client secret ⚠️ Legacy - avoid in new projects, use OIDC or managed identity
 
 ```bash
 export ARM_CLIENT_ID="..."
@@ -929,7 +931,7 @@ resource "azurerm_virtual_machine_extension" "ama" {
 }
 ```
 
-### `check` blocks - ambient assertions (Terraform 1.5+)
+### `check` blocks - ambient assertions 🧪 Terraform 1.5+
 
 `check` blocks run on every plan and apply and emit **warnings**, not errors - the operation continues regardless. Use them for compliance drift detection, runtime health assertions, and anything you want visible in CI without being a hard gate.
 
@@ -1025,7 +1027,7 @@ check "nsg_flow_logs_enabled" {
 
 ---
 
-## Ephemeral Values & Write-Only Arguments
+## Ephemeral Values & Write-Only Arguments 🧪 Terraform 1.10+ (ephemeral) / 1.11+ (write-only)
 
 Plan and state files persist on disk and in the remote backend - any secret stored there leaks. Terraform 1.10 introduced **ephemeral resources** (values that live only for the duration of one operation), and 1.11 added **write-only arguments** (`*_wo`) on resources so secrets can be sent to the provider without ever being recorded. Key Vault secrets are the canonical example.
 
@@ -1716,7 +1718,7 @@ terraform_run() {
   local workspace="${1:-prod}"
   local tf_version="${2:-1.9.5}"
 
-  command -v tfenv &>/dev/null && { tfenv install "$tf_version"; tfenv use "$tf_version"; }
+  command -v tenv &>/dev/null && { tenv tf install "$tf_version"; tenv tf use "$tf_version"; }
 
   terraform init && \
   { terraform workspace select "$workspace" || terraform workspace new "$workspace"; } && \
@@ -1773,6 +1775,8 @@ terraform plan -var-file="environments/prod.tfvars" -out tfplan.plan
 ---
 
 ## Testing
+
+> 🛠️ Deeper reference - covers the native `.tftest.hcl` framework: unit tests with mock providers, integration tests with real infrastructure, validation tests (`expect_failures`), and per-resource overrides. For quick command lookup, jump to "Commands".
 
 Terraform's native test framework uses `.tftest.hcl` files. Place them in a `tests/` subdirectory or the module root. Each file can contain `run` blocks that either plan or apply the module, then assert on the result.
 
@@ -2113,7 +2117,7 @@ resource "helm_release" "nginx_ingress" {
 }
 ```
 
-### Ansible provider - inventory management + playbook execution via actions
+### Ansible provider - inventory management + playbook execution via actions 🧪 Terraform 1.14+ (Actions)
 
 The `ansible.com/ansible` provider manages **Ansible inventory state** (registering hosts and groups). Playbook execution is now driven by **Terraform actions** (Terraform 1.14+) - a first-class imperative construct that replaces the old `terraform_data` + `local-exec` shim. Actions are declared at the top level, hooked into resource lifecycles via `action_trigger`, and can also be fired ad-hoc with `terraform apply -invoke`.
 
@@ -2334,3 +2338,17 @@ provider "kubernetes" {
 # Set provider host to a dummy value; use -target to create the cluster first,
 # then re-run without -target so the provider can resolve the real host.
 ```
+
+
+---
+
+## Anti-patterns
+
+- ⚠️ **Local state for team or production environments** - local `.tfstate` files can't be locked, can't be shared, and get lost. Use a remote backend (Azure Blob with `use_azuread_auth = true`) from day one.
+- 🚨 **Secrets in `.tfvars` files committed to git** - even `sensitive = true` variables end up in state. Use Key Vault data sources, ephemeral resources (TF 1.10+), or environment variables (`TF_VAR_name`) instead.
+- 🚨 **Using `sensitive = true` as a substitute for not storing secrets** - it redacts values from plan output but the plaintext is still written to the state file. Use ephemeral values or write-only arguments for secrets that must never land in state.
+- ⚠️ **`count` for resources that may be removed from the middle of a list** - removing index `0` re-numbers all remaining resources and forces replacement. Use `for_each` with stable string keys instead.
+- ⚠️ **`-target` as a normal workflow pattern** - it leaves state partially applied, diverges from what the code describes, and makes subsequent plans unpredictable. Use it only to unblock a stuck apply, then run a full plan immediately after.
+- 🚨 **`timestamp()` directly in resource tags** - it re-evaluates on every plan, creating a perpetual diff. Use an `external` data source that only runs during apply, or omit the timestamp from managed tags.
+- ⚠️ **Provider configuration in child modules** - providers should be declared and configured in the root module only. Child modules inherit them via the `providers` map. Provider config in a module makes it non-reusable.
+- 🔬 **Running `terraform apply` without reviewing the plan** - always `terraform plan -out tfplan.plan` first, then `terraform apply tfplan.plan`. Skipping the plan file means the apply re-plans with potentially different inputs.

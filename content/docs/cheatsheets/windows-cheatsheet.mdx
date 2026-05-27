@@ -1,17 +1,19 @@
 ---
 title: Windows Cheatsheet
-description: Windows PowerShell snippets for networking, WSL, Scoop, firewall rules, and system administration.
+description: Windows PowerShell snippets for networking, WSL2, Scoop, firewall rules, and system administration. Assumes Windows 10/11 / PowerShell 7+.
 ---
 
 # Windows Cheat Sheet
 
 PowerShell and Windows administration snippets for common platform engineering tasks.
 
+> **Versions:** Windows 10/11 · PowerShell 7+ · WSL2 · Scoop (current)
+
 ---
 
 ## Networking
 
-### Temporary TCP port listener
+### Temporary TCP port listener 🛠️ Operational helper
 
 Opens a firewall rule, listens on a port for connections, then cleans up the rule on exit. Useful for quickly verifying network connectivity from another host.
 
@@ -60,7 +62,7 @@ Get-NetTCPConnection -State Listen | Sort-Object LocalPort | Select-Object Local
 
 ---
 
-## Scoop Package Manager
+## Scoop Package Manager 🏠 Personal dev setup
 
 Scoop installs developer tools without requiring admin - ideal for development machines and CI agents.
 
@@ -110,12 +112,12 @@ wsl --install -d Ubuntu-22.04    # install a specific distro
 wsl --set-default Ubuntu-22.04   # change default distro
 wsl --set-version Ubuntu-22.04 2 # upgrade to WSL2
 wsl --shutdown                   # stop all running distros
-wsl --unregister Ubuntu-22.04    # remove a distro (destructive)
+wsl --unregister Ubuntu-22.04    # 🚨 remove a distro - permanently destroys all data; export first
 ```
 
 ---
 
-## Firewall
+## Firewall 🔐
 
 ```powershell
 # List all firewall rules
@@ -163,3 +165,14 @@ $env:MY_VAR = "value"
 # Set permanently for all users (requires admin)
 [System.Environment]::SetEnvironmentVariable("MY_VAR", "value", "Machine")
 ```
+
+---
+
+## Anti-patterns
+
+- **`irm <url> | iex` without reviewing the script** - executes arbitrary code from the network at current privilege. Inspect the URL in a browser first, or download to a file and review before running.
+- **`Set-ExecutionPolicy Bypass -Scope Process` in production scripts** - silently disables PowerShell script signing controls for that session. Use a properly signed script or `RemoteSigned` at minimum.
+- **`wsl --unregister <distro>` without a backup** 🚨 - permanently and irrecoverably deletes the distro's filesystem. Export first: `wsl --export Ubuntu-22.04 ubuntu-backup.tar`.
+- **Hardcoding credentials in `.ps1` scripts** - PowerShell history and transcript logs may capture the value. Use `Get-Credential`, Azure Key Vault, or environment variables instead.
+- **`Set-ExecutionPolicy Unrestricted -Scope LocalMachine`** - disables all script execution controls machine-wide, including for other users and service accounts. Use the minimum required scope (`CurrentUser` or `Process`).
+- **Leaving temporary firewall rules behind** - rules added with `New-NetFirewallRule` for testing persist across reboots unless explicitly removed. Always pair them with a `Remove-NetFirewallRule` in a `finally` block (as in the listener example above).

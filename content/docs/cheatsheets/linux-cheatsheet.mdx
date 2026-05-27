@@ -1,17 +1,19 @@
 ---
 title: Linux Cheatsheet
-description: Ubuntu, Fedora/RHEL, and WSL setup scripts - package managers, developer tools, CA certificates, and environment configuration.
+description: Ubuntu, Fedora/RHEL, and WSL2 setup scripts - package managers, developer tools, CA certificates, and environment configuration. Targets Ubuntu 22.04+ / Fedora 38+.
 ---
 
 # Linux Cheat Sheet
 
 Setup scripts and one-liners for Ubuntu, Fedora/RHEL, and WSL2 environments.
 
+> **Versions:** Ubuntu 22.04+ · Fedora 38+ / RHEL 9+ · WSL2
+
 ---
 
 ## Homebrew
 
-### Install Homebrew on Linux
+### Install Homebrew on Linux 🏠 Personal setup helper
 
 ```bash
 #!/usr/bin/env bash
@@ -97,7 +99,7 @@ sudo sh -c 'echo "deb [arch=amd64] https://packages.microsoft.com/repos/microsof
 sudo apt-get update && sudo apt-get install azure-functions-core-tools-4 -y
 ```
 
-### Install Starship prompt
+### Install Starship prompt 🏠 Personal setup helper
 
 ```bash
 #!/usr/bin/env bash
@@ -196,7 +198,7 @@ brew install terraform-docs
 echo "alias td='terraform-docs markdown . > README.md'" >> ~/.bashrc
 ```
 
-### Install JetBrains Toolbox
+### Install JetBrains Toolbox 🏠 Personal setup helper
 
 ```bash
 #!/bin/bash
@@ -251,7 +253,7 @@ echo 'eval "$(pyenv init -)"' >> ~/.bashrc
 
 ## WSL2
 
-### Create symlinks to Windows directories
+### Create symlinks to Windows directories 🏠 Personal config
 
 ```bash
 ln -s /mnt/c/Users          winusers
@@ -285,4 +287,15 @@ Invoke-WebRequest -Uri "https://github.com/sakai135/wsl-vpnkit/releases/latest/d
 wsl --import wsl-vpnkit "$env:USERPROFILE\wsl-vpnkit" wsl-vpnkit.tar.gz --version 2
 wsl -d wsl-vpnkit
 wsl.exe -d wsl-vpnkit --cd /app service wsl-vpnkit start
+
+---
+
+## Anti-patterns
+
+- **`curl | bash` as root without reviewing the script** - executes arbitrary code from the network at root privilege. Always inspect the script first, download to a temp file, or use a checksum-verified release asset.
+- **Not pinning tool versions in setup scripts** - `tfenv install latest` or `goenv install latest` will install whatever is current at runtime; a later run may break your environment. Pin to a specific version for reproducibility.
+- **Sourcing `~/.bashrc` inside a non-interactive script** - `~/.bashrc` is designed for interactive shells; scripts that source it inherit aliases, `PS1`, and interactive-only settings that can cause unpredictable behaviour. Use explicit paths or pass env vars directly.
+- **`sudo pip install` system-wide** - corrupts the system Python managed by apt/dnf and fights with OS package managers. Use `pipx` for CLI tools, `uv venv` or `python -m venv` for project environments.
+- **Modifying `/etc/profile.d/` for user-specific config** - that directory applies to all users on the system. Put personal `PATH` and env var changes in `~/.bashrc` or `~/.profile`.
+- **Hardcoding absolute paths from one user's home in shared scripts** - `/home/craig/...` paths break for any other user. Use `$HOME`, `~`, or `$(pwd)` instead.
 ```

@@ -1,17 +1,19 @@
 ---
 title: Git Cheatsheet
-description: Git configuration, core operations, branching, remotes, undoing changes, and automation scripts for GitHub and Azure DevOps.
+description: Git configuration, core operations, branching, remotes, undoing changes, and automation scripts for GitHub and Azure DevOps. Assumes Git 2.40+ / gh CLI 2.x.
 ---
 
 # Git Cheat Sheet
 
 A practical reference covering day-to-day Git usage, config templates, and bulk automation scripts for GitHub and Azure DevOps.
 
+> **Versions:** Git 2.40+ · gh CLI 2.x
+
 ---
 
 ## Setup & Configuration
 
-### Linux / WSL `.gitconfig`
+### Linux / WSL `.gitconfig` 🏠 Personal config
 
 Place this at `~/.gitconfig`. The credential helper paths assume `gh` CLI is installed at `/usr/bin/gh` - adjust if your install location differs.
 
@@ -49,7 +51,7 @@ Place this at `~/.gitconfig`. The credential helper paths assume `gh` CLI is ins
     helper = !/usr/bin/gh auth git-credential
 ```
 
-### Windows `.gitconfig`
+### Windows `.gitconfig` 🏠 Personal config
 
 Place this at `%USERPROFILE%\.gitconfig`. The `gh.exe` path assumes Scoop - adjust to your package manager.
 
@@ -172,7 +174,7 @@ git fetch origin                    # download without merging
 git fetch --all                     # fetch all remotes
 git pull origin main
 git push origin main
-git push --force-with-lease         # safer force push - fails if remote has moved
+git push --force-with-lease         # ✅ safer force push - fails if remote has moved since last fetch
 ```
 
 ---
@@ -200,7 +202,7 @@ git reset HEAD file.txt             # older equivalent
 git revert HEAD                     # create a new commit that undoes HEAD (safe for shared branches)
 git reset --soft HEAD~1             # undo last commit, keep changes staged
 git reset --mixed HEAD~1            # undo last commit, keep changes unstaged (default)
-git reset --hard HEAD~1             # undo last commit and discard all changes (destructive)
+git reset --hard HEAD~1             # 🚨 undo last commit and discard all changes (destructive)
 ```
 
 ---
@@ -320,7 +322,7 @@ terraform.rc
 
 ## Automation Scripts
 
-### Clone all repos in a GitHub org
+### Clone all repos in a GitHub org 🏠 Personal workflow helper
 
 Uses the `gh` CLI - run `gh auth login` first.
 
@@ -334,7 +336,7 @@ gh repo list "${org}" --limit 1000 | while read -r repo _; do
 done
 ```
 
-### Clone all repos in an Azure DevOps project
+### Clone all repos in an Azure DevOps project 🏠 Personal workflow helper
 
 Uses the `az` CLI with the `azure-devops` extension. The script logs in if needed and skips repos that are already cloned locally.
 
@@ -373,7 +375,7 @@ foreach ($Repo in $Repos) {
 
 ## Advanced
 
-### Reset git history to a single initial commit
+### Reset git history to a single initial commit 🚨
 
 Rewrites the entire branch history to a single commit. Useful for sanitising a repo before making it public. **This is destructive and rewrites remote history** - only use it on repos where you control all forks or there are none.
 
@@ -399,4 +401,16 @@ git log --all --full-history -- "**/my-file.ts"
 git cherry-pick abc1234             # apply a single commit to the current branch
 git cherry-pick abc1234^..def5678   # apply a range inclusive of abc1234 through def5678
 git cherry-pick --no-commit abc1234 # apply changes without committing
+
+---
+
+## Anti-patterns
+
+- **`git push --force` without `--lease`** - can overwrite commits pushed by others since your last fetch. Always use `--force-with-lease`, which fails if the remote has moved.
+- **Amending or rebasing already-pushed commits** - rewrites history that others may have fetched; causes divergence and requires force-pushing. Only rewrite commits that have never left your machine.
+- **Committing secrets or credentials** - once pushed, they're in history forever (and likely cached by forks/mirrors). Use environment variables or a vault, and rotate immediately if leaked.
+- **Committing directly to `main`/`master`** - bypasses review and CI. Use short-lived feature branches and PRs even for solo projects; it preserves a clean audit trail.
+- **`git stash` as long-term storage** - stashes are local and unnamed by default; easy to lose track of or apply to the wrong branch. Use a WIP branch instead for anything lasting more than a few minutes.
+- **`git clean -fd` without `-n` (dry-run) first** - irreversibly deletes untracked files and directories including build artefacts you might want. Always run `-n` to preview first.
+- **`git reset --hard` with uncommitted work** 🚨 - permanently discards all changes with no recovery path. Stash or commit first.
 ```
