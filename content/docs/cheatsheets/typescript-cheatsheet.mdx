@@ -458,6 +458,205 @@ async function apiFetch<T>(url: string, init?: RequestInit): Promise<T> {
 
 ---
 
+## Logging
+
+`console.log` is fine for scripts and the dev loop, but in any server-side TypeScript (Next.js Route Handlers, Node services, AWS Lambda, Azure Functions) it's the wrong tool: no levels, no structured fields, no redaction, and synchronous I/O on the event loop. The de-facto Node logger is **pino** - fast, JSON-by-default, and integrates cleanly with Next.js, Fastify, NestJS, and OpenTelemetry.
+
+### `pino` - structured JSON logging
+
+```bash
+pnpm add pino
+pnpm add -D pino-pretty   # dev-only - human-readable output
+```
+
+```typescript
+// src/lib/logger.ts
+import pino from 'pino'
+
+export const logger = pino({
+  level: process.env.LOG_LEVEL ?? 'info',
+  base:  { service: 'my-api', env: process.env.NODE_ENV },
+  timestamp: pino.stdTimeFunctions.isoTime,
+
+  // Redact common secret fields - applied to every log payload
+  redact: {
+    paths: [
+      'req.headers.authorization',
+      'req.headers.cookie',
+      '*.password',
+      '*.token',
+      '*.connectionString',
+    ],
+    censor: '[REDACTED]',
+  },
+
+  // Pretty-print in dev only - in prod, stay as JSON for log shippers
+  transport: process.env.NODE_ENV === 'development'
+    ? { target: 'pino-pretty', options: { colorize: true, translateTime: 'SYS:HH:MM:ss.l' } }
+    : undefined,
+})
+```
+
+Use it with **structured fields**, not interpolation - the first arg is a context object, the second is the message:
+
+```typescript
+import { logger } from '@/lib/logger'
+
+logger.info({ orderId, customerId, elapsedMs }, 'order processed')
+logger.warn({ vault: vaultName }, 'soft-delete disabled')
+logger.error({ err, exitCode: rc }, 'apply failed')   // pino auto-serialises Error objects
+```
+
+### Child loggers - bind context once, reuse everywhere
+
+```typescript
+// Bind a correlation id / request id once - every line through the child carries it.
+const reqLog = logger.child({ correlationId: req.headers['x-correlation-id'], userId: user.id })
+
+reqLog.info('checkout starting')
+await runCheckout()
+reqLog.info({ orderId }, 'checkout complete')
+```
+
+### Request-scoped context with `AsyncLocalStorage`
+
+In an HTTP handler you usually don't want to thread `reqLog` through every function call. `AsyncLocalStorage` (Node 14+) gives you implicit per-request context that survives `await` boundaries.
+
+```typescript
+// src/lib/request-context.ts
+import { AsyncLocalStorage } from 'node:async_hooks'
+import { randomUUID } from 'node:crypto'
+import { logger } from './logger'
+
+type Context = { correlationId: string; userId?: string }
+const als = new AsyncLocalStorage<Context>()
+
+export const requestContext = {
+  run: <T>(ctx: Context, fn: () => T): T => als.run(ctx, fn),
+  get: (): Context | undefined => als.getStore(),
+}
+
+// A logger that picks up whatever context is current.
+export const log = new Proxy(logger, {
+  get(target, prop: keyof typeof logger) {
+    const ctx = requestContext.get()
+    return ctx ? target.child(ctx)[prop] : target[prop]
+  },
+}) as typeof logger
+```
+
+```typescript
+// Next.js Route Handler / Express middleware
+export async function POST(req: Request) {
+  return requestContext.run(
+    { correlationId: req.headers.get('x-correlation-id') ?? randomUUID() },
+    async () => {
+      log.info('handling checkout')        // correlationId attached automatically
+      await processOrder()                  // nested calls inherit it
+      return Response.json({ ok: true })
+    },
+  )
+}
+```
+
+### Logging decorator pattern
+
+The decorator pattern works the same in TypeScript as in C#: wrap a service in another class that implements the same interface, log around each call, delegate inside.
+
+```typescript
+export interface OrderService {
+  place(req: PlaceOrderRequest): Promise<Order>
+}
+
+export class RealOrderService implements OrderService {
+  async place(req: PlaceOrderRequest): Promise<Order> { /* real work */ }
+}
+
+export class LoggingOrderService implements OrderService {
+  constructor(private readonly inner: OrderService, private readonly log = logger) {}
+
+  async place(req: PlaceOrderRequest): Promise<Order> {
+    const child = this.log.child({ method: 'place', customerId: req.customerId })
+    const start = performance.now()
+    child.info('starting')
+    try {
+      const order = await this.inner.place(req)
+      child.info({ orderId: order.id, elapsedMs: performance.now() - start }, 'ok')
+      return order
+    } catch (err) {
+      child.error({ err, elapsedMs: performance.now() - start }, 'failed')
+      throw err
+    }
+  }
+}
+
+// Wire it up
+export const orderService: OrderService = new LoggingOrderService(new RealOrderService())
+```
+
+For stacked decorators (logging → retry → caching → real), just nest the constructors in the desired order - innermost is the real implementation.
+
+#### Class method decorator (TypeScript 5.0+ standard decorators)
+
+If you'd rather decorate individual methods than wrap a whole class:
+
+```typescript
+function logged(level: 'info' | 'debug' = 'info') {
+  return function <This, Args extends unknown[], Return>(
+    originalMethod: (this: This, ...args: Args) => Promise<Return>,
+    context: ClassMethodDecoratorContext<This, (this: This, ...args: Args) => Promise<Return>>,
+  ) {
+    const name = String(context.name)
+    return async function (this: This, ...args: Args): Promise<Return> {
+      const start = performance.now()
+      logger[level]({ method: name }, 'starting')
+      try {
+        const result = await originalMethod.call(this, ...args)
+        logger[level]({ method: name, elapsedMs: performance.now() - start }, 'ok')
+        return result
+      } catch (err) {
+        logger.error({ method: name, err, elapsedMs: performance.now() - start }, 'failed')
+        throw err
+      }
+    }
+  }
+}
+
+class OrderService {
+  @logged()
+  async place(req: PlaceOrderRequest): Promise<Order> { /* ... */ }
+}
+```
+
+Requires `"target": "ES2022"` (or later) and **not** `"experimentalDecorators": true` in `tsconfig.json` - the legacy decorator proposal is incompatible with the standard one.
+
+### Log levels - when to use which
+
+| Level | Use for |
+|---|---|
+| `trace` | Per-iteration detail, payload dumps - dev only |
+| `debug` | Local diagnostics - off in prod |
+| `info`  | Business events: request handled, job completed |
+| `warn`  | Recoverable issue, retry succeeded, fallback used |
+| `error` | An operation failed; caller will see a failure |
+| `fatal` | Process is unhealthy / about to exit - alert on it |
+
+### Sensible defaults checklist
+
+- One logger module (`src/lib/logger.ts`), one configuration - import the same instance everywhere.
+- JSON in prod, pretty in dev - flip on `NODE_ENV`.
+- `LOG_LEVEL` env var to change verbosity without code changes.
+- Redact secret-y keys (`authorization`, `cookie`, `password`, `token`) globally.
+- Use `logger.child(...)` to bind context; never string-concat fields into the message.
+- Pass `Error` objects as `{ err }` - pino has a custom serialiser that captures stack + name + message.
+- Don't `console.log` in server code - it's synchronous, unstructured, and bypasses redaction.
+
+### Pino + Next.js / Edge runtime caveat
+
+`pino` is a Node-only library - it won't run on the Edge runtime (`export const runtime = 'edge'`). For Edge routes, use a lighter logger or write `console.log(JSON.stringify({...}))` directly. The same applies to Cloudflare Workers and Vercel Edge Functions.
+
+---
+
 ## Modules & Declarations
 
 ```typescript

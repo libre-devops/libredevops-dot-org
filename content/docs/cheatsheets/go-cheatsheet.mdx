@@ -808,32 +808,207 @@ func (d *Duration) UnmarshalJSON(b []byte) error {
 
 ## Structured Logging (slog)
 
+`log/slog` (Go 1.21+) is the standard structured logger. Use it instead of `log.Println` / `fmt.Println` for anything you'd ever read in a log aggregator. JSON in prod, text in dev, levels and context propagation built in.
+
+### Sensible defaults
+
 ```go
-// slog - built-in structured logging (Go 1.21+)
-import "log/slog"
+import (
+    "log/slog"
+    "os"
+)
 
-slog.Info("server starting", "addr", ":8080")
-slog.Error("request failed", "err", err, "path", r.URL.Path)
+func setupLogger() *slog.Logger {
+    level := slog.LevelInfo
+    if os.Getenv("LOG_LEVEL") == "debug" {
+        level = slog.LevelDebug
+    }
 
-// JSON logger
-logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-    Level: slog.LevelDebug,
-}))
-slog.SetDefault(logger)
+    opts := &slog.HandlerOptions{
+        Level:     level,
+        AddSource: false,                       // set true in dev to include file:line
+        ReplaceAttr: redactSensitive,           // see "Redaction" below
+    }
 
-// Logger with persistent fields
-log := logger.With("service", "api", "version", "1.0")
-log.Info("connected", "db", "postgres")
+    var handler slog.Handler
+    if os.Getenv("ENV") == "development" {
+        handler = slog.NewTextHandler(os.Stdout, opts)
+    } else {
+        handler = slog.NewJSONHandler(os.Stdout, opts)
+    }
 
-// Grouped attributes
-log.LogAttrs(ctx, slog.LevelInfo, "request",
-    slog.Group("http",
-        slog.String("method", r.Method),
-        slog.String("path",   r.URL.Path),
-        slog.Int("status",    200),
-    ),
+    logger := slog.New(handler).With(
+        "service", "my-api",
+        "version", buildVersion,
+    )
+    slog.SetDefault(logger)
+    return logger
+}
+```
+
+### Log lines - always structured fields, never `fmt.Sprintf`
+
+```go
+// CORRECT - each field is queryable in your log backend
+slog.Info("order processed",
+    "order_id",    order.ID,
+    "customer_id", order.CustomerID,
+    "elapsed_ms",  elapsed.Milliseconds())
+
+// WRONG - destroys the structure
+slog.Info(fmt.Sprintf("order %s processed for %s", order.ID, order.CustomerID))
+```
+
+Prefer `slog.LogAttrs(ctx, level, msg, attrs...)` on hot paths - it skips reflection and is allocation-free for typed attrs:
+
+```go
+slog.LogAttrs(ctx, slog.LevelInfo, "order processed",
+    slog.String("order_id",    order.ID),
+    slog.String("customer_id", order.CustomerID),
+    slog.Int64("elapsed_ms",   elapsed.Milliseconds()),
 )
 ```
+
+### Context propagation - one correlation ID across every log line
+
+`slog`'s methods take a `context.Context`. Stash the request-scoped logger in the context once at the HTTP boundary; every nested call pulls it back out.
+
+```go
+type ctxKey struct{}
+
+func WithLogger(ctx context.Context, l *slog.Logger) context.Context {
+    return context.WithValue(ctx, ctxKey{}, l)
+}
+
+func L(ctx context.Context) *slog.Logger {
+    if l, ok := ctx.Value(ctxKey{}).(*slog.Logger); ok {
+        return l
+    }
+    return slog.Default()
+}
+
+// HTTP middleware - bind correlation_id + user_id for every request
+func Logging(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        cid := r.Header.Get("X-Correlation-ID")
+        if cid == "" { cid = uuid.NewString() }
+
+        logger := slog.Default().With("correlation_id", cid, "method", r.Method, "path", r.URL.Path)
+        ctx    := WithLogger(r.Context(), logger)
+
+        start := time.Now()
+        next.ServeHTTP(w, r.WithContext(ctx))
+        logger.InfoContext(ctx, "request handled", "elapsed_ms", time.Since(start).Milliseconds())
+    })
+}
+
+// Anywhere downstream:
+func handleOrder(ctx context.Context, id string) {
+    L(ctx).Info("handling order", "order_id", id)
+}
+```
+
+### Redaction via `ReplaceAttr`
+
+`HandlerOptions.ReplaceAttr` runs on every attribute before it's emitted - the right place to mask tokens, passwords, or any field name you don't want in logs.
+
+```go
+var sensitiveKeys = map[string]bool{
+    "password": true, "token": true, "authorization": true,
+    "connection_string": true, "api_key": true,
+}
+
+func redactSensitive(groups []string, a slog.Attr) slog.Attr {
+    if sensitiveKeys[strings.ToLower(a.Key)] {
+        return slog.String(a.Key, "[REDACTED]")
+    }
+    return a
+}
+```
+
+### `LogValuer` - control how a type renders itself
+
+Implement `slog.LogValuer` so a struct logs its safe fields automatically, without callers having to remember to redact.
+
+```go
+type User struct {
+    ID       string
+    Email    string
+    Password string  // never log this
+}
+
+func (u User) LogValue() slog.Value {
+    return slog.GroupValue(
+        slog.String("id",    u.ID),
+        slog.String("email", u.Email),
+        // Password is deliberately omitted
+    )
+}
+
+slog.Info("user created", "user", user)   // password never appears
+```
+
+### Logger decorator - timing + error context around a service
+
+The decorator pattern works here as in C#/TypeScript: same interface, wrap inner, log around each call.
+
+```go
+type OrderService interface {
+    Place(ctx context.Context, req PlaceOrderRequest) (Order, error)
+}
+
+type loggingOrderService struct {
+    inner  OrderService
+    logger *slog.Logger
+}
+
+func NewLoggingOrderService(inner OrderService, logger *slog.Logger) OrderService {
+    return &loggingOrderService{inner: inner, logger: logger}
+}
+
+func (s *loggingOrderService) Place(ctx context.Context, req PlaceOrderRequest) (Order, error) {
+    log := s.logger.With("method", "Place", "customer_id", req.CustomerID)
+    start := time.Now()
+    log.InfoContext(ctx, "starting")
+
+    order, err := s.inner.Place(ctx, req)
+    if err != nil {
+        log.ErrorContext(ctx, "failed", "err", err, "elapsed_ms", time.Since(start).Milliseconds())
+        return order, err
+    }
+    log.InfoContext(ctx, "ok", "order_id", order.ID, "elapsed_ms", time.Since(start).Milliseconds())
+    return order, nil
+}
+```
+
+### Log-level guidance
+
+| Level | Use for |
+|---|---|
+| `Debug` | Local diagnostics, payload dumps - off in prod |
+| `Info`  | Business events: request handled, job complete |
+| `Warn`  | Recoverable issue, retry succeeded, fallback used |
+| `Error` | An operation failed; caller will see a failure |
+
+Custom levels (`slog.Level(12)` for "Notice", `slog.Level(-2)` for "Trace") are supported but rarely worth it - the four above cover every case I've seen in practice.
+
+### Sensible defaults checklist
+
+- One `setupLogger()` call in `main`; everything else uses `slog.Default()` or `L(ctx)`.
+- JSON in prod, text in dev - flip on `ENV`.
+- `LOG_LEVEL` env var to change verbosity without code changes.
+- `ReplaceAttr` to redact known-sensitive keys globally.
+- Bind context (`correlation_id`, `user_id`) in middleware, not at each call site.
+- Pass `error` values as the `"err"` attr - `slog` calls `.Error()` on them automatically.
+- Use `LogValuer` for any type with sensitive fields.
+
+### Common pitfalls
+
+- **Don't use `log.Println` / `fmt.Println` in production code** - unstructured, no levels, no redaction.
+- **Don't pass `context.Context` as a logger attr** - use `InfoContext`/`ErrorContext` to read attributes from it, don't serialise the whole context.
+- **Don't build the message with `fmt.Sprintf`** - it defeats the point of structured logging and runs even when the level is disabled.
+- **Don't create a new logger per request without `With(...)`** - it allocates on every call. Build a child via `logger.With(...)` and stash it in context.
+- **`slog.Default()` is set once** - if you call `SetDefault` mid-program, code holding a previous reference still uses the old one. Configure at startup only.
 
 ---
 

@@ -53,6 +53,113 @@ print_alert() {
 
 ---
 
+## Logging
+
+Bash has no built-in logger - everything is `echo` plus convention. The minimum bar in any script you'd run in CI or in production: levels, timestamps, output to **stderr** for anything that isn't structured data on stdout, and a single env var to control verbosity.
+
+### Leveled log functions
+
+```bash
+#!/usr/bin/env bash
+# Source this once at the top of your script.
+
+# LOG_LEVEL: DEBUG < INFO < WARN < ERROR (default INFO)
+LOG_LEVEL="${LOG_LEVEL:-INFO}"
+
+# Map level names to numeric weights for comparison.
+declare -A _LOG_WEIGHTS=( [DEBUG]=10 [INFO]=20 [WARN]=30 [ERROR]=40 )
+
+_log() {
+    local level="$1"; shift
+    local msg="$*"
+    local want="${_LOG_WEIGHTS[$LOG_LEVEL]:-20}"
+    local have="${_LOG_WEIGHTS[$level]:-20}"
+    (( have < want )) && return 0
+
+    # ISO-8601 UTC timestamp, level-padded, write to stderr so stdout stays for data.
+    printf '%s  %-5s  %s\n' \
+        "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$level" "$msg" >&2
+}
+
+log_debug() { _log DEBUG "$@"; }
+log_info()  { _log INFO  "$@"; }
+log_warn()  { _log WARN  "$@"; }
+log_error() { _log ERROR "$@"; }
+
+# Usage
+log_info  "Starting deploy to $env"
+log_warn  "Soft-delete disabled on vault $vault_name"
+log_error "Apply failed with exit code $rc"
+LOG_LEVEL=DEBUG ./deploy.sh   # turn on verbose logging
+```
+
+### Why stderr?
+
+Anything diagnostic goes to **stderr** (`>&2`); stdout is reserved for **data the caller wants to consume**. This keeps `result=$(my_script.sh)` clean even when the script logs heavily, and CI runners still surface both streams in their UI.
+
+```bash
+# Right - log to stderr, return JSON on stdout
+get_vault_secret() {
+    log_info "Fetching secret $1"
+    az keyvault secret show --vault-name "$kv" --name "$1" --query value -o tsv
+}
+
+secret=$(get_vault_secret "db-password")   # secret captured, logs printed live
+```
+
+### Structured (JSON) logging for log shippers
+
+If a log shipper (Fluent Bit, Vector, Loki agent) is parsing your output, emit JSON lines instead of free text. One line per event keeps it grep-friendly *and* machine-parseable.
+
+```bash
+log_json() {
+    local level="$1"; shift
+    local msg="$*"
+    # Use jq to escape values correctly - never string-concat into JSON.
+    jq -cn \
+        --arg ts    "$(date -u +'%Y-%m-%dT%H:%M:%S.%3NZ')" \
+        --arg level "$level" \
+        --arg msg   "$msg" \
+        --arg host  "$(hostname)" \
+        --arg pid   "$$" \
+        '{ts: $ts, level: $level, host: $host, pid: ($pid|tonumber), msg: $msg}' >&2
+}
+
+log_json INFO  "deploy started"
+log_json ERROR "apply failed: $rc"
+```
+
+Add context fields with extra `--arg` pairs and a richer `jq` template - e.g. `correlation_id`, `env`, `module`. Stick to one event per line.
+
+### `trap` for error context
+
+Capture line number and command on unhandled errors so you don't have to guess where the script died.
+
+```bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+on_err() {
+    local exit_code=$?
+    log_error "command '$BASH_COMMAND' failed at line $1 (exit=$exit_code)"
+    exit "$exit_code"
+}
+trap 'on_err $LINENO' ERR
+```
+
+`set -E` is what makes `ERR` traps inherit into functions and subshells - skip it and the trap won't fire from inside helpers.
+
+### Sensible defaults checklist
+
+- `set -Eeuo pipefail` at the top of every script.
+- All logging goes to `>&2`; stdout is reserved for data.
+- Timestamp every line in UTC (`date -u +'%Y-%m-%dT%H:%M:%SZ'`).
+- `LOG_LEVEL` env var to flip verbose mode without code changes.
+- One JSON object per line if anything will parse the output.
+- An `ERR` trap that prints the failed command + line number.
+
+---
+
 ## String Utilities
 
 ```bash
@@ -201,6 +308,214 @@ echo "# Define tfrel function" >> ~/.bashrc
 declare -f tfrel >> ~/.bashrc
 echo "tfrel appended to ~/.bashrc"
 ```
+
+---
+
+## Testing with bats
+
+**bats-core** (Bash Automated Testing System) is the de-facto unit test runner for bash. Tests are plain `.bats` files that look like bash with `@test` blocks. Companion libraries (`bats-assert`, `bats-support`, `bats-file`) give you readable assertions.
+
+### Install
+
+```bash
+# Linux (system-wide)
+git clone https://github.com/bats-core/bats-core.git
+cd bats-core
+sudo ./install.sh /usr/local
+
+# macOS
+brew install bats-core
+
+# Per-project (recommended for CI reproducibility) - vendor as git submodules
+mkdir -p test/test_helper
+git submodule add https://github.com/bats-core/bats-core.git           test/bats
+git submodule add https://github.com/bats-core/bats-support.git        test/test_helper/bats-support
+git submodule add https://github.com/bats-core/bats-assert.git         test/test_helper/bats-assert
+git submodule add https://github.com/bats-core/bats-file.git           test/test_helper/bats-file
+```
+
+### Test file structure
+
+```bash
+#!/usr/bin/env bats
+# test/string_utils.bats
+
+setup() {
+    load 'test_helper/bats-support/load'
+    load 'test_helper/bats-assert/load'
+    load 'test_helper/bats-file/load'
+
+    # Source the script under test
+    PROJECT_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
+    source "$PROJECT_ROOT/lib/string_utils.sh"
+}
+
+@test "upper_case_convert: lowercase input -> uppercase" {
+    run upper_case_convert "hello"
+    assert_success
+    assert_output "HELLO"
+}
+
+@test "upper_case_convert: already uppercase is unchanged" {
+    run upper_case_convert "FOO"
+    assert_output "FOO"
+}
+
+@test "title_case_convert: handles multiple words" {
+    run title_case_convert "hello world"
+    assert_output "Hello World"
+}
+
+@test "non-existent function fails cleanly" {
+    run not_a_real_function
+    assert_failure
+}
+```
+
+### Useful assertions
+
+```bash
+@test "assertion examples" {
+    run echo "hello world"
+
+    assert_success                       # exit code 0
+    assert_failure                       # non-zero exit
+    assert_failure 2                     # specific exit code
+
+    assert_output "hello world"          # exact match
+    assert_output --partial "hello"      # substring
+    assert_output --regexp '^hello.*$'   # regex
+
+    refute_output "goodbye"              # negative match
+    assert_line --index 0 "hello world"  # specific line in multi-line output
+
+    # File assertions (from bats-file)
+    assert_file_exist  /etc/hostname
+    assert_file_executable ./deploy.sh
+    assert_file_contains /etc/hostname "expected"
+}
+```
+
+### `setup` / `teardown` / `setup_file` / `teardown_file`
+
+```bash
+setup_file() {
+    # Once per file - heavy setup goes here
+    export FIXTURE_DIR="$(mktemp -d)"
+    cp -r tests/fixtures/* "$FIXTURE_DIR"
+}
+
+teardown_file() {
+    rm -rf "$FIXTURE_DIR"
+}
+
+setup() {
+    # Per test - light/cheap setup
+    cd "$BATS_TEST_TMPDIR"   # fresh temp dir per test, auto-cleaned
+}
+
+teardown() {
+    # Per test - rarely needed; $BATS_TEST_TMPDIR is auto-removed
+    :
+}
+```
+
+### Mocking external commands - PATH override
+
+Bash has no built-in mocking. The standard trick: prepend a temp directory to `PATH` containing fake executables that print what you want.
+
+```bash
+@test "deploy.sh calls terraform apply with -auto-approve" {
+    local mock_dir; mock_dir=$(mktemp -d)
+
+    # Fake `terraform` that records its args and exits 0
+    cat > "$mock_dir/terraform" <<'EOF'
+#!/usr/bin/env bash
+echo "$@" >> "$MOCK_CALLS"
+EOF
+    chmod +x "$mock_dir/terraform"
+
+    export MOCK_CALLS="$BATS_TEST_TMPDIR/calls.log"
+    : > "$MOCK_CALLS"
+    PATH="$mock_dir:$PATH" run ./deploy.sh prod
+
+    assert_success
+    assert_file_contains "$MOCK_CALLS" "apply -auto-approve"
+}
+```
+
+### Mocking shell functions - override after sourcing
+
+If the script under test calls a helper function (not an external binary), redefine the function in the test after sourcing.
+
+```bash
+@test "deploy aborts if precheck fails" {
+    source ./deploy.sh
+
+    # Override the precheck function
+    run_precheck() { return 1; }
+    export -f run_precheck
+
+    run deploy_main
+    assert_failure
+    assert_output --partial "precheck failed"
+}
+```
+
+### Running tests
+
+```bash
+# Run a single file
+./test/bats/bin/bats test/string_utils.bats
+
+# Run the whole suite
+./test/bats/bin/bats test/
+
+# Parallel (one process per file)
+./test/bats/bin/bats --jobs 4 test/
+
+# JUnit output for CI
+./test/bats/bin/bats --report-formatter junit -o test-results test/
+
+# TAP output (default; CI runners often parse this natively)
+./test/bats/bin/bats --formatter tap test/
+```
+
+### GitHub Actions example
+
+```yaml
+# .github/workflows/test.yml
+- uses: actions/checkout@v4
+  with:
+    submodules: recursive   # pull in bats + helpers
+- name: Run bats tests
+  run: ./test/bats/bin/bats --report-formatter junit -o test-results test/
+- uses: dorny/test-reporter@v1
+  if: always()
+  with:
+    name: bats
+    path: test-results/*.xml
+    reporter: java-junit
+```
+
+### Coverage with `kcov`
+
+bats integrates with `kcov` for line-level coverage. Install kcov (`apt install kcov` on Ubuntu) then:
+
+```bash
+mkdir -p coverage
+kcov --include-pattern=lib/ coverage ./test/bats/bin/bats test/
+# coverage/index.html now has the report
+```
+
+### Sensible defaults checklist
+
+- One `.bats` file per script/module under test, named `<thing>.bats`.
+- `setup()` sources the script under test; never run installation steps inside a test.
+- Use `run <command>` then `assert_*` - direct invocation breaks status capture.
+- One assertion per behavioural rule; avoid mega-tests that fail for unclear reasons.
+- Mock external commands via PATH override; never call real `terraform`/`az`/`kubectl` from a unit test.
+- Tests run in `$BATS_TEST_TMPDIR` (auto-cleaned) - never write to the working tree.
 
 ---
 

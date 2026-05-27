@@ -985,6 +985,180 @@ for resource in track(resources, description="Processing..."):
     process(resource)
 ```
 
+### Structured (JSON) logging - production default
+
+Free-text logs are unparseable at scale. For anything running in containers, App Service, or a serverless function, emit one JSON object per line - any log shipper will pick it up. `python-json-logger` (`pip install python-json-logger`) is the no-fuss option; in Python 3.12+ the standard `logging` library can do it natively via a custom formatter.
+
+```python
+import logging
+import sys
+from pythonjsonlogger.json import JsonFormatter
+
+handler = logging.StreamHandler(sys.stdout)
+handler.setFormatter(JsonFormatter(
+    "%(asctime)s %(levelname)s %(name)s %(message)s",
+    rename_fields={"asctime": "ts", "levelname": "level"},
+    timestamp=True,
+))
+
+root = logging.getLogger()
+root.setLevel(logging.INFO)
+root.handlers = [handler]
+
+log = logging.getLogger(__name__)
+log.info("deploy started", extra={"env": "prod", "resource_group": "rg-app"})
+# {"ts": "...", "level": "INFO", "name": "myapp", "message": "deploy started", "env": "prod", "resource_group": "rg-app"}
+```
+
+The `extra=` dict promotes keys into the JSON record - prefer this to `f"deploy {env}"` so each field is queryable.
+
+### Context propagation - `contextvars` + filter
+
+Adding `correlation_id`, `user_id`, or `request_id` to *every* log line in a request scope is a job for `contextvars` plus a logging filter. Works across `async` boundaries (unlike `threading.local`).
+
+```python
+import contextvars
+import logging
+
+_correlation_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "correlation_id", default=None
+)
+
+class ContextFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.correlation_id = _correlation_id.get() or "-"
+        return True
+
+logging.getLogger().addFilter(ContextFilter())
+
+# In an HTTP middleware / message handler:
+async def handle(request):
+    token = _correlation_id.set(request.headers.get("x-correlation-id", "..."))
+    try:
+        log.info("handling request")   # every nested log gets correlation_id automatically
+        await do_work()
+    finally:
+        _correlation_id.reset(token)
+```
+
+For the JSON formatter, just include `%(correlation_id)s` in the format string (or use a custom formatter that reads any attribute starting with `_ctx_`).
+
+### `LoggerAdapter` - bind context to a logger instance
+
+When the context is known at construction time (e.g. one logger per tenant or per job), `LoggerAdapter` is simpler than `contextvars`.
+
+```python
+class JobLogger(logging.LoggerAdapter):
+    def process(self, msg, kwargs):
+        kwargs.setdefault("extra", {}).update(self.extra)
+        return msg, kwargs
+
+base_log = logging.getLogger("jobs")
+job_log  = JobLogger(base_log, {"job_id": "abc123", "tenant": "acme"})
+job_log.info("started")          # every line carries job_id + tenant
+```
+
+### Logging decorator - timing and error context
+
+For a clean cross-cutting timing/error pattern, wrap callables with a decorator. Works for sync, and a parallel `wraps` for async.
+
+```python
+import functools
+import logging
+import time
+from collections.abc import Awaitable, Callable
+from typing import ParamSpec, TypeVar
+
+log = logging.getLogger(__name__)
+P = ParamSpec("P")
+R = TypeVar("R")
+
+def logged(level: int = logging.INFO) -> Callable[[Callable[P, R]], Callable[P, R]]:
+    def decorator(fn: Callable[P, R]) -> Callable[P, R]:
+        @functools.wraps(fn)
+        def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+            start = time.perf_counter()
+            log.log(level, "%s starting", fn.__qualname__)
+            try:
+                result = fn(*args, **kwargs)
+                log.log(level, "%s ok in %.1fms", fn.__qualname__,
+                        (time.perf_counter() - start) * 1000)
+                return result
+            except Exception:
+                log.exception("%s failed after %.1fms", fn.__qualname__,
+                              (time.perf_counter() - start) * 1000)
+                raise
+        return wrapper
+    return decorator
+
+# Async version
+def logged_async(level: int = logging.INFO):
+    def decorator(fn: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
+        @functools.wraps(fn)
+        async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+            start = time.perf_counter()
+            log.log(level, "%s starting", fn.__qualname__)
+            try:
+                result = await fn(*args, **kwargs)
+                log.log(level, "%s ok in %.1fms", fn.__qualname__,
+                        (time.perf_counter() - start) * 1000)
+                return result
+            except Exception:
+                log.exception("%s failed after %.1fms", fn.__qualname__,
+                              (time.perf_counter() - start) * 1000)
+                raise
+        return wrapper
+    return decorator
+
+@logged()
+def process_batch(items: list[str]) -> int: ...
+
+@logged_async()
+async def fetch_user(user_id: str) -> dict: ...
+```
+
+### `structlog` - if you'd rather not hand-roll any of this
+
+```python
+import structlog
+
+structlog.configure(
+    processors=[
+        structlog.contextvars.merge_contextvars,   # auto-pick contextvars
+        structlog.processors.add_log_level,
+        structlog.processors.TimeStamper(fmt="iso", utc=True),
+        structlog.processors.dict_tracebacks,
+        structlog.processors.JSONRenderer(),
+    ],
+)
+
+log = structlog.get_logger()
+log.info("deploy_started", env="prod", resource_group="rg-app")
+
+# Bind once, use many - returns a new logger with the context baked in
+job_log = log.bind(job_id="abc123", tenant="acme")
+job_log.info("started")
+job_log.warning("retrying", attempt=2)
+```
+
+### Log-level guidance
+
+| Level | Use for |
+|---|---|
+| `DEBUG`   | Local diagnostics, payload dumps - off in prod |
+| `INFO`    | Business events: deploy started, batch processed |
+| `WARNING` | Recoverable issue, retry succeeded, fallback used |
+| `ERROR`   | An operation failed; caller will see a failure |
+| `CRITICAL`| Process is unhealthy / about to exit - alert on it |
+
+### Common pitfalls
+
+- **Don't use `print()` for diagnostics.** It bypasses levels, handlers, and formatters - and goes to stdout, mixing with real output.
+- **Don't f-string the message** for production lines: `log.info(f"user {uid} did {x}")` builds the string even when the level is disabled. Use lazy formatting: `log.info("user %s did %s", uid, x)`.
+- **Don't log secrets.** Mask tokens/passwords/connection strings at the call site - the log backend is not a vault.
+- **Use `log.exception(...)` in `except:` blocks** - it captures the traceback automatically at ERROR level. `log.error(str(e))` loses the stack.
+- **Configure logging in *one* place** (entrypoint or `main()`), not in library modules. Libraries should call `logging.getLogger(__name__)` and let the app decide handlers/levels.
+
 ---
 
 ## Testing

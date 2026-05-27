@@ -1025,6 +1025,145 @@ check "nsg_flow_logs_enabled" {
 
 ---
 
+## Ephemeral Values & Write-Only Arguments
+
+Plan and state files persist on disk and in the remote backend - any secret stored there leaks. Terraform 1.10 introduced **ephemeral resources** (values that live only for the duration of one operation), and 1.11 added **write-only arguments** (`*_wo`) on resources so secrets can be sent to the provider without ever being recorded. Key Vault secrets are the canonical example.
+
+### Ephemeral resources - read a secret without persisting it
+
+`ephemeral` blocks behave like `data` blocks but the result is discarded at the end of the operation. The value is never written to state, plan, or any output.
+
+```hcl
+ephemeral "azurerm_key_vault_secret" "admin_password" {
+  name         = "vm-admin-password"
+  key_vault_id = data.azurerm_key_vault.shared.id
+}
+
+# The value can be referenced anywhere a normal data source can - but only
+# inside arguments that themselves accept ephemeral values (write-only args,
+# provider config, other ephemeral blocks, locals marked ephemeral, etc.)
+```
+
+Differences vs. `data "azurerm_key_vault_secret"`:
+
+| | `data` source | `ephemeral` source |
+|---|---|---|
+| Stored in state | Yes (encrypted at rest only if backend supports it) | No |
+| Visible in plan output | Yes (as sensitive) | No - shown as `(ephemeral)` |
+| Refreshes on every plan | Yes | Yes |
+| Usable as resource argument | Anywhere | Only in write-only / ephemeral-accepting fields |
+
+### Write-only arguments - set a secret without persisting it
+
+Write-only attributes are paired arguments: `<name>_wo` carries the value, `<name>_wo_version` is a user-controlled version number that tells Terraform when to push a new value (since it can't compare the old value - it isn't stored).
+
+```hcl
+resource "azurerm_key_vault_secret" "db_pass" {
+  name         = "db-password"
+  key_vault_id = azurerm_key_vault.kv.id
+
+  # New write-only pattern - the plaintext never lands in state
+  value_wo         = ephemeral.azurerm_key_vault_secret.bootstrap.value
+  value_wo_version = 1   # bump this integer to force a rewrite
+}
+```
+
+Bumping `value_wo_version` (e.g. `1` → `2`) is the **only** way Terraform knows the value has changed. Without it, the secret is written exactly once and ignored thereafter - so this also replaces the older `lifecycle { ignore_changes = [value] }` idiom.
+
+### Ephemeral variables and locals
+
+Variables and outputs (in nested modules) can be marked `ephemeral`. Trying to assign them to a non-ephemeral context will fail validation.
+
+```hcl
+variable "db_password" {
+  type      = string
+  ephemeral = true   # callers must pass it via -var or TF_VAR_, never via tfvars committed to git
+  sensitive = true
+}
+
+locals {
+  # Locals that reference ephemeral values are themselves ephemeral
+  bootstrap_password = ephemeral.azurerm_key_vault_secret.admin_password.value
+}
+```
+
+### End-to-end pattern - bootstrap a VM admin password from Key Vault, never persist it
+
+```hcl
+# 1. Read the bootstrap value ephemerally (not stored in state)
+ephemeral "azurerm_key_vault_secret" "vm_admin" {
+  name         = "vm-admin-password"
+  key_vault_id = data.azurerm_key_vault.shared.id
+}
+
+# 2. Pass it to the VM as a write-only argument
+resource "azurerm_linux_virtual_machine" "vm" {
+  name                            = "vm-${local.prefix}-app-01"
+  resource_group_name             = azurerm_resource_group.rg.name
+  location                        = local.location
+  size                            = "Standard_D2ds_v5"
+  admin_username                  = "azureadmin"
+  disable_password_authentication = false
+
+  admin_password_wo         = ephemeral.azurerm_key_vault_secret.vm_admin.value
+  admin_password_wo_version = 1
+
+  network_interface_ids = [azurerm_network_interface.nic.id]
+
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Premium_LRS"
+  }
+
+  source_image_reference {
+    publisher = "Canonical"
+    offer     = "0001-com-ubuntu-server-jammy"
+    sku       = "22_04-lts-gen2"
+    version   = "latest"
+  }
+}
+
+# 3. Rotate the password later by bumping vm_admin_password_wo_version
+#    and updating the secret in Key Vault out-of-band (or via a separate apply).
+```
+
+After `terraform apply`, `terraform show` will display the VM resource but the password field will be absent from state entirely - not redacted, **absent**. The same plan applied against a backend dump or a leaked `.tfstate` will not expose the credential.
+
+### Read-only / computed-only attributes - patterns to be aware of
+
+Some attributes are marked read-only by the provider schema: they're populated after creation and cannot be set. Common Azure examples:
+
+```hcl
+azurerm_key_vault.kv.vault_uri              # set by API after create
+azurerm_linux_virtual_machine.vm.private_ip_address
+azurerm_storage_account.sa.primary_blob_endpoint
+```
+
+If a value is computed *and* sensitive (connection strings, primary keys), pair it with `sensitive = true` on any output that consumes it, and prefer an ephemeral data source if a downstream resource only needs to read it transiently. To keep Terraform from churning on provider-rewritten values, use `lifecycle.ignore_changes`:
+
+```hcl
+resource "azurerm_key_vault_secret" "external_managed" {
+  name         = "rotated-by-another-system"
+  key_vault_id = azurerm_key_vault.kv.id
+  value        = "placeholder-only-used-on-first-create"
+
+  lifecycle {
+    ignore_changes = [value, tags["last_rotated"]]
+  }
+}
+```
+
+When to use which:
+
+| Goal | Use |
+|---|---|
+| Read a secret only during this run, no state record | `ephemeral` data source |
+| Write a secret to a resource without persisting plaintext | `*_wo` + `*_wo_version` |
+| Tolerate provider/external mutation of an existing attribute | `lifecycle.ignore_changes` |
+| Hide a value from plan/apply output but keep it in state | `sensitive = true` |
+
+---
+
 ## State Management
 
 ### Force-unlock a stuck state
@@ -1974,15 +2113,16 @@ resource "helm_release" "nginx_ingress" {
 }
 ```
 
-### Ansible provider - inventory management + playbook execution
+### Ansible provider - inventory management + playbook execution via actions
 
-The `ansible.com/ansible` provider manages **Ansible inventory state** - it registers hosts and groups so that the Ansible CLI (or AWX/AAP) can discover them. Running the playbook itself is triggered via `terraform_data` with a `local-exec` provisioner, which executes after the inventory is registered.
+The `ansible.com/ansible` provider manages **Ansible inventory state** (registering hosts and groups). Playbook execution is now driven by **Terraform actions** (Terraform 1.14+) - a first-class imperative construct that replaces the old `terraform_data` + `local-exec` shim. Actions are declared at the top level, hooked into resource lifecycles via `action_trigger`, and can also be fired ad-hoc with `terraform apply -invoke`.
 
 ```hcl
 terraform {
+  required_version = ">= 1.14"
   required_providers {
     azurerm = { source = "hashicorp/azurerm", version = "~> 4.0" }
-    ansible = { source = "ansible.com/ansible", version = "~> 1.3" }
+    ansible = { source = "ansible/ansible",   version = "~> 2.0" }   # 2.x exposes actions
   }
 }
 
@@ -2018,6 +2158,14 @@ resource "azurerm_linux_virtual_machine" "vm" {
   }
 
   tags = local.tags
+
+  # Run the configure_web action after the VM is created or updated.
+  lifecycle {
+    action_trigger {
+      events  = [after_create, after_update]
+      actions = [action.ansible_playbook.configure_web]
+    }
+  }
 }
 
 # --- Ansible inventory ---
@@ -2025,10 +2173,10 @@ resource "azurerm_linux_virtual_machine" "vm" {
 resource "ansible_group" "webservers" {
   name = "webservers"
   variables = {
-    http_port          = "80"
-    https_port         = "443"
-    ansible_user       = "azureadmin"
-    env                = var.environment
+    http_port    = "80"
+    https_port   = "443"
+    ansible_user = "azureadmin"
+    env          = var.environment
   }
 }
 
@@ -2043,57 +2191,64 @@ resource "ansible_host" "vm" {
   }
 }
 
-# --- Trigger playbook after inventory is registered ---
+# --- Action: run a playbook ---
 
-resource "terraform_data" "run_playbook" {
-  # Re-run the playbook whenever the VM's IP or the playbook file changes
-  triggers_replace = {
-    host_ip         = azurerm_linux_virtual_machine.vm.public_ip_address
-    playbook_sha    = filesha256("${path.module}/playbooks/configure_web.yml")
+action "ansible_playbook" "configure_web" {
+  config {
+    playbook    = "${path.module}/playbooks/configure_web.yml"
+    name        = azurerm_linux_virtual_machine.vm.public_ip_address  # inventory target
+    private_key = file("~/.ssh/id_rsa")
+
+    extra_vars = {
+      env     = var.environment
+      vm_name = azurerm_linux_virtual_machine.vm.name
+    }
+
+    ansible_ssh_extra_args = "-o StrictHostKeyChecking=no"
   }
-
-  provisioner "local-exec" {
-    command = <<-EOT
-      ansible-playbook \
-        -i "${azurerm_linux_virtual_machine.vm.public_ip_address}," \
-        --private-key ~/.ssh/id_rsa \
-        --ssh-extra-args="-o StrictHostKeyChecking=no" \
-        -e "env=${var.environment}" \
-        -e "vm_name=${azurerm_linux_virtual_machine.vm.name}" \
-        ${path.module}/playbooks/configure_web.yml
-    EOT
-  }
-
-  depends_on = [ansible_host.vm]
 }
 ```
 
-### Why `terraform_data` instead of `null_resource`
+#### Lifecycle events that can trigger an action
 
-`terraform_data` (Terraform 1.4+) is the built-in replacement for `null_resource`. It needs no provider, behaves identically for `triggers_replace` and `provisioner`, and avoids requiring the `hashicorp/null` provider.
+| Event | Fires when |
+|---|---|
+| `after_create` | Resource was just created |
+| `after_update` | Resource was updated in-place |
+| `before_destroy` | Resource is about to be destroyed (good for drain / deregister) |
+| `before_create` / `before_update` | Run a pre-flight before the provider call |
 
-```hcl
-# Old pattern - requires null provider
-resource "null_resource" "run_playbook" {
-  triggers = { host = azurerm_linux_virtual_machine.vm.public_ip_address }
-  provisioner "local-exec" { command = "..." }
-}
+Multiple events can be combined into one `action_trigger`, and a resource can have multiple `action_trigger` blocks for different actions/events.
 
-# Modern pattern - built-in, no extra provider
-resource "terraform_data" "run_playbook" {
-  triggers_replace = { host = azurerm_linux_virtual_machine.vm.public_ip_address }
-  provisioner "local-exec" { command = "..." }
-}
+#### Ad-hoc invocation - re-run a playbook without changing infra
+
+Because actions are top-level objects, they can be invoked without an associated resource change:
+
+```bash
+# Re-run the configure_web playbook against the current inventory
+terraform apply -invoke=action.ansible_playbook.configure_web
+
+# Plan only the action - shows what would happen
+terraform plan -invoke=action.ansible_playbook.configure_web
 ```
+
+This replaces the old "bump a trigger to force the playbook to re-run" hack.
 
 ### Running a playbook against multiple hosts
 
-When deploying several VMs with `for_each`, create one `terraform_data` trigger per host using the same key:
+When deploying several VMs with `for_each`, declare one action per VM and attach a trigger to each VM. Actions also support `for_each`:
 
 ```hcl
 resource "azurerm_linux_virtual_machine" "vms" {
   for_each = local.vm_configs
   # ...
+
+  lifecycle {
+    action_trigger {
+      events  = [after_create, after_update]
+      actions = [action.ansible_playbook.configure_vms[each.key]]
+    }
+  }
 }
 
 resource "ansible_host" "vms" {
@@ -2107,28 +2262,52 @@ resource "ansible_host" "vms" {
   }
 }
 
-resource "terraform_data" "configure_vms" {
+action "ansible_playbook" "configure_vms" {
   for_each = azurerm_linux_virtual_machine.vms
 
-  triggers_replace = {
-    host_ip      = each.value.public_ip_address
-    playbook_sha = filesha256("${path.module}/playbooks/configure_web.yml")
-  }
+  config {
+    playbook    = "${path.module}/playbooks/configure_web.yml"
+    name        = each.value.public_ip_address
+    private_key = file("~/.ssh/id_rsa")
+    extra_vars  = { vm_name = each.value.name }
 
-  provisioner "local-exec" {
-    command = <<-EOT
-      ansible-playbook \
-        -i "${each.value.public_ip_address}," \
-        --private-key ~/.ssh/id_rsa \
-        --ssh-extra-args="-o StrictHostKeyChecking=no" \
-        -e "vm_name=${each.value.name}" \
-        ${path.module}/playbooks/configure_web.yml
-    EOT
+    ansible_ssh_extra_args = "-o StrictHostKeyChecking=no"
   }
-
-  depends_on = [ansible_host.vms[each.key]]
 }
 ```
+
+### Actions vs. `terraform_data` + `local-exec` - why move
+
+| | `terraform_data` + `local-exec` | `action` |
+|---|---|---|
+| Execution model | Side-effect of a fake resource that lives in state | First-class, no state entry |
+| Re-run without state churn | Requires bumping `triggers_replace` | `terraform apply -invoke=...` |
+| Pre-destroy hooks | Awkward (`when = destroy` provisioner) | Native `before_destroy` event |
+| Plan visibility | Shows as a resource replace | Shows as a discrete action call |
+| Provider-native config | None - shells out | Typed `config` block validated by the provider |
+
+`terraform_data` is still useful for one-off `local-exec` glue where no provider offers an action, but for Ansible/Kubernetes/scripted post-deploy steps the action model is the preferred pattern.
+
+#### Pairing actions with ephemeral secrets
+
+Actions accept ephemeral values in their `config` block, so SSH keys or vault-stored playbook variables can be sourced from Key Vault without ever hitting state:
+
+```hcl
+ephemeral "azurerm_key_vault_secret" "deploy_key" {
+  name         = "ansible-deploy-key"
+  key_vault_id = data.azurerm_key_vault.shared.id
+}
+
+action "ansible_playbook" "configure_web" {
+  config {
+    playbook    = "${path.module}/playbooks/configure_web.yml"
+    name        = azurerm_linux_virtual_machine.vm.public_ip_address
+    private_key = ephemeral.azurerm_key_vault_secret.deploy_key.value
+  }
+}
+```
+
+See [Ephemeral Values & Write-Only Arguments](#ephemeral-values--write-only-arguments) for the full secret-handling story.
 
 ### Provider chaining: the execution order problem
 

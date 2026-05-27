@@ -209,6 +209,89 @@ public abstract class BaseHandler<TRequest, TResponse>
 }
 ```
 
+### Interface vs abstract class vs static function - choosing one
+
+These three constructs overlap, and picking the wrong one is one of the more common sources of friction in a C# codebase. The decision tree:
+
+| Question | If yes, use |
+|---|---|
+| Does this need to be **swapped at runtime** (fakes in tests, multiple implementations resolved via DI)? | **Interface** |
+| Are there **multiple unrelated types** that share *only* a contract, not implementation? | **Interface** |
+| Is there a partial implementation that **all subclasses will share**, plus a few hooks they override? | **Abstract class** |
+| Does the type need **fields, constructors, or protected state**? | **Abstract class** (or concrete base) |
+| Is the operation **stateless and deterministic** (pure transform, helper, formatter)? | **Static function** |
+| Is this method called from **one place** and unlikely to grow another implementation? | **Static function** or instance method |
+
+Three concrete examples of each choice being the right one:
+
+```csharp
+// 1. INTERFACE - external dependency, must be swappable for unit tests
+public interface IClock { DateTimeOffset UtcNow { get; } }
+
+public sealed class SystemClock : IClock { public DateTimeOffset UtcNow => DateTimeOffset.UtcNow; }
+public sealed class FakeClock(DateTimeOffset now) : IClock { public DateTimeOffset UtcNow => now; }
+
+// Registered once in DI - tests pass FakeClock, prod gets SystemClock.
+// Note: .NET 8+ ships TimeProvider for this exact use case - prefer it over a hand-rolled IClock.
+
+// 2. ABSTRACT CLASS - shared template with one variable step (Template Method)
+public abstract class MessageHandler<TMessage>
+{
+    private readonly ILogger _logger;
+    protected MessageHandler(ILogger logger) => _logger = logger;
+
+    public async Task HandleAsync(TMessage message, CancellationToken ct)
+    {
+        _logger.LogInformation("Handling {Type}", typeof(TMessage).Name);
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            await HandleCoreAsync(message, ct);
+            _logger.LogInformation("Handled in {Elapsed}ms", sw.ElapsedMilliseconds);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Handler failed after {Elapsed}ms", sw.ElapsedMilliseconds);
+            throw;
+        }
+    }
+
+    // The only variable step - subclasses fill this in.
+    protected abstract Task HandleCoreAsync(TMessage message, CancellationToken ct);
+}
+
+// 3. STATIC FUNCTION - pure transform, no state, no I/O
+public static class Slug
+{
+    public static string From(string input) =>
+        string.Join('-', input.ToLowerInvariant()
+                              .Where(c => char.IsLetterOrDigit(c) || c == ' ')
+                              .ToString()!
+                              .Split(' ', StringSplitOptions.RemoveEmptyEntries));
+}
+// Used as: Slug.From("Hello World!") => "hello-world"
+```
+
+#### Why prefer an interface over an abstract class by default?
+
+- **Single inheritance limit:** a class can implement many interfaces but inherit only one base. Forcing consumers into your inheritance chain is invasive.
+- **Mockability:** mocking libraries (Moq, NSubstitute) generate proxies cleanly from interfaces; abstract classes work but require all methods to be `virtual` and sealed members can't be overridden.
+- **No accidental state:** interfaces can't hold fields, which keeps the contract honest. Default interface methods (C# 8+) cover the "just one shared helper" case without dragging in inheritance.
+
+Use an abstract class when you genuinely have **shared implementation** (fields, constructor logic, base behaviour that every subclass uses). Template Method is the textbook case - everything else is usually better as an interface plus a concrete helper or extension methods.
+
+#### Why prefer a static function over an interface?
+
+- **No DI overhead, no allocation, no mock plumbing in tests** - calls a static method directly.
+- **Forces purity:** if the operation needs a database, clock, or HTTP client, you'll feel the friction of static-ness and naturally promote it to an injected service.
+- **Discoverability:** `Slug.From(...)` is one IDE jump; `ISlugGenerator` requires a registration, an interface, and an implementation to read three files.
+
+A good heuristic: **if the implementation only ever depends on its arguments, make it static**. The moment it needs an injected dependency (clock, logger, HTTP client, DB), promote it to an instance class behind an interface.
+
+#### Don't create interfaces "just in case"
+
+`IFoo` with a single `Foo` implementation, no tests substituting it, and no DI-driven swapping, is dead weight. Add the interface when you have a *second* implementation (a fake, a stub, a real alternative) - not before. Until then, inject the concrete type directly; ASP.NET Core's DI container resolves concrete types just fine.
+
 ---
 
 ## Records
@@ -481,6 +564,227 @@ public class DatabaseService(IOptions<DatabaseOptions> opts)
     private readonly DatabaseOptions _opts = opts.Value;
 }
 ```
+
+---
+
+## Logging
+
+`Microsoft.Extensions.Logging` is the standard abstraction; back it with a real sink (Serilog, OpenTelemetry, or the built-in console). The default `WebApplication.CreateBuilder` already wires console + debug + event source providers - the rules below cover what to do with that.
+
+### Sensible defaults in `Program.cs`
+
+```csharp
+using Microsoft.Extensions.Logging;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// 1. Strip the noisy defaults, then add what you actually want.
+builder.Logging.ClearProviders();
+
+// 2. JSON to stdout - parseable by any log shipper (App Insights, Loki, Datadog).
+//    Use SimpleConsole locally if you want human-readable colour output.
+builder.Logging.AddJsonConsole(options =>
+{
+    options.IncludeScopes        = true;
+    options.TimestampFormat      = "yyyy-MM-ddTHH:mm:ss.fffZ ";
+    options.UseUtcTimestamp      = true;
+    options.JsonWriterOptions    = new() { Indented = false };
+});
+
+// 3. OpenTelemetry / Application Insights pick this up automatically.
+builder.Logging.AddOpenTelemetry(o =>
+{
+    o.IncludeScopes           = true;
+    o.IncludeFormattedMessage = true;
+    o.ParseStateValues        = true;
+});
+
+// 4. Filters - keep framework noise down, keep your code at Information.
+builder.Logging.SetMinimumLevel(LogLevel.Information);
+builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
+builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.Warning);
+builder.Logging.AddFilter("Azure",                  LogLevel.Warning);
+builder.Logging.AddFilter("MyApp",                  LogLevel.Information);
+```
+
+Matching `appsettings.json` (env-specific overrides in `appsettings.Production.json`):
+
+```json
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning",
+      "Microsoft.EntityFrameworkCore.Database.Command": "Warning",
+      "Azure": "Warning"
+    }
+  }
+}
+```
+
+### Log levels - when to use which
+
+| Level | Use for | Goes to prod? |
+|---|---|---|
+| `Trace` | Per-iteration detail, byte-level dumps | No - dev only |
+| `Debug` | Local diagnostics, control-flow narration | No - rare in prod |
+| `Information` | Business events: request handled, message processed, job completed | Yes |
+| `Warning` | Recoverable issue, fallback used, retry succeeded | Yes |
+| `Error` | An operation failed; the caller will see a failure | Yes |
+| `Critical` | The process is unhealthy / about to terminate | Yes - alert on it |
+
+Rule of thumb: an on-call engineer reading `Warning` and above at 3am should learn something actionable. If a log line doesn't help diagnose a problem, it's `Debug` or it shouldn't exist.
+
+### Structured logging - always use named placeholders
+
+```csharp
+// CORRECT - structured: each property is queryable in your log backend
+logger.LogInformation("Order {OrderId} processed for customer {CustomerId} in {Elapsed}ms",
+    order.Id, order.CustomerId, sw.ElapsedMilliseconds);
+
+// WRONG - string interpolation flattens everything into one Message string,
+// destroying the structure and making it un-queryable.
+logger.LogInformation($"Order {order.Id} processed for customer {order.CustomerId}");
+```
+
+Analyzer `CA2254` will flag the interpolation form - enable it.
+
+### Source-generated logging - `[LoggerMessage]` (preferred for hot paths)
+
+`LoggerMessageAttribute` (.NET 6+) generates a strongly-typed, zero-allocation log method at compile time. It avoids boxing of value types, validates the template at build time, and reads better at call sites.
+
+```csharp
+public partial class OrderService(ILogger<OrderService> logger)
+{
+    [LoggerMessage(
+        EventId = 1001,
+        Level   = LogLevel.Information,
+        Message = "Order {OrderId} processed for customer {CustomerId} in {Elapsed}ms")]
+    private partial void LogOrderProcessed(string orderId, string customerId, long elapsed);
+
+    [LoggerMessage(
+        EventId = 1002,
+        Level   = LogLevel.Warning,
+        Message = "Order {OrderId} requeued (attempt {Attempt})")]
+    private partial void LogOrderRequeued(string orderId, int attempt);
+
+    public async Task ProcessAsync(Order order, CancellationToken ct)
+    {
+        var sw = Stopwatch.StartNew();
+        // ...
+        LogOrderProcessed(order.Id, order.CustomerId, sw.ElapsedMilliseconds);
+    }
+}
+```
+
+Use `[LoggerMessage]` for **every recurring log line** in production code. Reach for `logger.LogInformation(...)` only for one-off / startup messages.
+
+### Scopes - propagate context to every log line in a block
+
+```csharp
+using (logger.BeginScope(new Dictionary<string, object>
+{
+    ["CorrelationId"] = correlationId,
+    ["UserId"]        = user.Id,
+}))
+{
+    logger.LogInformation("Starting checkout");
+    await checkoutService.RunAsync(ct);
+    logger.LogInformation("Checkout complete");
+}
+// Every log line emitted inside the using block carries CorrelationId + UserId.
+```
+
+ASP.NET Core already opens a scope per request containing `RequestId` and `TraceId`; you usually don't need to add another at the top level - add scopes inside long-running operations or background jobs where the framework hasn't.
+
+### Logging decorator pattern - cross-cutting timing/auditing
+
+A logging decorator is a small class that implements the same interface as the thing it wraps, logs around each call, and delegates. It's the cleanest way to add timing/auditing without sprinkling `logger.Log…` calls through business code, and is well-supported in .NET via DI.
+
+```csharp
+public interface IOrderService
+{
+    Task<Order> PlaceAsync(PlaceOrderRequest req, CancellationToken ct);
+}
+
+public sealed class OrderService : IOrderService
+{
+    public Task<Order> PlaceAsync(PlaceOrderRequest req, CancellationToken ct) { /* real work */ }
+}
+
+// The decorator - same interface, wraps the inner implementation.
+public sealed class LoggingOrderService(
+    IOrderService inner,
+    ILogger<LoggingOrderService> logger) : IOrderService
+{
+    public async Task<Order> PlaceAsync(PlaceOrderRequest req, CancellationToken ct)
+    {
+        using var _ = logger.BeginScope(new Dictionary<string, object>
+        {
+            ["CustomerId"] = req.CustomerId,
+        });
+
+        var sw = Stopwatch.StartNew();
+        logger.LogInformation("PlaceOrder starting");
+        try
+        {
+            var result = await inner.PlaceAsync(req, ct);
+            logger.LogInformation("PlaceOrder succeeded in {Elapsed}ms (OrderId={OrderId})",
+                sw.ElapsedMilliseconds, result.Id);
+            return result;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "PlaceOrder failed after {Elapsed}ms", sw.ElapsedMilliseconds);
+            throw;
+        }
+    }
+}
+```
+
+#### Wiring decorators in DI - Scrutor (clean) or manual (no extra package)
+
+The built-in `IServiceCollection` has no first-class decorator API, but **Scrutor** (`dotnet add package Scrutor`) adds one and is the de-facto standard:
+
+```csharp
+builder.Services.AddScoped<IOrderService, OrderService>();
+builder.Services.Decorate<IOrderService, LoggingOrderService>();
+// Resolution order: consumers receive LoggingOrderService → wraps OrderService.
+
+// Stack multiple decorators - innermost registered first.
+builder.Services.Decorate<IOrderService, CachingOrderService>();   // outermost
+builder.Services.Decorate<IOrderService, LoggingOrderService>();   // middle, wraps Caching
+// Final chain: Logging → Caching → OrderService
+```
+
+Without Scrutor, register the inner type by its concrete class and resolve it from a factory:
+
+```csharp
+builder.Services.AddScoped<OrderService>();
+builder.Services.AddScoped<IOrderService>(sp =>
+    new LoggingOrderService(
+        inner:  sp.GetRequiredService<OrderService>(),
+        logger: sp.GetRequiredService<ILogger<LoggingOrderService>>()));
+```
+
+#### When to use a logging decorator
+
+- **Cross-cutting concerns on a stable interface boundary** - one place to add timing, retries, audit, or metrics for every method on the interface.
+- **Keeping business code free of logging plumbing** - the inner `OrderService` doesn't know about logging; it's testable in isolation.
+- **Pairs naturally with caching/retry decorators** for chains like `Logging → Retry → Caching → Real`.
+
+Avoid decorators when:
+- The interface has many methods and only one or two need logging - just inline `[LoggerMessage]` calls there.
+- The wrapped logic varies per method enough that the decorator becomes a `switch` statement - that's a smell.
+- You want method-level *parameter* logging beyond a couple of fields - use a source generator or AOP (Castle DynamicProxy, MethodBoundaryAspect) instead.
+
+### Common pitfalls
+
+- **Don't log and rethrow at every layer.** Log at the boundary that decides the user-facing failure (controller, message handler, top-level worker). Inner code throws; the boundary logs once with context.
+- **Don't log secrets.** Tokens, connection strings, passwords, PII - even via structured properties, they'll land in your log backend. Mask in the call site, not after.
+- **Don't `await` inside the log message arguments** - the message is built only if the level is enabled, but the arguments are always evaluated. Compute first, log second.
+- **Don't use `Console.WriteLine`.** It bypasses filters, providers, scopes, and structured properties.
+- **Check `IsEnabled` for expensive payloads** - `if (logger.IsEnabled(LogLevel.Debug)) logger.LogDebug(...)` avoids building a big string when Debug is off. `[LoggerMessage]` does this for you.
 
 ---
 

@@ -65,6 +65,160 @@ trap {
 
 ---
 
+## Logging
+
+PowerShell's `Write-*` cmdlets already form a layered logging system - the trick is using them correctly. `Write-Host` writes straight to the host (not pipeable, not capturable); for anything that should respect verbosity preferences or be captured, use the typed streams.
+
+### Use the right stream
+
+| Cmdlet | Stream # | When to use | Honours preference var |
+|---|---|---|---|
+| `Write-Output` | 1 (stdout) | The script's actual return data | n/a |
+| `Write-Error`  | 2 | Recoverable failure - the operation didn't work | `$ErrorActionPreference` |
+| `Write-Warning`| 3 | Something to flag but execution continues | `$WarningPreference` |
+| `Write-Verbose`| 4 | Detailed diagnostics, off by default | `$VerbosePreference` / `-Verbose` |
+| `Write-Debug`  | 5 | Developer-only deep diagnostics | `$DebugPreference` / `-Debug` |
+| `Write-Information` | 6 | Structured info events - preferred over `Write-Host` | `$InformationPreference` / `-InformationAction` |
+| `Write-Host`   | 6 (info) | UI output only - colour, banners, prompts | No |
+
+Rule of thumb: **`Write-Information` for normal log lines, `Write-Verbose` for diagnostics, `Write-Warning` for things you want the user to see, `Write-Error` for failures.** Save `Write-Host` for colour/banners that aren't real log data.
+
+### Advanced function with proper streams
+
+`[CmdletBinding()]` gives every function `-Verbose`, `-Debug`, `-InformationAction`, etc. for free. Use them.
+
+```powershell
+function Deploy-Stack {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter()][string]$Environment = 'dev'
+    )
+
+    Write-Verbose "Deploy-Stack called: Name=$Name Env=$Environment"
+    Write-Information "Starting deploy for $Name" -InformationAction Continue
+
+    try {
+        # ... real work ...
+        Write-Information "Deploy of $Name succeeded" -InformationAction Continue
+    }
+    catch {
+        Write-Warning "Deploy of $Name failed - rolling back"
+        Write-Error  $_ -ErrorAction Stop
+    }
+}
+
+# Default - quiet
+Deploy-Stack -Name app
+
+# Show diagnostics
+Deploy-Stack -Name app -Verbose
+```
+
+### Leveled wrapper - timestamped, stream-correct
+
+```powershell
+function Write-Log {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory, Position = 0)]
+        [ValidateSet('Debug', 'Verbose', 'Info', 'Warning', 'Error')]
+        [string]$Level,
+
+        [Parameter(Mandatory, Position = 1)]
+        [string]$Message,
+
+        [hashtable]$Context
+    )
+
+    $ts   = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
+    $ctx  = if ($Context) { ' ' + (($Context.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ' ') } else { '' }
+    $line = "$ts  [$Level]  $Message$ctx"
+
+    switch ($Level) {
+        'Debug'   { Write-Debug       $line }
+        'Verbose' { Write-Verbose     $line }
+        'Info'    { Write-Information $line -InformationAction Continue }
+        'Warning' { Write-Warning     $line }
+        'Error'   { Write-Error       $line }
+    }
+}
+
+Write-Log Info  'deploy started'   -Context @{ env = 'prod'; rg = 'rg-app' }
+Write-Log Warn  'using fallback region'
+Write-Log Error 'apply failed'     -Context @{ exit_code = $LASTEXITCODE }
+```
+
+### Structured (JSON) logging for log shippers
+
+For containerised PowerShell or anywhere a log shipper parses output, emit one JSON object per line on stdout. Use `ConvertTo-Json -Compress` so each event stays on one line.
+
+```powershell
+function Write-LogJson {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][ValidateSet('Debug','Info','Warning','Error')] [string]$Level,
+        [Parameter(Mandatory)][string]$Message,
+        [hashtable]$Context = @{}
+    )
+
+    $record = [ordered]@{
+        ts      = (Get-Date).ToUniversalTime().ToString('o')
+        level   = $Level
+        host    = [Environment]::MachineName
+        pid     = $PID
+        message = $Message
+    }
+    foreach ($k in $Context.Keys) { $record[$k] = $Context[$k] }
+
+    # -Compress = single-line; -Depth lets nested hashtables serialise.
+    $record | ConvertTo-Json -Compress -Depth 10
+}
+
+Write-LogJson Info  'deploy started' -Context @{ env = 'prod'; correlation_id = $cid }
+Write-LogJson Error 'apply failed'   -Context @{ exit_code = $LASTEXITCODE }
+```
+
+### Capturing streams in scripts that call other scripts
+
+```powershell
+# Capture every stream into one variable (PowerShell 5+).
+$all = & ./deploy.ps1 -Name app *>&1
+
+# Or redirect by stream:
+&  ./deploy.ps1 -Name app 6>info.log 3>warn.log 2>error.log
+
+# In CI, send everything except real return data to stderr so the agent surfaces it:
+&  ./deploy.ps1 -Name app 4>&2 5>&2 6>&2
+```
+
+### Module-level: `PSFramework` if you need more
+
+`PSFramework` (`Install-Module PSFramework -Scope CurrentUser`) is the de-facto third-party logger - it provides log providers (file, JSON, Splunk, Azure Log Analytics), automatic rotation, structured fields, and runspace-safe writes. Worth pulling in for anything beyond simple scripts.
+
+```powershell
+Import-Module PSFramework
+
+Set-PSFLoggingProvider -Name 'logfile' `
+    -FilePath  'C:\logs\deploy-%date%.json' `
+    -FileType  Json `
+    -Enabled   $true
+
+Write-PSFMessage -Level Important -Message 'deploy started' -Tag 'deploy' `
+    -Data @{ env = 'prod'; rg = 'rg-app' }
+```
+
+### Sensible defaults checklist
+
+- Always declare `[CmdletBinding()]` so callers get `-Verbose` / `-InformationAction` for free.
+- Set `$ErrorActionPreference = 'Stop'` so terminating errors propagate predictably.
+- Prefer `Write-Information` over `Write-Host` for log lines; reserve `Write-Host` for coloured UI output.
+- `Write-Verbose` for any diagnostic the user would only want when troubleshooting.
+- Use `Write-Error -ErrorAction Stop` (or `throw`) inside `catch` blocks - bare `Write-Error` is non-terminating.
+- In CI/containers, emit JSON via `Write-LogJson` so log shippers can parse fields.
+
+---
+
 ## Core Language
 
 ### String formatting
@@ -822,35 +976,7 @@ Start-AzPolicyComplianceScan -ResourceGroupName 'rg-myapp-prod-uksouth' -AsJob
 
 ---
 
-## Logging & Output
-
-### Structured logging helper
-
-```powershell
-function Write-Log {
-    [CmdletBinding()]
-    param (
-        [Parameter(Mandatory)][string]$Message,
-        [ValidateSet('INFO', 'WARN', 'ERROR', 'DEBUG')][string]$Level = 'INFO',
-        [hashtable]$Properties
-    )
-    $entry = [ordered]@{
-        Timestamp = (Get-Date -Format 'o')
-        Level     = $Level
-        Message   = $Message
-    }
-    if ($Properties) { $Properties.GetEnumerator() | ForEach-Object { $entry[$_.Key] = $_.Value } }
-
-    switch ($Level) {
-        'WARN'  { Write-Warning  ($entry | ConvertTo-Json -Compress) }
-        'ERROR' { Write-Error    ($entry | ConvertTo-Json -Compress) }
-        'DEBUG' { Write-Debug    ($entry | ConvertTo-Json -Compress) }
-        default { Write-Host     ($entry | ConvertTo-Json -Compress) }
-    }
-}
-
-Write-Log 'Deployment started' -Properties @{ Environment = 'prod'; Region = 'uksouth' }
-```
+## Progress & Output Formatting
 
 ### Progress bar
 
