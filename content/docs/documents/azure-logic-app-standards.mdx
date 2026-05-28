@@ -1000,6 +1000,674 @@ resource "azurerm_logic_app_standard" "this" {
 }
 ```
 
+### Workflow trigger standards (azurerm provider)
+
+Triggers are the entry point for Logic App workflows. They define how and when a workflow executes - whether by external HTTP request, scheduled timer, or incoming message/event. Define triggers as separate Terraform resources using `azurerm_logic_app_trigger_*`. 
+
+**Trigger positioning:** Triggers do not have `depends_on` - they are root-level entry points that actions depend on. A workflow has exactly one active trigger. If you need multiple trigger types, create separate Logic Apps or use conditional branching after a single trigger.
+
+**Key decision: Trigger type selection**
+
+| Scenario | Trigger Type | Why | Example |
+|:--|:--|:--|:--|
+| Manual invocation or external system webhooks | HTTP Request | Caller controls when workflow runs; good for on-demand and integrations | GitHub webhook → create ticket |
+| Recurring automated tasks | Recurrence | Fixed schedule; predictable cost and execution | Daily threat hunt KQL query |
+| Sentinel incident automation | Sentinel Incident (custom) | Native incident data; direct role assignment in Standard Logic Apps | Enrich and notify on incident creation |
+| Event-driven (message queue) | Service Bus (custom) | Reliable message processing; automatic retry | Process incident queues |
+| Reactive to resource events | Event Grid (custom) | Event-driven without polling; push-based | Storage blob created → scan for malware |
+| Third-party service events | Custom webhook | Platform-specific integration | Slack message, Teams notification |
+
+**HTTP Request trigger (manual invocation)**
+
+**Use when:** External systems need to invoke the workflow; caller controls execution time. Common in Sentinel playbooks, webhook integrations, or on-demand operations.
+
+**Considerations:**
+- Requires schema definition to validate incoming requests (protects against malformed payloads)
+- Each HTTP trigger generates a unique callback URL; share this carefully (publish to only trusted callers)
+- Stateless execution makes HTTP triggers ideal for one-shot operations (no run history overhead)
+- Timeout: 120 seconds per request (Consumption) or configurable (Standard)
+
+**Avoid:** Using HTTP trigger for scheduled tasks (use Recurrence instead); sending sensitive data in request body without encryption
+
+```hcl
+resource "azurerm_logic_app_trigger_http_request" "http_trigger" {
+  name         = "When_HTTP_request_is_received"
+  logic_app_id = azurerm_logic_app_standard.this.id
+  
+  # Schema validates incoming request body - required
+  schema = jsonencode({
+    type       = "object"
+    properties = {
+      incident_id = {
+        type        = "string"
+        description = "Sentinel incident ID"
+      }
+      severity = {
+        type        = "string"
+        enum        = ["Low", "Medium", "High", "Critical"]
+        description = "Incident severity level"
+      }
+      payload = {
+        type       = "object"
+        properties = {
+          assets = { type = "array" }
+          tags   = { type = "object" }
+        }
+      }
+    }
+    required = ["incident_id", "severity"]
+  })
+  
+  method = "POST"
+}
+```
+
+**Recurrence trigger (scheduled execution)**
+
+**Use when:** Workflow runs on a fixed schedule - daily scans, hourly reports, weekly reviews. Good for automated threat hunting, compliance checks, or routine data synchronization.
+
+**Considerations:**
+- `start_time` must be in ISO 8601 UTC format (e.g., `2024-01-01T08:00:00Z`); do not use local time
+- Use `time_zone = "UTC"` to avoid DST confusion; if end-user sees times, convert client-side
+- Frequency + interval determine execution: `frequency = "Day"` + `interval = 1` = every day; `frequency = "Hour"` + `interval = 6` = every 6 hours
+- Recurrence runs at the specified time; if Logic App is down, it queues and runs when available
+- Cost: Fixed App Service Plan cost; no per-execution billing
+
+**Avoid:** Recurrence intervals less than 1 minute (Azure limit); complex schedules (use multiple Logic Apps instead); hardcoded start times that become outdated
+
+```hcl
+resource "azurerm_logic_app_trigger_recurrence" "schedule_trigger" {
+  name         = "Recurrence_daily_enrichment"
+  logic_app_id = azurerm_logic_app_standard.this.id
+  
+  frequency  = "Day"
+  interval   = 1
+  start_time = "2024-01-01T08:00:00Z"  # UTC only
+  time_zone  = "UTC"
+  
+  # Optional: restrict to business days
+  schedule {
+    days_of_week = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+  }
+}
+```
+
+**Custom trigger - Sentinel Incident (native security automation)**
+
+**Use when:** Responding to Sentinel incident creation or updates. Automatically enriches, correlates, or escalates high-severity incidents without manual intervention.
+
+**Considerations:**
+- Requires Sentinel connection (configured separately in Azure portal or via `azurerm_logic_app_connection`)
+- Only available in Standard Logic Apps (Consumption requires manual trigger configuration)
+- Incident data is passed directly; no schema validation needed (Sentinel defines the structure)
+- Supports filtering by severity, product, or custom analytics rules
+- Fires synchronously; if workflow exceeds 1 hour, incident may be locked or escalated
+- Cost: Included in Standard Logic App plan (no per-incident charges)
+
+**Avoid:** Logic Apps that take > 1 hour per incident (design for parallel execution); blocking on external API calls without timeout; hardcoding watchlist IDs or DCE immutable IDs (use Terraform variables instead)
+
+```hcl
+# First, ensure the Sentinel connection exists (managed separately)
+resource "azurerm_logic_app_connection" "sentinel" {
+  name                = "sentinel-${var.environment}"
+  resource_group_name = azurerm_resource_group.this.name
+  managed_api_id      = "/subscriptions/${data.azurerm_client_config.current.subscription_id}/providers/Microsoft.Web/locations/${var.location}/managedApis/azuresentinel"
+}
+
+# Sentinel trigger definition
+resource "azurerm_logic_app_trigger_custom" "sentinel_incident" {
+  name         = "When_Azure_Sentinel_incident_is_created_or_updated"
+  logic_app_id = azurerm_logic_app_standard.this.id
+  
+  body = jsonencode({
+    inputs = {
+      host = {
+        connection = {
+          name = azurerm_logic_app_connection.sentinel.id
+        }
+      }
+      path = "/incident"
+      queries = {
+        # Filter by severity - do not hardcode
+        "triggerBody()?['object']?['properties']?['severity']" = "High,Critical"
+      }
+    }
+  })
+}
+
+# Example: Later action referencing the trigger
+resource "azurerm_logic_app_action_custom" "enrich_incident" {
+  name         = "Enrich_from_watchlist"
+  logic_app_id = azurerm_logic_app_standard.this.id
+  
+  # Use Terraform-evaluated watchlist ID, not hardcoded string
+  body = jsonencode({
+    inputs = {
+      watchlist_id = azurerm_sentinel_watchlist.threat_actors.immutable_id
+      incident_id  = "@{triggerBody()?['object']?['id']}"
+      severity     = "@{triggerBody()?['object']?['properties']?['severity']}"
+    }
+  })
+  
+  depends_on = [azurerm_logic_app_trigger_custom.sentinel_incident]
+}
+```
+
+**Custom trigger - Service Bus Queue (reliable message processing)**
+
+**Use when:** Incidents or alerts are queued in Service Bus; workflow processes them asynchronously. Good for decoupling producers from consumers, handling traffic spikes, and guaranteed delivery.
+
+**Considerations:**
+- Service Bus provides automatic retry, dead-lettering, and message expiration
+- Polling interval: 30 seconds (configurable in Standard Logic Apps)
+- Scale horizontally: multiple Logic App instances pull from same queue without duplication
+- Messages auto-complete after processing; set `isSessionEnabled = true` for ordered message groups
+- Cost: Consumed as part of Standard plan; message charges apply
+
+**Avoid:** Polling very frequently (< 30s causes unnecessary scaling); processing without error handling (unprocessed messages stay in queue); hardcoding queue names
+
+```hcl
+# Service Bus connection
+resource "azurerm_logic_app_connection" "service_bus" {
+  name                = "servicebus-${var.environment}"
+  resource_group_name = azurerm_resource_group.this.name
+  managed_api_id      = "/subscriptions/${data.azurerm_client_config.current.subscription_id}/providers/Microsoft.Web/locations/${var.location}/managedApis/servicebus"
+}
+
+# Queue trigger - references queue name from Terraform variable
+resource "azurerm_logic_app_trigger_custom" "service_bus_trigger" {
+  name         = "Service_Bus_message_incident_queue"
+  logic_app_id = azurerm_logic_app_standard.this.id
+  
+  body = jsonencode({
+    inputs = {
+      host = {
+        connection = {
+          name = azurerm_logic_app_connection.service_bus.id
+        }
+      }
+      method = "GET"
+      path   = "/queue/@{encodeURIComponent('${var.incident_queue_name}')}/messages"
+      queries = {
+        "maxMessagesToReturn" = 1
+        "isSessionEnabled"    = false
+      }
+    }
+  })
+}
+```
+
+**Custom trigger - Event Grid (event-driven automation)**
+
+**Use when:** Azure resources emit events (blob storage, Key Vault, Log Analytics); workflow reacts immediately without polling. Efficient for event-driven architectures.
+
+**Considerations:**
+- Event Grid is push-based (not polling); immediate execution on event
+- Requires Event Grid subscription and topic configuration
+- Filters by event type (e.g., BlobCreated, SecretCreated, ResourceWriteSuccess)
+- Includes event metadata (timestamp, resource ID, properties)
+- Cost: Low cost per event; scales automatically
+
+**Avoid:** Using Event Grid for internal app state changes (use Service Bus instead); not setting event filters (can overwhelm workflow)
+
+```hcl
+# Event Grid connection
+resource "azurerm_logic_app_connection" "event_grid" {
+  name                = "eventgrid-${var.environment}"
+  resource_group_name = azurerm_resource_group.this.name
+  managed_api_id      = "/subscriptions/${data.azurerm_client_config.current.subscription_id}/providers/Microsoft.Web/locations/${var.location}/managedApis/azureeventgrid"
+}
+
+# Event Grid trigger - blob storage events
+resource "azurerm_logic_app_trigger_custom" "event_grid_trigger" {
+  name         = "Event_Grid_blob_created"
+  logic_app_id = azurerm_logic_app_standard.this.id
+  
+  body = jsonencode({
+    inputs = {
+      host = {
+        connection = {
+          name = azurerm_logic_app_connection.event_grid.id
+        }
+      }
+      # Reference storage account from Terraform - do not hardcode
+      path = "/subscriptions/@{encodeURIComponent('${data.azurerm_client_config.current.subscription_id}')}/resourceGroups/@{encodeURIComponent('${azurerm_resource_group.this.name}')}/providers/Microsoft.Storage/storageAccounts/@{encodeURIComponent('${azurerm_storage_account.logs.name}')}/events"
+      queries = {
+        # Filter to blob created events only
+        "api-version" = "2017-09-15-preview"
+      }
+    }
+    schema = {
+      type       = "object"
+      properties = {
+        eventType = {
+          type = "string"
+          enum = ["Microsoft.Storage.BlobCreated"]
+        }
+        data = {
+          type = "object"
+          properties = {
+            url = { type = "string" }
+          }
+        }
+      }
+    }
+  })
+}
+```
+
+**Trigger naming standards:**
+
+| Trigger Type | Naming Pattern | Example |
+|:--|:--|:--|
+| HTTP Request | `[verb]_http_request` | `when_http_request_is_received` |
+| Recurrence | `recurrence_[frequency]_[purpose]` | `recurrence_daily_enrichment`, `recurrence_hourly_scan` |
+| Sentinel Incident | `sentinel_incident_[filter]` | `sentinel_incident_high_critical`, `sentinel_incident_created` |
+| Service Bus | `service_bus_[queue/topic]_message` | `service_bus_incident_queue_message` |
+| Event Grid | `event_grid_[resource_type]` | `event_grid_blob_created`, `event_grid_key_vault_secret` |
+| Custom Connector | `[service]_[event_type]` | `teams_message_received`, `slack_event_posted` |
+
+**Trigger best practices (Terraform):**
+
+1. **No `depends_on` on triggers** - Triggers are root entry points; actions depend on triggers via implicit trigger body references
+2. **Sentinel triggers in Standard Logic Apps** - Allows direct Sentinel role assignment and private resource access
+3. **Recurrence triggers - always use UTC** - Avoid timezone confusion; use `time_zone = "UTC"` with fixed `start_time` (ISO 8601 format)
+4. **HTTP triggers - require schema** - Document expected body structure; clients must validate against schema
+5. **Custom triggers - use connection references** - Never hardcode credentials; reference `azurerm_logic_app_connection` resources
+6. **Polling intervals** - Service Bus (30s), Event Grid (push), Recurrence (configurable)
+
+**Example: Complete trigger + action dependency chain:**
+
+```hcl
+# Trigger - entry point, no depends_on
+resource "azurerm_logic_app_trigger_recurrence" "daily_scan" {
+  name         = "Recurrence_daily_threat_hunt"
+  logic_app_id = azurerm_logic_app_standard.this.id
+  frequency    = "Day"
+  interval     = 1
+  start_time   = "2024-01-01T09:00:00Z"
+  time_zone    = "UTC"
+}
+
+# Action - depends on trigger via trigger body
+resource "azurerm_logic_app_action_http" "kql_query" {
+  name         = "HTTP_execute_kql_query"
+  logic_app_id = azurerm_logic_app_standard.this.id
+  method       = "POST"
+  uri          = "https://${var.log_analytics_workspace_name}.api.loganalytics.io/v1/workspaces/${azurerm_log_analytics_workspace.this.id}/query"
+  
+  depends_on = [azurerm_logic_app_trigger_recurrence.daily_scan]
+}
+
+# Action - depends on previous action
+resource "azurerm_logic_app_action_custom" "parse_results" {
+  name         = "Parse_KQL_results"
+  logic_app_id = azurerm_logic_app_standard.this.id
+  # ...
+  depends_on = [azurerm_logic_app_action_http.kql_query]
+}
+```
+
+### Workflow action standards (azurerm provider)
+
+Workflow actions are defined as separate Terraform resources using `azurerm_logic_app_action_*`. This approach provides explicit dependency management, clear action ordering, and testability. Actions execute sequentially based on `depends_on` (or conditionally via `runAfter` in the action body).
+
+**Action selection and dependencies**
+
+| Action Type | Use Case | When | Avoid |
+|:--|:--|:--|:--|
+| HTTP | REST API calls, webhooks, external integrations | Need external system data; calling internal microservices | For internal Logic App state; hardcoding API keys |
+| Custom | Connector-based operations (Jira, Teams, Service Bus) | Using platform-specific connectors | Reinventing connector functionality with HTTP |
+| Scope | Grouped actions with error handling (try/catch) | Multiple actions with shared error handler | Single action (overhead not justified) |
+| Condition | Branching logic (if/else) | Multi-path workflows based on data | Complex decision trees (use Scope instead) |
+| For Each | Iterating over arrays | Processing multiple incidents, alerts, recipients | Iterating strings (use split() + For Each) |
+| Initialize Variable | Declare workflow-scoped variables | Need persistent state across actions | Hardcoding values; use variables for reusability |
+
+**Terraform best practices for actions**
+
+1. **No hardcoding deferred values** - Never include Terraform-evaluated IDs in action bodies as strings. Reference them directly:
+
+   ```hcl
+   # WRONG - hardcoded ID becomes stale when DCE is recreated
+   body = jsonencode({
+     dce_immutable_id = "/subscriptions/.../dces/my-dce-12345"
+   })
+   
+   # CORRECT - Terraform ensures ID is current
+   body = jsonencode({
+     dce_immutable_id = azurerm_monitor_data_collection_endpoint.this.immutable_id
+   })
+   ```
+
+2. **jsonencode() for all JSON** - Always use `jsonencode()` to prevent quote escaping issues and ensure valid JSON syntax.
+
+3. **Variables for reusable values** - Store queue names, API endpoints, watchlist names as Terraform variables:
+
+   ```hcl
+   # In variables.tf
+   variable "incident_queue_name" {
+     type = string
+     default = "incident-queue"
+   }
+   
+   # In action body
+   path = "/queue/@{encodeURIComponent('${var.incident_queue_name}')}/messages"
+   ```
+
+4. **Connection references** - Always reference `azurerm_logic_app_connection` resources, never hardcode connection IDs:
+
+   ```hcl
+   host = {
+     connection = {
+       name = azurerm_logic_app_connection.sentinel.id
+     }
+   }
+   ```
+
+**Initialize Variable (root action - no depends_on)**
+
+**Use when:** Declaring workflow-scoped variables that multiple actions will reference. Initialize early; variables persist across entire workflow run.
+
+**Avoid:** Declaring variables late (actions before initialization can't reference them); storing sensitive data (use Key Vault references instead)
+
+```hcl
+resource "azurerm_logic_app_action_http" "initialize_variables" {
+  name                    = "Initialize_variables"
+  logic_app_id            = azurerm_logic_app_standard.this.id
+  
+  body = jsonencode({
+    inputs = {
+      variables = [
+        {
+          name  = "incident_id"
+          type  = "String"
+          value = "@{triggerBody()?['object']?['id']}"
+        },
+        {
+          name  = "severity"
+          type  = "String"
+          value = "@{triggerBody()?['object']?['properties']?['severity']}"
+        },
+        {
+          name  = "enrichment_api_key"
+          type  = "String"
+          # Reference Key Vault secret - never hardcode API keys
+          value = "@{parameters('enrichment_api_key')}"
+        }
+      ]
+    }
+  })
+}
+```
+
+**HTTP action (external API calls)**
+
+**Use when:** Calling external REST APIs, webhooks, or enrichment services. Synchronous calls for data retrieval.
+
+**Considerations:**
+- Timeout: 30 seconds (standard); use `timeout = "PT5M"` for longer operations
+- Retry: Set to 3 attempts with exponential backoff for transient failures
+- Headers: Always set `Content-Type`; use parameters for authentication (not hardcoded)
+- Fail-safe: Wrap in Scope block if API failure shouldn't stop entire workflow
+
+**Avoid:** Hardcoding API endpoints (use variables); hardcoding credentials (use Key Vault parameters); not handling API errors
+
+```hcl
+# Store API endpoint in variable (can change per environment)
+variable "enrichment_api_endpoint" {
+  type = string
+  default = "https://api.example.com/incidents/enrich"
+}
+
+resource "azurerm_logic_app_action_http" "webhook_call" {
+  name                    = "HTTP_webhook_enrichment"
+  logic_app_id            = azurerm_logic_app_standard.this.id
+  method                  = "POST"
+  uri                     = var.enrichment_api_endpoint  # From Terraform variable
+  headers = {
+    "Content-Type"      = "application/json"
+    "Authorization"     = "Bearer @{parameters('enrichment_api_key')}"  # From Key Vault
+    "X-Request-ID"      = "@{guid()}"  # Unique request ID for tracking
+  }
+  
+  body = jsonencode({
+    incident_id = "@{variables('incident_id')}"
+    severity    = "@{variables('severity')}"
+    # Include enrichment context - reference from watchlist via Terraform
+    threat_intel_source = var.threat_intel_watchlist_name
+  })
+  
+  depends_on = [azurerm_logic_app_action_http.initialize_variables]
+}
+```
+
+**Custom connector action (platform-specific operations)**
+
+**Use when:** Using Jira, Teams, Service Bus, Log Analytics, or other managed connectors. Avoid reimplementing connector logic with HTTP.
+
+**Considerations:**
+- Connector must be pre-registered as `azurerm_logic_app_connection`
+- Each connector has specific operation IDs (e.g., `CreateIssue`, `SendMessage`, `QueryLogs`)
+- Retry: Managed by connector (usually 2 attempts); HTTP actions retry separately
+- Output: Connector action output is available to subsequent actions
+
+**Avoid:** Using HTTP for operations that have managed connectors available (maintainability nightmare); hardcoding project keys or queue names
+
+```hcl
+# First, register the connector (manages authentication)
+resource "azurerm_logic_app_connection" "jira" {
+  name                = "jira-${var.environment}"
+  resource_group_name = azurerm_resource_group.this.name
+  managed_api_id      = "/subscriptions/${data.azurerm_client_config.current.subscription_id}/providers/Microsoft.Web/locations/${var.location}/managedApis/jira"
+}
+
+# Then use in custom action - reference connector and store project key as variable
+variable "jira_security_project_key" {
+  type    = string
+  default = "SEC"
+}
+
+resource "azurerm_logic_app_action_custom" "create_jira_ticket" {
+  name             = "JIRA_create_issue"
+  logic_app_id     = azurerm_logic_app_standard.this.id
+  
+  body = jsonencode({
+    inputs = {
+      host = {
+        connection = {
+          name = azurerm_logic_app_connection.jira.id
+        }
+      }
+      method   = "post"
+      path     = "/rest/api/3/issues"
+      queries = {
+        # Project key from Terraform variable
+        projectKey = var.jira_security_project_key
+      }
+      body = {
+        fields = {
+          summary     = "@{variables('incident_id')} - @{variables('severity')}"
+          description = "@{body('HTTP_webhook_enrichment')?['description']}"
+          issuetype = {
+            # Map severity to issue type
+            name = "@{if(equals(variables('severity'), 'Critical'), 'Security Incident', 'Task')}"
+          }
+          # Reference custom field from Terraform if needed
+          customfield_10000 = var.jira_incident_priority_field_id
+        }
+      }
+    }
+    runAfter = {
+      "HTTP_webhook_enrichment" = ["Succeeded"]
+    }
+  })
+  
+  depends_on = [azurerm_logic_app_action_http.webhook_call]
+}
+```
+
+**Scope block (try/catch error handling)**
+
+**Use when:** Grouping multiple actions that share error handling. Scope catches failures from child actions and allows conditional error handler logic.
+
+**Considerations:**
+- Scope succeeds only if all children succeed; any child failure marks scope as failed
+- Error handler Scope runs on parent failure (`runAfter: ["Failed", "TimedOut"]`)
+- Multiple Scopes can execute in parallel if not dependent
+- Use for enrichment operations, data validation, or external API sequences
+
+**Avoid:** Nesting Scopes > 2 levels deep (complex error logic); empty Scopes (use single action instead)
+
+```hcl
+# Try block - enrichment operations
+resource "azurerm_logic_app_action_scope" "scope_enrichment" {
+  name         = "Scope_enrichment"
+  logic_app_id = azurerm_logic_app_standard.this.id
+  
+  actions = jsonencode({
+    "Parse_enrichment_response" = {
+      type = "ParseJson"
+      inputs = {
+        content = "@body('HTTP_webhook_enrichment')"
+        schema = {
+          type       = "object"
+          properties = {
+            risk_score = { type = "number" }
+            assets     = { type = "array" }
+          }
+        }
+      }
+      runAfter = {}
+    },
+    "Update_incident_tags" = {
+      type = "ApiConnection"
+      inputs = {
+        host = {
+          connection = { name = azurerm_logic_app_connection.sentinel.id }
+        }
+        method = "patch"
+        path   = "/incidents/@{variables('incident_id')}"
+        body = {
+          # Pass enriched assets from webhook response
+          tags = "@{body('Parse_enrichment_response')?['assets']}"
+        }
+      }
+      runAfter = {
+        "Parse_enrichment_response" = ["Succeeded"]
+      }
+    }
+  })
+  
+  depends_on = [azurerm_logic_app_action_http.webhook_call]
+}
+
+# Catch block - runs only if scope_enrichment fails
+resource "azurerm_logic_app_action_scope" "scope_error_handler" {
+  name         = "Scope_error_handler"
+  logic_app_id = azurerm_logic_app_standard.this.id
+  
+  actions = jsonencode({
+    "Log_error_to_law" = {
+      type = "ApiConnection"
+      inputs = {
+        host = {
+          connection = { name = azurerm_logic_app_connection.log_analytics.id }
+        }
+        method = "post"
+        # Reference DCE immutable ID from Terraform - not hardcoded
+        path = "/api/logs?api-version=2016-04-01&dce=${azurerm_monitor_data_collection_endpoint.this.immutable_id}"
+        body = {
+          TimeGenerated = "@utcNow()"
+          SourceSystem  = "LogicApp"
+          Message       = "@{string(outputs('Scope_enrichment'))}"
+          IncidentId    = "@{variables('incident_id')}"
+          Severity      = "@{variables('severity')}"
+        }
+      }
+      runAfter = {}
+    },
+    "Alert_team_enrichment_failure" = {
+      type = "ApiConnection"
+      inputs = {
+        host = {
+          connection = { name = azurerm_logic_app_connection.teams.id }
+        }
+        method = "post"
+        path   = "/webhooks"
+        body = {
+          text = "⚠️ Enrichment failed for incident @{variables('incident_id')} (@{variables('severity')}). Check logs."
+        }
+      }
+      runAfter = {
+        "Log_error_to_law" = ["Succeeded"]
+      }
+    }
+  })
+  
+  # Error handler runs when scope_enrichment fails (or times out)
+  depends_on = [azurerm_logic_app_action_scope.scope_enrichment]
+}
+```
+
+**Action dependency chain example:**
+
+```hcl
+# Dependency flow:
+# Initialize_variables
+#   ├─ HTTP_webhook_enrichment
+#   │   ├─ JIRA_create_issue
+#   │   └─ Scope_enrichment
+#   │       └─ Scope_error_handler (on failure)
+#   └─ Condition_severity_check
+#       └─ For_each_recipients
+
+resource "azurerm_logic_app_action_http" "initialize_variables" {
+  # ... (see above, no depends_on)
+}
+
+resource "azurerm_logic_app_action_http" "webhook_call" {
+  depends_on = [azurerm_logic_app_action_http.initialize_variables]
+  # ...
+}
+
+resource "azurerm_logic_app_action_custom" "create_jira_ticket" {
+  depends_on = [azurerm_logic_app_action_http.webhook_call]
+  # ...
+}
+
+resource "azurerm_logic_app_action_scope" "scope_enrichment" {
+  depends_on = [azurerm_logic_app_action_http.webhook_call]
+  # ...
+}
+
+resource "azurerm_logic_app_action_scope" "scope_error_handler" {
+  depends_on = [azurerm_logic_app_action_scope.scope_enrichment]
+  # Only runs on failure (express in body's runAfter)
+}
+
+resource "azurerm_logic_app_action_condition" "severity_check" {
+  depends_on = [azurerm_logic_app_action_http.initialize_variables]
+  # ...
+}
+
+resource "azurerm_logic_app_action_for_each" "notify_recipients" {
+  depends_on = [azurerm_logic_app_action_condition.severity_check]
+  # ...
+}
+```
+
+**Action naming standards:**
+
+| Resource Type | Naming Pattern | Example |
+|:--|:--|:--|
+| HTTP | `http_[verb]_[service]` | `http_post_webhook`, `http_get_sentinel` |
+| Custom | `[service]_[operation]` | `jira_create_issue`, `service_bus_send_message` |
+| Scope | `scope_[operation]` | `scope_enrichment`, `scope_error_handler` |
+| Condition | `condition_[check]` | `condition_severity_check` |
+| For Each | `for_each_[items]` | `for_each_recipients`, `for_each_alerts` |
+| Initialize | `initialize_[variable_name]` | `initialize_variables`, `initialize_counter` |
+| Parse | `parse_[format]_[source]` | `parse_json_response`, `parse_xml_body` |
+
 ### Role assignments (always in Terraform, never manual)
 
 **Cookie-cutter path - referencing the module output:**
