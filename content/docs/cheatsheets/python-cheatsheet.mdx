@@ -669,6 +669,227 @@ data = asyncio.run(fetch_all(["https://api.example.com/a", "https://api.example.
 
 ---
 
+## FastAPI - Modern API Framework
+
+FastAPI is a modern, fast web framework for building APIs with Python 3.10+ async/await, with automatic OpenAPI (Swagger) docs and request validation via Pydantic.
+
+### Basic app with types and routes
+
+```python
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from typing import Optional
+import uvicorn
+
+app = FastAPI(
+    title="My API",
+    version="1.0.0",
+    description="DevOps automation API"
+)
+
+class Item(BaseModel):
+    name: str
+    price: float
+    is_active: bool = True
+
+class ItemUpdate(BaseModel):
+    name: Optional[str] = None
+    price: Optional[float] = None
+    is_active: Optional[bool] = None
+
+# GET - read all
+@app.get("/items")
+async def list_items():
+    return [{"id": 1, "name": "Item 1"}]
+
+# GET - read by path parameter
+@app.get("/items/{item_id}")
+async def read_item(item_id: int, skip: int = 0, limit: int = 10):
+    return {"item_id": item_id, "skip": skip, "limit": limit}
+
+# POST - create with request body
+@app.post("/items", status_code=201)
+async def create_item(item: Item):
+    return {"created": item}
+
+# PUT - full update
+@app.put("/items/{item_id}")
+async def update_item(item_id: int, item: Item):
+    return {"item_id": item_id, "item": item}
+
+# PATCH - partial update
+@app.patch("/items/{item_id}")
+async def patch_item(item_id: int, item: ItemUpdate):
+    return {"item_id": item_id, "updates": item}
+
+# DELETE
+@app.delete("/items/{item_id}")
+async def delete_item(item_id: int):
+    return {"deleted": item_id}
+
+# Run with: uvicorn script:app --reload
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+```
+
+### Response models and status codes
+
+```python
+from fastapi import FastAPI, status
+from pydantic import BaseModel
+
+app = FastAPI()
+
+class Item(BaseModel):
+    id: int
+    name: str
+
+class Error(BaseModel):
+    detail: str
+    code: int
+
+@app.get(
+    "/items/{item_id}",
+    response_model=Item,
+    status_code=status.HTTP_200_OK,
+    responses={
+        404: {"model": Error, "description": "Item not found"},
+        500: {"model": Error, "description": "Internal error"}
+    }
+)
+async def get_item(item_id: int):
+    if item_id == 0:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return {"id": item_id, "name": "Widget"}
+
+# List with optional response
+@app.get("/items", response_model=list[Item])
+async def list_items():
+    return [{"id": 1, "name": "Item 1"}, {"id": 2, "name": "Item 2"}]
+```
+
+### Dependency injection
+
+```python
+from fastapi import FastAPI, Depends, HTTPException
+from typing import Optional
+
+app = FastAPI()
+
+# Dependency - reusable logic
+async def get_current_user(token: Optional[str] = None) -> dict:
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing token")
+    return {"username": "user", "token": token}
+
+async def get_db_session():
+    # Setup
+    session = {"connection": "active"}
+    yield session
+    # Cleanup
+    print("Closing connection")
+
+# Use dependencies
+@app.get("/protected")
+async def protected_endpoint(current_user: dict = Depends(get_current_user)):
+    return {"message": f"Hello {current_user['username']}"}
+
+@app.get("/data")
+async def get_data(
+    user: dict = Depends(get_current_user),
+    db: dict = Depends(get_db_session)
+):
+    return {"user": user, "db": db}
+```
+
+### Middleware and error handling
+
+```python
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from starlette.middleware.cors import CORSMiddleware
+import time
+import logging
+
+app = FastAPI()
+
+logger = logging.getLogger(__name__)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://example.com", "http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Custom middleware
+@app.middleware("http")
+async def add_process_time_header(request: Request, call_next):
+    start = time.time()
+    response = await call_next(request)
+    process_time = time.time() - start
+    response.headers["X-Process-Time"] = str(process_time)
+    logger.info(f"{request.method} {request.url.path} - {process_time:.3f}s")
+    return response
+
+# Global exception handler
+@app.exception_handler(ValueError)
+async def value_error_handler(request: Request, exc: ValueError):
+    return JSONResponse(
+        status_code=400,
+        content={"detail": str(exc)}
+    )
+```
+
+### Testing with TestClient
+
+```python
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+app = FastAPI()
+
+@app.get("/items/{item_id}")
+async def get_item(item_id: int):
+    return {"item_id": item_id, "name": "Widget"}
+
+client = TestClient(app)
+
+def test_get_item():
+    response = client.get("/items/42")
+    assert response.status_code == 200
+    assert response.json() == {"item_id": 42, "name": "Widget"}
+
+def test_not_found():
+    response = client.get("/items/invalid")
+    assert response.status_code == 422  # validation error
+
+if __name__ == "__main__":
+    test_get_item()
+    test_not_found()
+    print("All tests passed")
+```
+
+### Running with Uvicorn (production)
+
+```bash
+# Development (auto-reload)
+uvicorn script:app --reload --host 0.0.0.0 --port 8000
+
+# Production (4 workers)
+uvicorn script:app --host 0.0.0.0 --port 8000 --workers 4
+
+# With env vars
+uvicorn script:app --env-file .env --host 0.0.0.0 --port ${PORT}
+
+# With custom log level
+uvicorn script:app --log-level debug --access-log
+```
+
+---
+
 ## Concurrency
 
 ### `asyncio` - event loop and tasks

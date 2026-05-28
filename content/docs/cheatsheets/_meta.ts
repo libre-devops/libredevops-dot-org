@@ -1,5 +1,6 @@
 export default {
     terraform:             'Terraform',
+    'ai-cheatsheet':       'AI',
     'ansible-cheatsheet':  'Ansible',
     'git-cheatsheet':      'Git',
     'go-cheatsheet':       'Go',
