@@ -1,4 +1,4 @@
-import { GithubIcon, Key, Linkedin, Mail, Shield } from 'lucide-react';
+import { GithubIcon, Key, LinkedinIcon, Mail, Shield } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { socialLinks } from '@/lib/site';
@@ -22,7 +22,7 @@ function TerraformIcon() {
 
 const iconMap: Record<string, ReactNode> = {
     github: <GithubIcon size={16} />,
-    linkedin: <Linkedin size={16} />,
+    linkedin: <LinkedinIcon size={16} />,
     terraform: <TerraformIcon />,
     key: <Key size={16} />,
     mail: <Mail size={16} />,
@@ -32,17 +32,21 @@ const iconMap: Record<string, ReactNode> = {
 export function SocialLinks() {
     return (
         <div className="social-links">
-            {socialLinks.map((link) => (
-                <a
-                    key={link.label}
-                    href={link.mailto ? `mailto:${link.href}` : link.href}
-                    {...(!link.mailto && { target: '_blank', rel: 'noopener noreferrer' })}
-                    aria-label={link.label}
-                    className="social-link"
-                >
-                    {iconMap[link.icon]}
-                </a>
-            ))}
+            {socialLinks.map((link) => {
+                const icon = iconMap[link.icon];
+                if (!icon) return null;
+                return (
+                    <a
+                        key={link.label}
+                        href={link.mailto ? `mailto:${link.href}` : link.href}
+                        {...(!link.mailto && { target: '_blank', rel: 'noopener noreferrer' })}
+                        aria-label={link.label}
+                        className="social-link"
+                    >
+                        {icon}
+                    </a>
+                );
+            })}
         </div>
     );
 }

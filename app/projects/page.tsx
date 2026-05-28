@@ -80,6 +80,7 @@ export default function ProjectsPage() {
                                             <a
                                                 href={project.docs}
                                                 className="project-card-link project-card-link--docs"
+                                                aria-label={`${project.title} documentation`}
                                                 {...(project.docs.startsWith('http') ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
                                             >
                                                 Docs

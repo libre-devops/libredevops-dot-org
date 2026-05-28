@@ -14,8 +14,22 @@ currently being supported with security updates.
 
 ## Reporting a Vulnerability
 
-Use this section to tell people how to report a vulnerability.
+Please report suspected vulnerabilities privately by email to **security@example.com**.
+Do **not** open public GitHub issues for undisclosed security reports.
 
-Tell them where to go, how often they can expect to get an update on a
-reported vulnerability, what to expect if the vulnerability is accepted or
-declined, etc.
+Include the affected version(s), reproduction steps, impact assessment, and any proposed
+remediation details in your report.
+
+We will acknowledge receipt within **3 business days** and provide an initial
+triage update within **7 business days**.
+
+If the report is accepted, we will work on a fix and coordinate disclosure with
+you after a patch or mitigation is available. If the report is declined, we will
+share the reason (for example, unsupported version, non-security issue, or not
+reproducible with provided details).
+
+Please do **not** disclose vulnerabilities publicly until we have completed
+investigation and remediation coordination.
+
+Security advisories and fixes will be published at:
+**https://github.com/libre-devops/libredevops-dot-org/security/advisories**
