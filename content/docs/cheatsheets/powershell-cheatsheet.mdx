@@ -326,7 +326,7 @@ $rows = @(
 ) | ForEach-Object { [PSCustomObject]$_ }
 ```
 
-### PSCustomObject — patterns and idioms
+### PSCustomObject - patterns and idioms
 
 **Building arrays from pipelines**
 
@@ -394,7 +394,7 @@ $copy = $json | ConvertFrom-Json
 **Type names and default display**
 
 ```powershell
-# Assign a type name — shows in Get-Member and Format-* output
+# Assign a type name - shows in Get-Member and Format-* output
 $obj.PSObject.TypeNames.Insert(0, 'LibreDevOps.DeployResult')
 
 # Add a custom display property with Update-TypeData (session-scoped)
@@ -516,7 +516,7 @@ git status
 if (-not $?) { throw "git exited with code $LASTEXITCODE" }
 ```
 
-### try / catch / finally — full reference
+### try / catch / finally - full reference
 
 Every `catch` block receives the current error as `$_` (an `ErrorRecord`). Multiple `catch` clauses are tested top-to-bottom; the first matching type wins.
 
@@ -573,7 +573,7 @@ catch {
 
 ### trap vs try/catch
 
-`trap` is a scope-level statement handler (PS 1.x era). `try/catch` is block-scoped and structured. Prefer `try/catch` for all new code — `trap` is mainly useful as a last-resort script-level safety net.
+`trap` is a scope-level statement handler (PS 1.x era). `try/catch` is block-scoped and structured. Prefer `try/catch` for all new code - `trap` is mainly useful as a last-resort script-level safety net.
 
 | | `try / catch` | `trap` |
 |---|---|---|
@@ -584,7 +584,7 @@ catch {
 | **When to use** | Structured error handling in functions and scripts | Script-level safety nets; cleanup-on-exit guards |
 
 ```powershell
-# trap — handles any terminating error in the current scope
+# trap - handles any terminating error in the current scope
 trap [System.IO.IOException] {
     Write-Warning "IO error: $_"
     continue   # resume execution after the line that errored
@@ -726,14 +726,14 @@ function Invoke-MyOperation {
 ```powershell
 [CmdletBinding(
     SupportsShouldProcess,            # adds -WhatIf and -Confirm; required to call $PSCmdlet.ShouldProcess()
-    ConfirmImpact = 'High',           # None | Low | Medium | High — auto-prompts when -Confirm not set
+    ConfirmImpact = 'High',           # None | Low | Medium | High - auto-prompts when -Confirm not set
     DefaultParameterSetName = 'ByName',
     SupportsPaging,                   # adds -First, -Skip, -IncludeTotalCount
     PositionalBinding = $false        # disable auto-positional parameter binding
 )]
 ```
 
-### Parameter attributes — quick reference
+### Parameter attributes - quick reference
 
 ```powershell
 param (
@@ -781,7 +781,7 @@ param (
 )
 ```
 
-### begin / process / end — pipeline processing
+### begin / process / end - pipeline processing
 
 ```powershell
 function Measure-DeployTime {
@@ -828,7 +828,7 @@ function Measure-DeployTime {
     }
 }
 
-# Pipeline usage — process runs once per item
+# Pipeline usage - process runs once per item
 'rg-dev', 'rg-staging', 'rg-prod' | Measure-DeployTime -Verbose
 ```
 

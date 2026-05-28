@@ -38,7 +38,7 @@
 
 /* ── Base ──────────────────────────────────────────────────────── */
 html {
-  overflow-x: clip;
+  overflow-x: hidden; /* propagates to the viewport scroll container - clip does not */
 }
 
 html, body {
@@ -983,6 +983,21 @@ body.banner-hidden .site-header {
     margin-top: 2rem;
     color: var(--text-secondary);
     font-size: 0.95rem;
+}
+
+/* ── Nextra mobile nav ─────────────────────────────────────────── */
+/* When our site-header is visible the Nextra navbar sits at         */
+/* top: site-header-height, so the mobile nav needs extra padding    */
+/* to start its content below both bars (not just nextra-navbar).   */
+body:not(.banner-hidden) .nextra-mobile-nav {
+    padding-top: calc(var(--site-header-height) + var(--nextra-navbar-height, 64px)) !important;
+}
+
+/* Hide the Nextra mobile nav's built-in search – we always show     */
+/* search in the fixed navbar (our x:flex-1 patch), making the       */
+/* internal copy a duplicate that appears behind / below the bars.   */
+.nextra-mobile-nav > .x\:px-4 {
+    display: none !important;
 }
 
 /* ── Docs footer ───────────────────────────────────────────────── */
