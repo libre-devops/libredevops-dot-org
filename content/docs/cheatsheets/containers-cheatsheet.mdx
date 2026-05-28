@@ -1101,6 +1101,8 @@ helm plugin install https://github.com/jkroepke/helm-secrets
 helm plugin install https://github.com/quintush/helm-unittest
 ```
 
+> **See also:** [Azure - AKS](/docs/cheatsheets/azure-cheatsheet) for cluster provisioning and Day-2 operations. [AWS - EKS](/docs/cheatsheets/aws-cheatsheet) for EKS-specific kubeconfig and access patterns.
+
 ---
 
 ## Container Security 🔐
@@ -1203,6 +1205,8 @@ spec:
     namespaces: ["production"]
 ```
 
+> **See also:** [Security](/docs/cheatsheets/security-cheatsheet) - broader hardening techniques including network scanning, TLS inspection, and Linux hardening that complement container security posture.
+
 ---
 
 ## AKS-Specific Patterns
@@ -1259,6 +1263,8 @@ az role assignment create \
   --assignee user@example.com \
   --scope "..."
 ```
+
+> **See also:** [Azure - AKS](/docs/cheatsheets/azure-cheatsheet) for OIDC issuer setup, managed identity federation, and cluster upgrades via Az CLI.
 
 ---
 

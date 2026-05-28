@@ -90,6 +90,8 @@ export ARM_CLIENT_SECRET=""
 # export ARM_USE_MSI=true
 ```
 
+> **See also:** [PowerShell - Azure Authentication](/docs/cheatsheets/powershell-cheatsheet) for Az module equivalents. [Terraform - Provider & Authentication](/docs/cheatsheets/terraform) for using these credentials with the AzureRM provider.
+
 ---
 
 ## CLI Essentials
@@ -683,6 +685,8 @@ az aks stop  -n aks-myapp-prod -g rg-myapp-prod-uksouth
 az aks start -n aks-myapp-prod -g rg-myapp-prod-uksouth
 ```
 
+> **See also:** [Containers](/docs/cheatsheets/containers-cheatsheet) - kubectl commands, Helm, and AKS-specific patterns for day-2 cluster operations.
+
 ---
 
 ## Container Registry (ACR)
@@ -1009,6 +1013,8 @@ az rest --method GET \
   --url "https://management.azure.com/subscriptions/$SUB/resourceGroups/rg-monitoring/providers/Microsoft.Portal/dashboards/MyDashboard?api-version=2020-09-01-preview" \
   -o json > dashboard.json
 ```
+
+> **See also:** [KQL](/docs/cheatsheets/kql-cheatsheet) - query language for Log Analytics, Sentinel, and Defender. Covers fundamentals, threat hunting queries, and Sentinel analytic rule patterns.
 
 ---
 

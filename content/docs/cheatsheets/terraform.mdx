@@ -133,6 +133,8 @@ provider "azurerm" {
 }
 ```
 
+> **See also:** [Azure - Auth & Context](/docs/cheatsheets/azure-cheatsheet) for SPN creation and role assignment commands. [AWS - Authentication & Credentials](/docs/cheatsheets/aws-cheatsheet) for named profiles and OIDC setup used with the AWS provider.
+
 ---
 
 ## Remote State Backend
@@ -1579,6 +1581,8 @@ resource "azurerm_storage_account_network_rules" "sa_rules" {
   ip_rules           = [local.runner_ip_cidr]
 }
 ```
+
+> **See also:** [Azure](/docs/cheatsheets/azure-cheatsheet) - Az CLI commands for the resources being managed (Key Vault, AKS, networking). [PowerShell - Azure Resources](/docs/cheatsheets/powershell-cheatsheet) for Terraform pipeline helper functions and resource provider registration.
 
 ---
 

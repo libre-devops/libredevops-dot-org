@@ -375,6 +375,12 @@ GetFailedLogons(1d, 20)
 | `BehaviorAnalytics` | Sentinel UEBA | User and entity anomaly scores |
 | `ThreatIntelligenceIndicator` | Threat Intelligence | IOCs (IPs, domains, hashes, URLs) |
 | `CommonSecurityLog` | CEF via AMA | Third-party firewall/IDS/proxy logs in CEF format |
+| `AzureActivity` | Azure Resource Manager | Control-plane audit log - all ARM operations (create, delete, role assignments, policy changes) |
+| `AzureDiagnostics` | Azure resources | Diagnostic logs from Azure services (Key Vault access, NSG flow logs, SQL audit, App Service, etc.) |
+| `AzureMetrics` | Azure Monitor | Resource metrics (CPU, memory, request counts, latency) at configurable granularity |
+| `StorageBlobLogs` | Azure Storage | Blob read/write/delete operations - useful for data-exfiltration hunting |
+
+> **See also:** [Azure - Azure Monitor & Log Analytics](/docs/cheatsheets/azure-cheatsheet) for workspace setup, diagnostic settings, and Log Analytics CLI commands. [PowerShell - Microsoft Sentinel](/docs/cheatsheets/powershell-cheatsheet) for watchlist and automation rule management.
 
 ---
 
@@ -443,6 +449,8 @@ DeviceEvents
 | where FileName =~ "lsass.exe"
 | project Timestamp, DeviceName, InitiatingProcessFileName, InitiatingProcessCommandLine
 ```
+
+> **See also:** [Security](/docs/cheatsheets/security-cheatsheet) - nmap, netcat, and post-exploitation reference for host-level investigation once a suspicious process is identified.
 
 ---
 
@@ -622,6 +630,8 @@ AuditLogs
 | project TimeGenerated, Actor, Target, Role
 ```
 
+> **See also:** [Azure - Entra ID](/docs/cheatsheets/azure-cheatsheet) for managing users, roles, and Conditional Access policies. [PowerShell - Microsoft Sentinel](/docs/cheatsheets/powershell-cheatsheet) for bulk watchlist operations and incident automation.
+
 ---
 
 ## Threat Hunting - Email 🔬
@@ -667,6 +677,99 @@ EmailEvents
 | where Count > 100
 | sort by Count desc
 ```
+
+---
+
+## Threat Hunting - Azure Activity 🔬
+
+### Mass resource deletion or modification
+
+```kql
+AzureActivity
+| where TimeGenerated > ago(1d)
+| where ActivityStatusValue == "Success"
+| where OperationNameValue has_any ("delete", "deallocate", "stop")
+| summarize
+    OperationCount = count(),
+    Operations     = make_set(OperationNameValue, 20)
+  by Caller, CallerIpAddress
+| where OperationCount > 20
+| sort by OperationCount desc
+```
+
+### Privilege escalation - role assignment writes
+
+```kql
+AzureActivity
+| where TimeGenerated > ago(7d)
+| where OperationNameValue =~ "Microsoft.Authorization/roleAssignments/write"
+| where ActivityStatusValue == "Success"
+| extend Props = todynamic(Properties)
+| project TimeGenerated, Caller, CallerIpAddress, ResourceGroup, SubscriptionId,
+          RoleDefinitionId = tostring(Props.requestbody)
+```
+
+### Security control changes (policy, NSG, Defender)
+
+```kql
+AzureActivity
+| where TimeGenerated > ago(7d)
+| where OperationNameValue has_any (
+    "Microsoft.Security/",
+    "Microsoft.Authorization/policyAssignments",
+    "Microsoft.Network/networkSecurityGroups"
+  )
+| where ActivityStatusValue == "Success"
+| project TimeGenerated, Caller, CallerIpAddress, OperationNameValue, ResourceGroup
+| sort by TimeGenerated desc
+```
+
+### Failed ARM operations by caller (misconfiguration or denial pattern)
+
+```kql
+AzureActivity
+| where TimeGenerated > ago(1d)
+| where ActivityStatusValue == "Failed"
+| summarize
+    FailureCount = count(),
+    Operations   = make_set(OperationNameValue, 10)
+  by Caller, CallerIpAddress, ResourceGroup
+| where FailureCount > 10
+| sort by FailureCount desc
+```
+
+### Key Vault secret access audit
+
+```kql
+AzureDiagnostics
+| where TimeGenerated > ago(1d)
+| where ResourceType == "VAULTS"
+| where OperationName in ("SecretGet", "SecretList", "KeyGet", "KeyDecrypt")
+| where ResultType == "Success"
+| project TimeGenerated,
+          Identity   = identity_claim_oid_g,
+          Operation  = OperationName,
+          SecretId   = id_s,
+          CallerIP   = CallerIPAddress
+| sort by TimeGenerated desc
+```
+
+### Activity from a new or unexpected caller IP
+
+```kql
+AzureActivity
+| where TimeGenerated > ago(30d)
+| where ActivityStatusValue == "Success"
+| summarize
+    FirstSeen = min(TimeGenerated),
+    LastSeen  = max(TimeGenerated),
+    OpCount   = count()
+  by Caller, CallerIpAddress
+| where FirstSeen > ago(2d)   // IP not seen before the last 2 days
+| sort by FirstSeen desc
+```
+
+> **See also:** [Security - Incident Response](/docs/cheatsheets/security-cheatsheet) for host-level triage commands once a suspicious caller is identified.
 
 ---
 
@@ -819,6 +922,55 @@ DeviceNetworkEvents
 | where RemoteIP in (WatchlistIPs)
 ```
 
+### Cross-workspace queries (Sentinel multi-workspace)
+
+```kql
+// Query a named workspace by resource ID or alias
+workspace("secondary-workspace").SecurityEvent
+| where TimeGenerated > ago(1h)
+| where EventID == 4625
+
+// Union across multiple workspaces (multi-tenant / MSSPs)
+union
+    workspace("workspace-emea").SigninLogs,
+    workspace("workspace-apac").SigninLogs
+| where TimeGenerated > ago(1h)
+| summarize Failures = countif(ResultType != "0") by UserPrincipalName
+
+// Cross-cluster query (ADX)
+cluster("mycluster.westeurope").database("mydb").MyTable
+| take 10
+```
+
+### Persisted functions (save reusable KQL)
+
+```kql
+// Define once in ADX / Sentinel workspace as a saved function:
+// Name:       GetSuspiciousProcesses
+// Parameters: lookback:timespan = 1d
+DeviceProcessEvents
+| where TimeGenerated > ago(lookback)
+| where FileName in~ ("mimikatz.exe", "psexec.exe", "nc.exe", "meterpreter.exe")
+| project Timestamp, DeviceName, AccountName, FileName, ProcessCommandLine
+
+// Invoke it later (lookback is optional - defaults to 1d)
+GetSuspiciousProcesses(7d)
+```
+
+### `arg()` - query Azure Resource Graph from Log Analytics
+
+```kql
+// Correlate log data with live resource metadata
+let VMs = arg("").Resources
+    | where type =~ "microsoft.compute/virtualmachines"
+    | project vmId = tolower(id), tags, location, sku = properties.hardwareProfile.vmSize;
+DeviceNetworkEvents
+| where TimeGenerated > ago(1h)
+| extend vmId = tolower(DeviceId)
+| join kind=leftouter VMs on vmId
+| project Timestamp, DeviceName, RemoteIP, location, sku
+```
+
 ### Render options
 
 ```kql
@@ -828,6 +980,87 @@ DeviceNetworkEvents
 | render table        // explicit table (default)
 | render scatterchart // scatter plot (good for anomalies)
 ```
+
+---
+
+## Sentinel Analytic Rules
+
+Analytic rules run as scheduled queries. These patterns produce low-noise, actionable alerts.
+
+### Rule query structure
+
+```kql
+// 1. Define constants at the top with let - makes tuning easy
+let LookbackPeriod = 1h;
+let FailThreshold  = 10;
+let ExcludedAccounts = dynamic(["health-check", "monitoring-svc"]);
+
+// 2. Filter aggressively early - reduces cost and latency
+SecurityEvent
+| where TimeGenerated > ago(LookbackPeriod)
+| where EventID == 4625
+| where TargetAccount !in (ExcludedAccounts)
+
+// 3. Aggregate to get an entity-level signal (not per-event noise)
+| summarize
+    FailCount = count(),
+    FirstSeen = min(TimeGenerated),
+    LastSeen  = max(TimeGenerated),
+    SourceIPs = make_set(IpAddress, 10)
+  by TargetAccount, Computer
+| where FailCount > FailThreshold
+
+// 4. Project only the columns needed for entity mapping
+| project TargetAccount, Computer, FailCount, FirstSeen, LastSeen, SourceIPs
+```
+
+### Suppress known-good activity with a watchlist
+
+```kql
+let TrustedIPs   = _GetWatchlist("TrustedRanges") | project SearchKey;
+let SvcAccounts  = _GetWatchlist("ServiceAccounts") | project SearchKey;
+DeviceNetworkEvents
+| where TimeGenerated > ago(1h)
+| where RemoteIPType == "Public"
+| where RemoteIP !in (TrustedIPs)
+| where InitiatingProcessAccountName !in (SvcAccounts)
+| where RemotePort !in (80, 443)
+```
+
+### Correlate events with threat intelligence
+
+```kql
+let TIIndicators =
+    ThreatIntelligenceIndicator
+    | where TimeGenerated > ago(14d)
+    | where isnotempty(NetworkIP)
+    | where ConfidenceScore > 50
+    | summarize by NetworkIP;
+DeviceNetworkEvents
+| where TimeGenerated > ago(1h)
+| join kind=inner TIIndicators on $left.RemoteIP == $right.NetworkIP
+| project Timestamp, DeviceName, RemoteIP, RemotePort, InitiatingProcessFileName
+```
+
+### Multi-stage correlation (alert chaining)
+
+```kql
+// Stage 1: suspicious recon
+let ReconDevices =
+    DeviceProcessEvents
+    | where TimeGenerated > ago(30m)
+    | where FileName in~ ("whoami.exe", "ipconfig.exe", "net.exe", "nltest.exe")
+    | summarize ReconCount = count() by DeviceId, DeviceName
+    | where ReconCount > 5;
+// Stage 2: lateral movement from those same devices
+DeviceNetworkEvents
+| where TimeGenerated > ago(1h)
+| where RemotePort in (445, 3389, 5985)
+| join kind=inner ReconDevices on DeviceId
+| project Timestamp, DeviceName, RemoteIP, RemotePort, ReconCount
+```
+
+> **See also:** [PowerShell - Microsoft Sentinel](/docs/cheatsheets/powershell-cheatsheet) for automation rules, watchlist management, and incident enrichment via the Sentinel REST API.
 
 ---
 

@@ -618,6 +618,8 @@ cat ~/.gitconfig
 git config --list --show-origin | grep -i 'url\|credential\|token'
 ```
 
+> **See also:** [Git - .gitignore Reference](/docs/cheatsheets/git-cheatsheet) for preventing secrets reaching the repo in the first place, and [Git - History & Inspection](/docs/cheatsheets/git-cheatsheet) for `git log -S` and `git bisect` to trace when a secret was introduced.
+
 ---
 
 ## grep / ripgrep - Secret & Pattern Hunting
@@ -1130,6 +1132,8 @@ Get-AppLockerPolicy -Effective | Set-AppLockerPolicy -XMLPolicy C:\applocker_bac
 Get-AppLockerPolicy -Local | Test-AppLockerPolicy -Path C:\Windows\System32\cmd.exe -User Everyone
 ```
 
+> **See also:** [Windows](/docs/cheatsheets/windows-cheatsheet) for firewall rules and environment hardening. [PowerShell](/docs/cheatsheets/powershell-cheatsheet) for advanced defensive automation and log collection.
+
 ---
 
 ## Linux Hardening
@@ -1466,6 +1470,10 @@ ss -ulnp    # UDP
 # Detailed with process info
 ss -tlnp | awk 'NR>1 {print $4, $6}' | sort
 ```
+
+> **See also:** [Linux](/docs/cheatsheets/linux-cheatsheet) for distribution-specific setup (Ubuntu, Fedora, WSL2). [Bash](/docs/cheatsheets/bash-cheatsheet) for scripting hardening steps reproducibly.
+
+> **See also:** [KQL - Threat Hunting](/docs/cheatsheets/kql-cheatsheet) for cloud-side investigation using Defender for Endpoint and Sentinel once a suspicious host is identified.
 
 ---
 

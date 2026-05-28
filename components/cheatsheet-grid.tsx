@@ -41,6 +41,13 @@ const CHEATSHEETS: Cheatsheet[] = [
         icon: <DevIcon name="terraform/terraform-original.svg" alt="Terraform" />,
     },
     {
+        title: 'Ansible',
+        href: '/docs/cheatsheets/ansible-cheatsheet',
+        description: 'Installation, static and dynamic inventory, ad-hoc commands, playbook structure, roles, variables, Jinja2 templates, vault encryption, collections, and common modules.',
+        tags: ['Ansible', 'IaC', 'Automation', 'Linux'],
+        icon: <DevIcon name="ansible/ansible-original.svg" alt="Ansible" />,
+    },
+    {
         title: 'Git',
         href: '/docs/cheatsheets/git-cheatsheet',
         description: 'Configuration templates, core operations, branching, remotes, undoing changes, history inspection, and bulk automation scripts for GitHub and Azure DevOps.',

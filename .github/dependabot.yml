@@ -1,6 +1,6 @@
 version: 2
 updates:
-  # npm — group minor/patch into one PR per week to reduce noise;
+  # npm - group minor/patch into one PR per week to reduce noise;
   # major versions get individual PRs so they can be reviewed separately.
   - package-ecosystem: npm
     directory: /
@@ -17,7 +17,7 @@ updates:
     labels:
       - dependencies
 
-  # GitHub Actions — group all updates together.
+  # GitHub Actions - group all updates together.
   - package-ecosystem: github-actions
     directory: /
     schedule:

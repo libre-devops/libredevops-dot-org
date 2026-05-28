@@ -245,7 +245,9 @@ while IFS= read -r dir; do
 done < <(find . -maxdepth 1 -mindepth 1 -type d)
 ```
 
-### Run a command across multiple Terraform module directories
+### Sort and format all Terraform modules in a directory
+
+Runs `terraform-sort.sh` (from the [Terraform Standards](/docs/documents/terraform-standards)) across every `terraform-<provider>-*` module directory. Git releases are handled per-module in CI, not in bulk scripts.
 
 ```bash
 #!/usr/bin/env bash
@@ -254,62 +256,130 @@ set -euo pipefail
 back=$(pwd)
 provider="${1:-azurerm}"
 location="${2:-.}"
+sort_script="${TERRAFORM_SORT_SCRIPT:-./terraform-sort.sh}"
 
-workspace=$(find "${location}" -maxdepth 1 -name "terraform-${provider}-*" -type d)
+workspace=$(find "${location}" -maxdepth 1 -name "terraform-${provider}-*" -type d | sort)
 
 for dir in ${workspace}; do
     cd "${dir}"
     echo "Processing: ${dir}"
-    terraform fmt -recursive
-    git add --all && git commit -m "Update module" && git push
-    git tag 1.0.0 --force && git push --tags --force
+    if [[ -x "$sort_script" ]]; then
+        "$sort_script" --sort-variables --sort-outputs --format-terraform --generate-readme
+    else
+        # Fallback: fmt only when sort script not present
+        terraform fmt -recursive
+    fi
     cd "${back}"
 done
 ```
 
 ---
 
-## Terraform Module Release Helper 🏠 Personal workflow helper
+## Terraform Module Sort Helper 🏠 Personal workflow helper
 
-Appends a reusable `tfrel` function to `.bashrc` that formats, generates docs, and publishes a module in one shot.
+Appends a reusable `tfsort` function to `.bashrc` that sorts variable and output blocks, runs `terraform fmt`, and regenerates `README.md` via terraform-docs. Git operations are handled separately - see [Terraform Standards - Release workflow](/docs/documents/terraform-standards).
 
 ```bash
 #!/usr/bin/env bash
 
-function tfrel() {
-    local curdir build_file=""
-    curdir=$(pwd)
+function tfsort() {
+    # Requires: terraform, terraform-docs, gawk
+    # Usage: tfsort [--readme-header-file HEADER.md]
+    local readme_header_file=""
 
-    if [ -f build.tf ]; then
-        build_file="build.tf"
-    elif [ -f main.tf ]; then
-        build_file="main.tf"
-    else
-        print_alert "Not a build directory - no build.tf or main.tf found"
-        return 1
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --readme-header-file) readme_header_file="$2"; shift 2 ;;
+            *) echo "Unknown option: $1" >&2; return 1 ;;
+        esac
+    done
+
+    # Verify required tools
+    for tool in terraform terraform-docs gawk; do
+        command -v "$tool" &>/dev/null || { echo "ERROR: $tool not found in PATH" >&2; return 1; }
+    done
+
+    [[ -f main.tf || -f build.tf ]] \
+        || { echo "ERROR: no main.tf or build.tf found - not a module root" >&2; return 1; }
+
+    echo ">> terraform fmt"
+    terraform fmt -recursive
+
+    # Sort variable blocks
+    if [[ -f variables.tf ]]; then
+        echo ">> sorting variables.tf"
+        _tf_sort_blocks variables.tf variable
     fi
 
-    # Write a README with the build file content + terraform-docs output
-    {
-        echo '```hcl'
-        cat "$build_file"
-        echo '```'
-    } > README.md
-    terraform-docs markdown . >> README.md
+    # Sort output blocks
+    if [[ -f outputs.tf ]]; then
+        echo ">> sorting outputs.tf"
+        _tf_sort_blocks outputs.tf output
+    fi
 
-    terraform fmt -recursive
-    git add --all
-    git commit -m "Update module"
-    git push
-    git tag 1.0.0 --force
-    git push --tags --force
+    # Write README header if provided, then inject terraform-docs
+    if [[ -n "$readme_header_file" ]]; then
+        [[ -f "$readme_header_file" ]] \
+            || { echo "ERROR: header file not found: $readme_header_file" >&2; return 1; }
+        cat "$readme_header_file" > README.md
+        printf '\n\n<!-- BEGIN_TF_DOCS -->\n<!-- END_TF_DOCS -->\n' >> README.md
+    fi
+
+    if [[ -f .terraform-docs.yml ]]; then
+        echo ">> terraform-docs . (using .terraform-docs.yml)"
+        terraform-docs .
+    else
+        [[ -f README.md ]] \
+            || printf '<!-- BEGIN_TF_DOCS -->\n<!-- END_TF_DOCS -->\n' > README.md
+        echo ">> terraform-docs markdown table --output-mode inject"
+        terraform-docs markdown table --output-file README.md --output-mode inject .
+    fi
+
+    echo "Done."
 }
 
+# Helper: sort variable or output blocks in a file using gawk brace-depth counting
+function _tf_sort_blocks() {
+    local file="$1" keyword="$2" tmp_dir count=0
+
+    tmp_dir="$(mktemp -d)"
+
+    gawk -v kw="$keyword" -v tmpdir="$tmp_dir" '
+    BEGIN { in_block=0; depth=0; block=""; name="" }
+    !in_block && match($0, "^" kw " \"([^\"]+)\" \\{", arr) {
+        name=arr[1]; in_block=1; depth=0; block=$0"\n"
+        for(i=1;i<=length($0);i++){c=substr($0,i,1);if(c=="{")depth++;else if(c=="}")depth--}
+        if(depth==0){sub(/\n$/,"",block);print block>(tmpdir"/"name".tf");close(tmpdir"/"name".tf");in_block=0;block="";name=""}
+        next
+    }
+    in_block {
+        block=block $0"\n"
+        for(i=1;i<=length($0);i++){c=substr($0,i,1);if(c=="{")depth++;else if(c=="}")depth--}
+        if(depth==0){sub(/\n$/,"",block);print block>(tmpdir"/"name".tf");close(tmpdir"/"name".tf");in_block=0;block="";name=""}
+    }
+    ' "$file"
+
+    local output="" first=true
+    while IFS= read -r -d $'\0' bf; do
+        $first && output="$(cat "$bf")" && first=false \
+               || output="$output"$'\n\n'"$(cat "$bf")"
+        count=$((count + 1))
+    done < <(find "$tmp_dir" -name '*.tf' -print0 | sort -z)
+
+    rm -rf "$tmp_dir"
+    [[ $count -gt 0 ]] && printf '%s\n' "$output" > "$file" \
+                       || echo "WARNING: no $keyword blocks found in $file"
+}
+
+# Append both functions to .bashrc
 echo "" >> ~/.bashrc
-echo "# Define tfrel function" >> ~/.bashrc
-declare -f tfrel >> ~/.bashrc
-echo "tfrel appended to ~/.bashrc"
+echo "# Terraform sort helper" >> ~/.bashrc
+declare -f _tf_sort_blocks >> ~/.bashrc
+declare -f tfsort >> ~/.bashrc
+echo "tfsort appended to ~/.bashrc"
 ```
+
+> **See also:** [Terraform Standards - Module maintenance scripts](/docs/documents/terraform-standards) for the full PowerShell, Bash, and Python implementations. [Git - Tags](/docs/cheatsheets/git-cheatsheet) for the tagging commands that trigger a module registry release.
 
 ---
 

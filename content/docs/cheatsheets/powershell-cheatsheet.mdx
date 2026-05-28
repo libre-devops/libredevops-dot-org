@@ -1133,6 +1133,8 @@ $ctx = Get-AzContext
 Set-AzContext -Context $ctx
 ```
 
+> **See also:** [Azure - Auth & Context](/docs/cheatsheets/azure-cheatsheet) for Az CLI equivalents and managed identity patterns. [Terraform - Provider & Authentication](/docs/cheatsheets/terraform) for using SPN credentials with the AzureRM provider.
+
 ---
 
 ## Azure Resources
@@ -1644,6 +1646,8 @@ Import-Csv 'new-indicators.csv' | ForEach-Object {
         -ItemProperties    @{ IPAddress = $_.IPAddress; Reason = $_.Reason; AddedDate = (Get-Date -Format 'o') }
 }
 ```
+
+> **See also:** [KQL](/docs/cheatsheets/kql-cheatsheet) - the query language that runs inside Sentinel. Covers scheduled rule structure, threat hunting across Defender tables, and watchlist lookups in KQL.
 
 ---
 

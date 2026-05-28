@@ -1,0 +1,1375 @@
+---
+title: Azure Logic App Standards
+description: Production standards for designing, naming, securing, and operating Azure Logic Apps - covering hosting model selection, Sentinel integration, trigger types, networking, retries, Terraform, and dependency chains.
+---
+
+# Azure Logic App Standards
+
+Production standards for building Azure Logic Apps that are consistent, secure, maintainable, and traceable - from hosting model selection through Sentinel incident triggers, HTTP endpoints, KQL scheduling, networking, retries, Terraform, and observability.
+
+> **Microsoft reference:** [Azure Logic Apps overview](https://learn.microsoft.com/en-us/azure/logic-apps/logic-apps-overview) · [Standard vs Consumption](https://learn.microsoft.com/en-us/azure/logic-apps/single-tenant-overview-compare) · [Sentinel playbooks](https://learn.microsoft.com/en-us/azure/sentinel/automate-responses-with-playbooks)
+
+---
+
+## Hosting Model: Consumption vs Standard
+
+The first decision before writing any workflow is which hosting model to use. Getting this wrong is costly - migrating between models requires rebuilding the workflow from scratch.
+
+### Decision tree
+
+Work through these questions in order. Stop at the first `→` that matches your requirement.
+
+| Question | Yes → | No ↓ |
+|:--|:--|:--|
+| Does the workflow need VNet integration or private endpoints? | **Standard** | ↓ |
+| Does the workflow need a static, dedicated outbound IP? | **Standard** | ↓ |
+| Will this resource host more than one workflow? | **Standard** | ↓ |
+| Does this workflow need stateless execution (no run history storage)? | **Standard** | ↓ |
+| Is expected throughput > 100,000 action executions per 5 minutes? | **Standard** | ↓ |
+| Does this workflow need custom built-in connectors or local function execution? | **Standard** | ↓ |
+| Is cost optimisation via pay-per-execution more important than fixed cost? | **Consumption** | ↓ |
+| Is this a simple event-driven integration with low, bursty volume? | **Consumption** | **Standard** |
+
+> **Sentinel playbooks:** Both Consumption and Standard Logic Apps can serve as Sentinel playbooks. Consumption is simpler to onboard (Sentinel's built-in playbook gallery uses it by default). Standard is required if the playbook must reach private resources. When in doubt, Standard is the more production-ready choice - see [Sentinel automation](https://learn.microsoft.com/en-us/azure/sentinel/automate-incident-handling-with-automation-rules).
+
+### Consumption (Multitenant)
+
+| Property | Value |
+|:--|:--|
+| Hosting | Shared, multitenant |
+| Workflows per resource | One |
+| Billing | Pay per action execution |
+| Networking | Shared IPs, no VNet integration |
+| Outbound IPs | Shared, unpredictable (see [IP list](https://learn.microsoft.com/en-us/azure/logic-apps/logic-apps-limits-and-config#outbound-ip-addresses)) |
+| Concurrency limit | 25 concurrent runs (default, max 100) |
+| Action timeout | 120 seconds per action |
+| When to use | Sentinel playbooks with no private network requirements; low-volume event-driven automation; proof-of-concept |
+
+### Standard (Single-tenant)
+
+| Property | Value |
+|:--|:--|
+| Hosting | Single-tenant (App Service Plan / Workflow Service Plan) |
+| Workflows per resource | Multiple stateful and stateless |
+| Billing | Fixed plan cost + storage transactions |
+| Networking | VNet integration, private endpoints, dedicated subnet |
+| Outbound IPs | Dedicated and predictable (the App Service Plan IPs) |
+| Concurrency limit | 100 concurrent runs (default, configurable) |
+| Action timeout | Configurable (default 1 hour for stateful, 5 min for stateless) |
+| When to use | Production automation touching private resources; workflows requiring consistent egress IPs; high-throughput pipelines; multi-workflow resources |
+
+### Standard SKUs
+
+| SKU | vCPUs | RAM | Use case |
+|:--|:--|:--|:--|
+| `WS1` | 1 | 3.5 GB | Dev, low-volume production |
+| `WS2` | 2 | 7 GB | Mid-volume, concurrent workflows |
+| `WS3` | 4 | 14 GB | High-volume, CPU-intensive transformation |
+
+Start at `WS1` and scale based on observed CPU and memory under load.
+
+---
+
+## Naming & Tagging
+
+### Resource name
+
+Follow the [Azure Naming Convention](/docs/documents/azure-naming-convention). Both Consumption (`Microsoft.Logic/workflows`) and Standard (`Microsoft.Web/sites`) Logic Apps use the `logic-` prefix.
+
+```
+# Consumption (Microsoft.Logic/workflows) and Standard (Microsoft.Web/sites)
+logic-{infix}-{outfix}-{suffix}-{numbering}
+logic-ldo-uks-prd-01
+logic-ldo-uks-dev-01
+logic-ldo-uks-prd-02
+```
+
+Supporting resources follow their own conventions:
+
+| Resource | Prefix | Example |
+|:--|:--|:--|
+| Logic App (Consumption + Standard) | `logic-` | `logic-ldo-uks-prd-01` |
+| App Service Plan | `plan-` | `plan-ldo-uks-prd-01` |
+| Storage Account | `sa` (no hyphen) | `saldouksprd01` |
+| User-assigned Identity | `id-` | `id-sentinel-playbooks-ldo-uks-prd-01` |
+| API Connection (`Microsoft.Web/connections`) | `conn-` | `conn-sentinel-ldo-uks-prd-01` |
+| Private Endpoint | `pep-` | `pep-logic-ldo-uks-prd-01` |
+| Application Insights | `appi-` | `appi-ldo-uks-prd-01` |
+| Log Analytics Workspace | `log-` | `log-ldo-uks-prd-01` |
+| Key Vault | `kv-` | `kv-ldo-uks-prd-01` |
+
+The resource name is short and machine-readable. It identifies **what it is and where** - not what it does. The name never changes after creation without destroying the resource.
+
+### Hidden Title tag
+
+Because the resource name is opaque, every Logic App must carry a `hidden-title` tag containing a human-readable description of what the workflow does. This tag renders in the Azure Portal resource list as a subtitle beneath the resource name.
+
+```hcl
+# Terraform
+tags = {
+  hidden-title = "Sentinel Incident - Enrich and notify Teams on High severity"
+  environment  = "prd"
+  managed-by   = "terraform"
+  module       = "terraform-azurerm-logic-app"
+}
+```
+
+The `hidden-title` convention is an Azure platform feature - the portal reads this tag and surfaces it in the resource overview blade. No other tag key achieves this.
+
+**Format for `hidden-title`:** `{Trigger type} - {What it does in plain language}`
+
+| Example trigger | Example hidden-title |
+|:--|:--|
+| Sentinel Incident | `Sentinel Incident - Auto-close TI false positives` |
+| HTTP | `HTTP - Receive webhook from GitHub and create JIRA ticket` |
+| Recurrence | `Scheduled - Daily stale device report to Teams` |
+| Polling | `Polling - ServiceNow new P1 tickets to PagerDuty` |
+
+### Required tags
+
+Every Logic App resource must carry these tags at minimum:
+
+| Tag key | Example value | Purpose |
+|:--|:--|:--|
+| `hidden-title` | `Sentinel Incident - Enrich on High severity` | Portal display name |
+| `environment` | `prd`, `dev`, `tst` | Environment identification |
+| `managed-by` | `terraform` | Drift detection |
+| `owner` | `platform-team` | Incident escalation |
+| `cost-centre` | `sec-ops` | FinOps allocation |
+
+---
+
+## Trigger Types
+
+### Sentinel Incident trigger
+
+The recommended trigger for all security automation playbooks. Uses the **Microsoft Sentinel** managed connector.
+
+**Trigger:** `When a Microsoft Sentinel incident is created or updated`
+
+This trigger fires on both creation and update events. Always add a condition immediately after the trigger to filter the event type:
+
+```
+Trigger
+└── Condition: triggerBody()?['object']?['properties']?['status'] is not equal to 'Closed'
+    ├── True: continue with automation
+    └── False: Terminate (Cancelled)
+```
+
+Additional filters to apply early (reduces wasted executions):
+
+```
+# Filter to creation events only (avoid re-triggering on enrichment updates):
+triggerOutputs()?['body']?['object']?['properties']?['additionalData']?['alertsCount'] > 0
+
+# Filter by severity:
+triggerBody()?['object']?['properties']?['severity'] equals 'High'
+
+# Filter by specific analytic rule:
+contains(triggerBody()?['object']?['properties']?['title'], 'Brute Force')
+```
+
+**Required permissions for the Logic App identity:**
+
+| Role | Scope | Why |
+|:--|:--|:--|
+| `Microsoft Sentinel Responder` | Sentinel workspace resource group | Read incidents, add comments, update status |
+| `Microsoft Sentinel Contributor` | Sentinel workspace resource group | Needed if playbook writes back to incidents |
+| `Logic App Contributor` | Logic App resource | Allows Sentinel automation rules to trigger it |
+
+> **Rule:** Always use **Managed Identity** for the Sentinel connector, not a user account connection. User account connections break when the user leaves or their password changes.
+
+**Sentinel Automation Rule:** Link the playbook via an Automation Rule - not the legacy Alert Rule playbook field. Automation Rules evaluate after incident creation/update and support conditions, ordering, and expiry.
+
+```
+Sentinel → Automation rules → + Create
+  Trigger: When incident is created
+  Conditions: Severity = High
+  Actions: Run playbook → select your Logic App
+```
+
+**Cross-subscription playbooks:** If the Logic App is in a different subscription from the Sentinel workspace, the automation rule must be configured with an explicit resource ID and the Logic App must grant `Logic App Contributor` to the Sentinel workspace's managed identity.
+
+### HTTP Request trigger
+
+Use for webhook-based integrations - GitHub, JIRA, ServiceNow, custom applications calling the Logic App endpoint.
+
+```json
+{
+  "type": "Request",
+  "kind": "Http",
+  "inputs": {
+    "schema": {
+      "type": "object",
+      "properties": {
+        "alertId": { "type": "string" },
+        "severity": { "type": "string", "enum": ["High", "Medium", "Low"] },
+        "description": { "type": "string" }
+      },
+      "required": ["alertId", "severity"]
+    }
+  }
+}
+```
+
+**Always define a JSON schema** on the Request trigger. Without a schema, expressions referencing request body fields are untyped and fail silently when the field is missing.
+
+**HTTP trigger endpoint URL:** The URL contains an `sp`, `sv`, and `sig` SAS token. This token does **not expire by default** but should be treated as a secret.
+
+| Security control | Implementation |
+|:--|:--|
+| Restrict caller IPs | Logic App Settings → Access control → Allowed inbound IP addresses |
+| Require Azure AD auth | Enable OAuth on the Request trigger (Standard only) |
+| Rotate the SAS token | Regenerate the trigger URL on a schedule (breaks existing callers - coordinate first) |
+| Use API Management as a front door | Route all external webhooks through APIM, which handles auth, rate limiting, and IP restriction |
+
+**Always return a meaningful HTTP response** from the HTTP trigger. If the workflow is long-running, respond immediately with `202 Accepted` and process asynchronously. Never leave callers waiting for the full workflow duration.
+
+```
+Request trigger
+└── Response action (immediately): HTTP 202 Accepted
+└── [rest of workflow runs async]
+```
+
+### Recurrence trigger (time-based)
+
+Use for scheduled automation: daily reports, periodic KQL scans, nightly cleanup jobs.
+
+```json
+{
+  "type": "Recurrence",
+  "recurrence": {
+    "frequency": "Day",
+    "interval": 1,
+    "schedule": {
+      "hours": ["06"],
+      "minutes": [0]
+    },
+    "timeZone": "GMT Standard Time"
+  }
+}
+```
+
+**Always set `timeZone` explicitly.** Without it, the recurrence runs in UTC. For UK deployments, use `"GMT Standard Time"` - this automatically respects BST/GMT transitions.
+
+**Recurrence trigger does not support waiting runs.** If a previous execution is still running when the next fire time arrives, the new execution is skipped. For long-running jobs, set the recurrence interval to be significantly longer than the expected execution time, or switch to a polling pattern with overlap protection.
+
+### KQL query pattern (scheduled scan)
+
+Logic Apps cannot run KQL directly - you call an external service to execute the query and process the results. The two patterns:
+
+**Pattern 1: Azure Monitor Logs connector (Consumption + Standard)**
+
+Use the `Azure Monitor Logs` managed connector action: `Run query and list results`.
+
+```
+Recurrence trigger (every 1 hour)
+└── Azure Monitor Logs: Run query and list results
+    ├── Subscription: [your subscription]
+    ├── Resource Group: [Log Analytics RG]
+    ├── Resource Type: Log Analytics Workspace
+    ├── Resource Name: [workspace name]
+    └── Query:
+        SecurityEvent
+        | where TimeGenerated > ago(1h)
+        | where EventID == 4625
+        | summarize FailCount = count() by TargetAccount, IpAddress
+        | where FailCount > 20
+└── Condition: length(body('Run_query_and_list_results')?['value']) > 0
+    ├── True: For each result → [send Teams notification / create incident]
+    └── False: Terminate (Succeeded)
+```
+
+> **Always guard the "For each" loop with a result count check.** Without this check, a zero-result query still iterates, and any action inside the loop throws an error on empty arrays in some connector versions.
+
+**Pattern 2: Sentinel Analytics Rule → Incident → Playbook**
+
+The cleaner production pattern. Let Sentinel's analytics engine run the KQL on its own schedule, create an incident when the threshold is met, and trigger the playbook via an automation rule. This:
+
+- Offloads KQL execution to Sentinel (designed for it)
+- Gives you incident history, comment trails, and severity tracking
+- Decouples the query schedule from the automation schedule
+- Avoids reimplementing Sentinel's own deduplication and suppression
+
+Prefer this pattern for anything security-related. Use Pattern 1 only for operational data not in Sentinel (e.g. cost anomalies, performance metrics, non-security Log Analytics workspaces).
+
+### Polling trigger
+
+Used for connectors that don't support push (ServiceNow, older REST APIs, SFTP). The Logic App polls the source on a fixed interval.
+
+```
+Recurrence trigger (every 5 minutes)
+└── [Connector]: Get new items since last run
+    ├── Use a timestamp variable initialised on first run
+    └── Update the timestamp at the end of each successful run
+└── Condition: has items
+    ├── True: process each item
+    └── False: Terminate (Succeeded)
+```
+
+> **Polling frequency:** Match the polling interval to the criticality of the data. Security-critical data: 5 minutes max. Operational reports: 15-60 minutes. Never poll faster than the source API's rate limit allows.
+
+---
+
+## API Connections & Authentication
+
+### Managed Identity (required for production)
+
+All connections to Microsoft services (Sentinel, Azure Monitor, Teams, Key Vault, Storage) must use Managed Identity. Never use a user account or a stored connection string in a production playbook.
+
+#### System-assigned (standard)
+
+System-assigned managed identity is the default. The identity lifecycle is tied to the Logic App - it is created when the Logic App is created and destroyed when the Logic App is destroyed. Use this for all Logic Apps that are individually scoped (one Logic App, its own permissions, its own rotation boundary).
+
+```hcl
+resource "azurerm_logic_app_standard" "this" {
+  name                = "logic-ldo-uks-prd-01"
+  resource_group_name = var.rg_name
+  location            = var.location
+  # ...
+
+  identity {
+    type = "SystemAssigned"
+  }
+}
+
+# Role assignment targets the Logic App's own identity
+resource "azurerm_role_assignment" "sentinel_responder" {
+  scope                = var.sentinel_workspace_resource_id
+  role_definition_name = "Microsoft Sentinel Responder"
+  principal_id         = azurerm_logic_app_standard.this.identity[0].principal_id
+
+  depends_on = [azurerm_logic_app_standard.this]
+}
+```
+
+#### User-assigned (shared permission model)
+
+Use a User-assigned managed identity when multiple Logic Apps need the same set of permissions - for example, a suite of Sentinel playbooks that all need `Microsoft Sentinel Responder` on the same workspace. The identity is created and managed independently; it can be attached to many resources simultaneously, and role assignments are made once on the identity rather than once per Logic App.
+
+```hcl
+# Shared identity - created once, attached to all playbooks in the suite
+resource "azurerm_user_assigned_identity" "sentinel_playbooks" {
+  name                = "id-sentinel-playbooks-ldo-uks-prd-01"
+  resource_group_name = var.rg_name
+  location            = var.location
+  tags                = var.tags
+}
+
+# Role assignments made once on the shared identity
+resource "azurerm_role_assignment" "sentinel_responder" {
+  scope                = var.sentinel_workspace_resource_id
+  role_definition_name = "Microsoft Sentinel Responder"
+  principal_id         = azurerm_user_assigned_identity.sentinel_playbooks.principal_id
+}
+
+resource "azurerm_role_assignment" "law_reader" {
+  scope                = azurerm_log_analytics_workspace.this.id
+  role_definition_name = "Log Analytics Reader"
+  principal_id         = azurerm_user_assigned_identity.sentinel_playbooks.principal_id
+}
+
+# All playbooks in the suite use the shared identity.
+# Use "this" as the resource label - for_each provides the per-instance key.
+locals {
+  sentinel_playbook_names = toset([
+    "logic-ldo-uks-prd-01",
+    "logic-ldo-uks-prd-02",
+  ])
+}
+
+resource "azurerm_logic_app_standard" "this" {
+  for_each = local.sentinel_playbook_names
+
+  name                = each.key
+  resource_group_name = var.rg_name
+  location            = var.location
+  # ...
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.sentinel_playbooks.id]
+  }
+}
+
+# Access individual instances via the for_each key:
+# azurerm_logic_app_standard.this["logic-ldo-uks-prd-01"]
+```
+
+**When to use each:**
+
+| | System-assigned | User-assigned |
+|:--|:--|:--|
+| Lifecycle | Tied to the Logic App | Independent - survives Logic App deletion |
+| Role assignments | Per Logic App | Once per identity, shared across all attached resources |
+| Use case | Single isolated Logic App | Multiple Logic Apps with identical permission needs |
+| Key rotation boundary | Per Logic App | Shared - revoking the identity affects all attached resources |
+| Terraforming | Simpler - principal_id is an output of the resource | Requires separate identity resource and explicit attachment |
+
+> **Do not combine System and User-assigned on the same Logic App** unless you have a specific reason (e.g. one set of permissions must survive independently). Pick one model per resource. The default is System-assigned.
+
+For **Consumption Logic Apps** using the Sentinel managed connector with Managed Identity:
+
+1. Enable System Assigned identity on the Logic App
+2. Grant `Microsoft Sentinel Responder` to the Logic App's identity on the workspace RG
+3. In the Logic App Designer, when configuring the Sentinel connector, select **Connect with managed identity**
+
+### Service Principal connection
+
+Use when Managed Identity is unavailable or the connection must be cross-tenant. Store the client secret in Azure Key Vault and reference it via Key Vault references in App Settings.
+
+```hcl
+app_settings = {
+  "SENTINEL_CLIENT_ID"     = var.sentinel_sp_client_id
+  "SENTINEL_CLIENT_SECRET" = "@Microsoft.KeyVault(VaultName=${var.kv_name};SecretName=sentinel-sp-secret)"
+  "SENTINEL_TENANT_ID"     = var.tenant_id
+}
+```
+
+### Never use
+
+- **User account connections** - break on password changes, MFA prompts, or when the account is disabled. Cause playbook failures with no clear error message.
+- **Hardcoded credentials in workflow JSON** - visible to anyone with `Logic App Reader`; cannot be rotated without a code change.
+- **Shared access keys stored as plain App Settings** - use Key Vault references instead.
+
+### API connections in Terraform (azapi)
+
+Managed connector actions (Microsoft Sentinel, Microsoft Teams, Outlook 365) require a `Microsoft.Web/connections` ARM resource, plus an access policy that authorises the Logic App's managed identity to use the connection. The `azurerm` provider has no native resource for this - use the `azapi` provider instead of `azurerm_resource_group_template_deployment`, which is harder to read and does not surface connection state in the Terraform plan.
+
+```hcl
+# terraform.tf - add azapi alongside azurerm
+terraform {
+  required_providers {
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = ">= 4.0.0, < 5.0.0"
+    }
+    azapi = {
+      source  = "azure/azapi"
+      version = ">= 2.0.0, < 3.0.0"
+    }
+  }
+}
+```
+
+```hcl
+# Create the managed API connection
+# parameterValueType = "Alternative" enables managed identity auth on the connection
+resource "azapi_resource" "sentinel_connection" {
+  type      = "Microsoft.Web/connections@2016-06-01"
+  name      = "conn-sentinel-ldo-uks-prd-01"
+  location  = var.location
+  parent_id = "/subscriptions/${var.subscription_id}/resourceGroups/${var.rg_name}"
+
+  body = {
+    properties = {
+      displayName        = "Microsoft Sentinel - Managed Identity"
+      parameterValueType = "Alternative"
+      api = {
+        id = "/subscriptions/${var.subscription_id}/providers/Microsoft.Web/locations/${var.location}/managedApis/azuresentinel"
+      }
+    }
+  }
+
+  response_export_values = ["*"]
+}
+
+# Create the Microsoft Teams connection
+resource "azapi_resource" "teams_connection" {
+  type      = "Microsoft.Web/connections@2016-06-01"
+  name      = "conn-teams-ldo-uks-prd-01"
+  location  = var.location
+  parent_id = "/subscriptions/${var.subscription_id}/resourceGroups/${var.rg_name}"
+
+  body = {
+    properties = {
+      displayName        = "Microsoft Teams - Managed Identity"
+      parameterValueType = "Alternative"
+      api = {
+        id = "/subscriptions/${var.subscription_id}/providers/Microsoft.Web/locations/${var.location}/managedApis/teams"
+      }
+    }
+  }
+
+  response_export_values = ["*"]
+}
+
+# Grant the Logic App's managed identity access to the Sentinel connection
+# This access policy is what allows the Logic App to use the connection at runtime
+resource "azapi_resource" "sentinel_connection_access_policy" {
+  type      = "Microsoft.Web/connections/accessPolicies@2016-06-01"
+  name      = azurerm_logic_app_standard.this.name
+  parent_id = azapi_resource.sentinel_connection.id
+  location  = var.location
+
+  body = {
+    properties = {
+      principal = {
+        type = "ActiveDirectory"
+        identity = {
+          objectId = azurerm_logic_app_standard.this.identity[0].principal_id
+          tenantId = var.tenant_id
+        }
+      }
+    }
+  }
+
+  depends_on = [
+    azapi_resource.sentinel_connection,
+    azurerm_logic_app_standard.this,
+    azurerm_role_assignment.sentinel_responder,   # role must exist before the connection is used
+  ]
+}
+
+resource "azapi_resource" "teams_connection_access_policy" {
+  type      = "Microsoft.Web/connections/accessPolicies@2016-06-01"
+  name      = azurerm_logic_app_standard.this.name
+  parent_id = azapi_resource.teams_connection.id
+  location  = var.location
+
+  body = {
+    properties = {
+      principal = {
+        type = "ActiveDirectory"
+        identity = {
+          objectId = azurerm_logic_app_standard.this.identity[0].principal_id
+          tenantId = var.tenant_id
+        }
+      }
+    }
+  }
+
+  depends_on = [
+    azapi_resource.teams_connection,
+    azurerm_logic_app_standard.this,
+  ]
+}
+```
+
+**Referencing connections in the workflow JSON:**
+
+The workflow definition JSON (stored as `workflow.json` for Standard, or embedded in the ARM template for Consumption) must reference the connection resource by ID:
+
+```json
+{
+  "parameters": {
+    "$connections": {
+      "value": {
+        "azuresentinel": {
+          "connectionId": "/subscriptions/.../resourceGroups/.../providers/Microsoft.Web/connections/conn-sentinel-ldo-uks-prd-01",
+          "connectionName": "conn-sentinel-ldo-uks-prd-01",
+          "connectionProperties": {
+            "authentication": {
+              "type": "ManagedServiceIdentity"
+            }
+          },
+          "id": "/subscriptions/.../providers/Microsoft.Web/locations/uksouth/managedApis/azuresentinel"
+        }
+      }
+    }
+  }
+}
+```
+
+Pass the connection ID from Terraform using `azapi_resource.sentinel_connection.id` rather than hardcoding it.
+
+> **Rule:** The access policy must be created after both the connection resource and the Logic App identity exist, and after the role assignment granting the identity access to Sentinel has been applied. Chain these with explicit `depends_on` - Terraform cannot infer these relationships from attribute references alone because the access policy body references an `objectId` string rather than a Terraform resource attribute.
+
+---
+
+## Networking
+
+### Consumption: shared infrastructure
+
+Consumption Logic Apps run on shared Azure infrastructure with shared, rotating outbound IP addresses. You cannot pin a Consumption Logic App to a static IP.
+
+- **Outbound IPs:** Published by Microsoft per region but shared across all Consumption Logic Apps in that region. The [full list](https://learn.microsoft.com/en-us/azure/logic-apps/logic-apps-limits-and-config#outbound-ip-addresses) is long - allowlisting it effectively allows all Azure Logic Apps in that region, not just yours.
+- **VNet integration:** Not available.
+- **Private endpoints:** Not available.
+- **Inbound restriction:** Available - configure allowed IP ranges in Logic App Settings → Access control.
+
+**Consequence:** Never rely on IP allowlisting to authenticate a Consumption Logic App to an external service. Use identity-based auth (OAuth, Managed Identity) instead. If IP allowlisting is a hard requirement, use Standard.
+
+### Standard: dedicated networking
+
+Standard Logic Apps run on an App Service Plan, which gives you a predictable, dedicated set of outbound IPs.
+
+**VNet integration (outbound traffic):**
+
+```hcl
+resource "azurerm_logic_app_standard" "this" {
+  for_each = local.logic_app_map
+  # ...
+  virtual_network_subnet_id = var.integration_subnet_id   # /28 minimum, /26 recommended
+}
+```
+
+The integration subnet must be delegated to `Microsoft.Web/serverFarms` and must not host any other resources.
+
+**Private endpoint (inbound traffic):**
+
+```hcl
+resource "azurerm_private_endpoint" "this" {
+  for_each = local.logic_app_map
+
+  # Convention: pep-{resource_name} - the protected resource name already contains
+  # the environment and region, so no suffix is added.
+  name                = "pep-${each.key}"
+  resource_group_name = var.rg_name
+  location            = var.location
+  subnet_id           = var.private_endpoint_subnet_id
+
+  private_service_connection {
+    name                           = "psc-${each.key}"
+    private_connection_resource_id = azurerm_logic_app_standard.this[each.key].id
+    subresource_names              = ["sites"]
+    is_manual_connection           = false
+  }
+}
+```
+
+When a private endpoint is configured:
+- The public HTTP trigger URL still exists but can be disabled via `public_network_access = "Disabled"`
+- Sentinel Automation Rules can still trigger the playbook directly via the ARM plane, regardless of network access settings
+- HTTP webhook callers must be within the VNet or use a peered/connected network
+
+**Outbound IP stability:**
+
+The outbound IPs of a Standard Logic App are the outbound IPs of its underlying App Service Plan. These are stable and listed in the Azure Portal under the App Service Plan → Properties → Outbound IP addresses. Use these for allowlisting in third-party services (ServiceNow, Splunk, external APIs).
+
+```bash
+# Get outbound IPs via CLI
+az webapp show \
+  --name logic-ldo-uks-prd-01 \
+  --resource-group rg-ldo-uks-prd-01 \
+  --query outboundIpAddresses -o tsv
+```
+
+**Network Security Group on the integration subnet:**
+
+```
+Inbound:
+  Allow: Azure Logic Apps service tag → subnet (for platform health checks)
+
+Outbound:
+  Allow: subnet → Log Analytics workspace (AzureMonitor service tag) - for diagnostics
+  Allow: subnet → Key Vault private endpoint (port 443)
+  Allow: subnet → Storage account (Azure Storage service tag) - Standard stateful storage
+  Allow: subnet → external services (specific IPs/FQDNs per integration)
+  Deny: all other outbound
+```
+
+### Inbound security for HTTP triggers
+
+For Standard Logic Apps with HTTP triggers, layer multiple controls:
+
+1. **Private endpoint:** Prevent public internet access entirely
+2. **IP restriction in App Settings:** Allows only specific CIDR ranges, even within the VNet
+3. **Azure API Management:** Route all external webhooks through APIM, which handles mTLS, OAuth, and rate limiting
+4. **SAS signature:** The trigger URL includes a signature - keep it secret and rotate it on a schedule
+
+---
+
+## Retries & Error Handling
+
+### Default retry policy
+
+All managed connector actions have a default retry policy of **4 retries with exponential backoff** starting at 7.5 seconds. For most integrations this is sufficient. Verify and override where needed.
+
+```json
+{
+  "type": "ApiConnection",
+  "inputs": { "...": "..." },
+  "runAfter": {},
+  "runtimeConfiguration": {
+    "staticResult": { "name": "...", "staticResultOptions": "Disabled" }
+  },
+  "operationOptions": "DisableAsyncPattern",
+  "retryPolicy": {
+    "type": "exponential",
+    "count": 4,
+    "interval": "PT7.5S",
+    "minimumInterval": "PT5S",
+    "maximumInterval": "PT1H"
+  }
+}
+```
+
+**Retry policy types:**
+
+| Type | Use case |
+|:--|:--|
+| `exponential` | Default for most actions - backs off to avoid overwhelming the target |
+| `fixed` | Use when the target has a known recovery time (e.g. "retry every 30s") |
+| `none` | Fire-and-forget actions where retrying would cause duplicate side effects |
+
+> **Rule:** Set `type: none` on actions that are not idempotent - Teams notifications, email sends, JIRA ticket creation. Retrying these creates duplicate messages. Set exponential on all read operations and safe writes.
+
+### `Run After` (structured error handling)
+
+Use `Run After` configuration to build error handling branches that fire on failure, timeout, or skip conditions.
+
+```
+Action: Call External API
+├── Run After: preceding step succeeded
+├── On Success: continue
+└── On Failure / Timeout / Skipped:
+    └── Scope: Error Handler
+        ├── Send Teams alert: "Logic App {{workflow().name}} failed at {{actions('Call_External_API').startTime}}"
+        ├── Add Sentinel incident comment: "Automation failed - manual review required"
+        └── Terminate: Failed (with descriptive error message)
+```
+
+### Scope blocks for structured try/catch
+
+Wrap the main workflow body in a `Scope` block. Add a second `Scope` block configured to run after the first scope fails:
+
+```
+Scope: Main Workflow
+  ├── [all your workflow actions]
+  └── runs on: succeeded
+
+Scope: Error Handler
+  ├── runs on: Main Workflow failed OR timed out OR skipped
+  ├── Send failure notification
+  ├── Optionally: Update Sentinel incident status to "In Progress" with comment
+  └── Terminate action: Failed
+```
+
+**Always end a failure handler with a `Terminate` action** set to `Failed`. Without this, the workflow run reports `Succeeded` even though the main logic failed - this silently swallows errors.
+
+### Sentinel-specific error handling
+
+When the playbook is triggered by Sentinel, always write back to the incident regardless of success or failure:
+
+```
+On success:
+  Sentinel: Add comment to incident
+    Comment: "Playbook completed successfully. [Summary of actions taken]."
+  Sentinel: Update incident status (if appropriate: Closed/Active)
+
+On failure:
+  Sentinel: Add comment to incident
+    Comment: "⚠️ Playbook failed at step [action name]. Error: [error message]. Manual review required."
+  Do NOT close or change the incident status - leave it for human review
+```
+
+### Timeout considerations
+
+| Hosting | Action timeout | Workflow timeout |
+|:--|:--|:--|
+| Consumption | 120 seconds per action | 90 days total |
+| Standard (stateful) | Configurable (default 1 hour) | No limit |
+| Standard (stateless) | Configurable (default 5 minutes) | 5 minutes |
+
+> **Standard stateless workflows cannot call asynchronous actions or polling connectors.** If your workflow uses HTTP triggers with async responses, Azure Monitor polling, or any action that takes >5 minutes, use stateful.
+
+For long-running operations (batch processing, large KQL result sets), use the [async HTTP pattern](https://learn.microsoft.com/en-us/azure/logic-apps/logic-apps-create-api-app#action-patterns):
+
+```
+1. HTTP request → Logic App HTTP trigger
+2. Logic App responds immediately: 202 Accepted + Location header (status endpoint URL)
+3. Caller polls the status URL
+4. Logic App updates a Storage Table with run status
+5. Status endpoint returns 200 OK when complete
+```
+
+---
+
+## Terraform
+
+### Cookie-cutter vs custom Logic Apps
+
+Before choosing whether to use a module or write raw resources, decide whether the Logic App is **cookie-cutter** or **custom**. This distinction determines the right Terraform approach.
+
+**A cookie-cutter Logic App has all of the following:**
+
+- Standard hosting: Linux OS, WS1–WS3 SKU, App Service Plan
+- Standard identity: System-assigned (or a single shared User-assigned) managed identity
+- Standard networking: optional VNet integration subnet, optional private endpoint - no ASE, no special network policies
+- Standard site config: `always_on`, TLS 1.2, FTPS disabled, HTTP2
+- Standard App Settings: App Insights key, Key Vault references for secrets, no custom environment injection at deploy time
+- No resource-level `lifecycle` overrides beyond `ignore_changes` on `app_settings["WEBSITE_RUN_FROM_PACKAGE"]`
+- No cross-resource dependencies that require orchestrating creates/destroys outside of Terraform's normal graph
+
+If all of the above apply, use the module. The module's `list(object)` input means you can declare several cookie-cutter Logic Apps in a single call without duplicating configuration.
+
+**A custom Logic App has any of the following:**
+
+- App Service Environment v3 (ASEv3) hosting
+- Multiple storage accounts per Logic App (e.g. separate accounts for different workflow groups)
+- Complex `lifecycle` blocks - `create_before_destroy`, `prevent_destroy`, per-attribute `ignore_changes` beyond the standard set
+- Per-resource provider aliases or multi-subscription deployments
+- Custom scaling rules that attach to the App Service Plan in a way the module does not expose
+- Dependency relationships on resources the module does not manage (e.g. the Logic App must only be created after a specific database migration completes)
+- Any situation where the module abstraction forces you to work around it rather than with it
+
+If any of the above apply, **do not use the module** - write raw `azurerm_logic_app_standard`, `azurerm_service_plan`, and supporting resources directly. Fighting a module to accommodate a non-standard requirement produces harder-to-read code than writing the resources explicitly.
+
+> **Rule:** Modules exist to reduce repetition for standard cases. They are not a substitute for understanding the underlying resources. If you cannot immediately explain what a module call expands to, you should not be using it in a production deployment.
+
+### Module usage (cookie-cutter)
+
+```hcl
+# terraform.tf
+terraform {
+  required_providers {
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = ">= 4.0.0, < 5.0.0"
+    }
+    azapi = {
+      source  = "azure/azapi"
+      version = ">= 2.0.0, < 3.0.0"
+    }
+  }
+}
+
+# main.tf
+module "logic_apps" {
+  source = "github.com/libre-devops/terraform-azurerm-logic-app"
+
+  location = var.location
+  rg_name  = azurerm_resource_group.this.name
+
+  logic_apps = [
+    {
+      name                       = "logic-ldo-uks-prd-01"
+      app_service_plan_name      = "plan-ldo-uks-prd-01"
+      os_type                    = "Linux"
+      sku_name                   = "WS1"
+      storage_account_name       = azurerm_storage_account.logic_app.name
+      storage_account_access_key = azurerm_storage_account.logic_app.primary_access_key
+      https_only                 = true
+      enabled                    = true
+      identity_type              = "SystemAssigned"
+      public_network_access      = "Disabled"
+      virtual_network_subnet_id  = azurerm_subnet.integration.id
+
+      app_settings = {
+        "APPINSIGHTS_INSTRUMENTATIONKEY"        = azurerm_application_insights.this.instrumentation_key
+        "APPLICATIONINSIGHTS_CONNECTION_STRING" = azurerm_application_insights.this.connection_string
+        "WEBSITE_RUN_FROM_PACKAGE"              = "1"
+      }
+
+      site_config = {
+        always_on       = true
+        min_tls_version = "1.2"
+        ftps_state      = "Disabled"
+        http2_enabled   = true
+      }
+
+      tags = {
+        hidden-title = "Sentinel Incident - Enrich and notify Teams on High severity"
+        environment  = var.environment
+        managed-by   = "terraform"
+        owner        = "platform-team"
+        cost-centre  = "sec-ops"
+      }
+    }
+  ]
+
+  tags = var.tags
+}
+```
+
+### Raw resource (custom)
+
+When the Logic App is non-standard, write the resources explicitly. This is more verbose but completely transparent - no module abstraction to look through.
+
+```hcl
+# App Service Plan - written directly when the module's plan configuration is insufficient
+resource "azurerm_service_plan" "this" {
+  name                = "plan-ldo-uks-prd-01"
+  resource_group_name = azurerm_resource_group.this.name
+  location            = var.location
+  os_type             = "Linux"
+  sku_name            = "WS2"
+
+  # Example custom requirement: zone balancing enabled - not exposed by the module
+  zone_balancing_enabled = true
+
+  tags = var.tags
+}
+
+# Logic App - written directly
+resource "azurerm_logic_app_standard" "this" {
+  name                       = "logic-ldo-uks-prd-01"
+  resource_group_name        = azurerm_resource_group.this.name
+  location                   = var.location
+  app_service_plan_id        = azurerm_service_plan.this.id
+  storage_account_name       = azurerm_storage_account.logic_app.name
+  storage_account_access_key = azurerm_storage_account.logic_app.primary_access_key
+  https_only                 = true
+  enabled                    = true
+  public_network_access      = "Disabled"
+  virtual_network_subnet_id  = azurerm_subnet.integration.id
+
+  app_settings = {
+    "APPINSIGHTS_INSTRUMENTATIONKEY"        = azurerm_application_insights.this.instrumentation_key
+    "APPLICATIONINSIGHTS_CONNECTION_STRING" = azurerm_application_insights.this.connection_string
+    "WEBSITE_RUN_FROM_PACKAGE"              = "1"
+    # Custom: reference a secret that only this Logic App needs
+    "DOWNSTREAM_API_KEY" = "@Microsoft.KeyVault(VaultName=${azurerm_key_vault.this.name};SecretName=downstream-api-key)"
+  }
+
+  identity {
+    type = "SystemAssigned"
+  }
+
+  site_config {
+    always_on       = true
+    min_tls_version = "1.2"
+    ftps_state      = "Disabled"
+    http2_enabled   = true
+  }
+
+  # Custom lifecycle: prevent accidental destroy in production
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes  = [app_settings["WEBSITE_RUN_FROM_PACKAGE"]]
+  }
+
+  tags = merge(var.tags, {
+    hidden-title = "HTTP - Receive GitHub webhook and create JIRA ticket"
+  })
+
+  # The Key Vault must be accessible before the Logic App can start up and read its secrets
+  depends_on = [
+    azurerm_role_assignment.kv_secrets_user,
+    azurerm_subnet.integration,
+  ]
+}
+```
+
+### Role assignments (always in Terraform, never manual)
+
+**Cookie-cutter path - referencing the module output:**
+
+```hcl
+# The map key matches the name value in the logic_apps input list.
+resource "azurerm_role_assignment" "sentinel_responder" {
+  scope                = data.azurerm_resource_group.sentinel.id
+  role_definition_name = "Microsoft Sentinel Responder"
+  principal_id         = module.logic_apps.logic_app_identities["logic-ldo-uks-prd-01"][0].principal_id
+}
+```
+
+**Custom path - referencing the raw resource directly:**
+
+```hcl
+resource "azurerm_role_assignment" "sentinel_responder" {
+  scope                = data.azurerm_resource_group.sentinel.id
+  role_definition_name = "Microsoft Sentinel Responder"
+  principal_id         = azurerm_logic_app_standard.this.identity[0].principal_id
+
+  # principal_id is an attribute of the Logic App, so Terraform infers the dependency.
+  # The explicit depends_on is belt-and-braces for the provisioning race condition
+  # described in the Key Vault section above.
+  depends_on = [azurerm_logic_app_standard.this]
+}
+
+resource "azurerm_role_assignment" "law_reader" {
+  scope                = azurerm_log_analytics_workspace.this.id
+  role_definition_name = "Log Analytics Reader"
+  principal_id         = azurerm_logic_app_standard.this.identity[0].principal_id
+  depends_on           = [azurerm_logic_app_standard.this]
+}
+
+resource "azurerm_role_assignment" "kv_secrets_user" {
+  scope                = azurerm_key_vault.this.id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = azurerm_logic_app_standard.this.identity[0].principal_id
+  depends_on           = [azurerm_logic_app_standard.this]
+}
+```
+
+### Storage account (Standard)
+
+Standard Logic Apps require a dedicated storage account for stateful workflow state, run history, and queue scheduling.
+
+```hcl
+resource "azurerm_storage_account" "logic_app" {
+  name                     = "saldouksprd01"   # no hyphens, max 24 chars
+  resource_group_name      = azurerm_resource_group.this.name
+  location                 = var.location
+  account_tier             = "Standard"
+  account_replication_type = "ZRS"              # Zone-redundant for production
+  min_tls_version          = "TLS1_2"
+  https_traffic_only_enabled = true
+  public_network_access_enabled = false         # Use private endpoint or service endpoint
+
+  network_rules {
+    default_action             = "Deny"
+    virtual_network_subnet_ids = [azurerm_subnet.integration.id]
+  }
+
+  tags = var.tags
+}
+```
+
+> **Rule:** Never share the Logic App storage account with other workloads. The storage account handles internal state queuing; unexpected IOPS from another workload can cause workflow execution failures.
+
+### Diagnostic settings
+
+```hcl
+resource "azurerm_monitor_diagnostic_setting" "logic_app" {
+  for_each = module.logic_apps.logic_app_ids
+
+  name                       = "diag-${each.key}"
+  target_resource_id         = each.value
+  log_analytics_workspace_id = azurerm_log_analytics_workspace.this.id
+
+  enabled_log { category = "WorkflowRuntime" }
+  metric { category = "AllMetrics" }
+}
+```
+
+---
+
+## Dependency Chains
+
+When Logic Apps, API connections, role assignments, access policies, storage accounts, and Sentinel automation rules are provisioned together, the order matters. Terraform infers most dependencies automatically from attribute references (`some_resource.id`), but several relationships in the Logic App stack cannot be inferred - the body of an `azapi_resource` or a `depends_on` is needed to express them explicitly.
+
+### Correct creation order
+
+```
+1.  Resource Group
+2.  Storage Account          (Standard only - Logic App cannot start without it)
+3.  App Service Plan         (Standard only)
+4.  User-assigned Identity   (if using shared permission model)
+5.  Role Assignments         (on the identity - must exist before App Settings can read KV)
+6.  Logic App                (depends on storage, plan, and KV role assignment)
+7.  API Connection resources (Sentinel, Teams - depends_on Logic App)
+8.  Connection Access Policies (depends_on connection + Logic App identity)
+9.  Diagnostic Settings      (depends on Logic App ID)
+10. Sentinel Automation Rule (depends on Logic App - references its resource ID)
+```
+
+### Terraform depends_on chain - full example
+
+```hcl
+# ── 1. Storage (Standard Logic App prerequisite) ───────────────────────────
+resource "azurerm_storage_account" "logic_app" {
+  name                     = "saldouksprd01"
+  resource_group_name      = azurerm_resource_group.this.name
+  location                 = var.location
+  account_tier             = "Standard"
+  account_replication_type = "ZRS"
+  min_tls_version          = "TLS1_2"
+  https_traffic_only_enabled    = true
+  public_network_access_enabled = false
+
+  network_rules {
+    default_action             = "Deny"
+    virtual_network_subnet_ids = [azurerm_subnet.integration.id]
+  }
+
+  tags = var.tags
+}
+
+# ── 2. App Service Plan ─────────────────────────────────────────────────────
+resource "azurerm_service_plan" "this" {
+  name                = "plan-ldo-uks-prd-01"
+  resource_group_name = azurerm_resource_group.this.name
+  location            = var.location
+  os_type             = "Linux"
+  sku_name            = "WS1"
+  tags                = var.tags
+}
+
+# ── 3. Key Vault role assignment ────────────────────────────────────────────
+# Must be applied BEFORE the Logic App is created.
+# The Logic App reads Key Vault references in App Settings on startup.
+# If the role does not exist when the Logic App first starts, startup fails.
+resource "azurerm_role_assignment" "kv_secrets_user" {
+  scope                = azurerm_key_vault.this.id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = azurerm_logic_app_standard.this.identity[0].principal_id
+
+  # Chicken-and-egg: the principal_id comes from the Logic App, but we need the
+  # role before the Logic App can boot. Terraform creates the Logic App first
+  # (because principal_id is its attribute), then creates the role.
+  # This is acceptable - the Logic App will retry KV reads on first workflow run.
+  # If a hard guarantee is needed, use a User-assigned identity whose role
+  # assignment can be applied fully before the Logic App is created.
+}
+
+# ── 4. Logic App ────────────────────────────────────────────────────────────
+resource "azurerm_logic_app_standard" "this" {
+  name                       = "logic-ldo-uks-prd-01"
+  resource_group_name        = azurerm_resource_group.this.name
+  location                   = var.location
+  app_service_plan_id        = azurerm_service_plan.this.id
+  storage_account_name       = azurerm_storage_account.logic_app.name
+  storage_account_access_key = azurerm_storage_account.logic_app.primary_access_key
+  https_only                 = true
+  virtual_network_subnet_id  = azurerm_subnet.integration.id
+
+  identity {
+    type = "SystemAssigned"
+  }
+
+  app_settings = {
+    "APPINSIGHTS_INSTRUMENTATIONKEY" = azurerm_application_insights.this.instrumentation_key
+    "DOWNSTREAM_API_KEY"             = "@Microsoft.KeyVault(VaultName=${azurerm_key_vault.this.name};SecretName=downstream-api-key)"
+  }
+
+  site_config {
+    always_on       = true
+    min_tls_version = "1.2"
+    ftps_state      = "Disabled"
+  }
+
+  tags = merge(var.tags, {
+    "hidden-title" = "Sentinel Incident - Enrich on High severity"
+  })
+
+  # Explicit: storage and plan are inferred via attribute refs.
+  # Subnet must exist before VNet integration is configured.
+  depends_on = [azurerm_subnet.integration]
+}
+
+# ── 5. Sentinel role assignment ─────────────────────────────────────────────
+resource "azurerm_role_assignment" "sentinel_responder" {
+  scope                = data.azurerm_resource_group.sentinel.id
+  role_definition_name = "Microsoft Sentinel Responder"
+  principal_id         = azurerm_logic_app_standard.this.identity[0].principal_id
+  # Implicit depends_on: principal_id is an attribute of azurerm_logic_app_standard.this
+}
+
+resource "azurerm_role_assignment" "law_reader" {
+  scope                = azurerm_log_analytics_workspace.this.id
+  role_definition_name = "Log Analytics Reader"
+  principal_id         = azurerm_logic_app_standard.this.identity[0].principal_id
+}
+
+# ── 6. API connections (azapi) ──────────────────────────────────────────────
+resource "azapi_resource" "sentinel_connection" {
+  type      = "Microsoft.Web/connections@2016-06-01"
+  name      = "conn-sentinel-ldo-uks-prd-01"
+  location  = var.location
+  parent_id = "/subscriptions/${var.subscription_id}/resourceGroups/${var.rg_name}"
+
+  body = {
+    properties = {
+      displayName        = "Microsoft Sentinel - Managed Identity"
+      parameterValueType = "Alternative"
+      api = {
+        id = "/subscriptions/${var.subscription_id}/providers/Microsoft.Web/locations/${var.location}/managedApis/azuresentinel"
+      }
+    }
+  }
+
+  response_export_values = ["*"]
+
+  # Connection can be created in parallel with the Logic App - no dependency needed here
+}
+
+# ── 7. Access policy ────────────────────────────────────────────────────────
+# Must wait for: the connection, the Logic App identity, AND the Sentinel role assignment.
+# Terraform cannot infer the role assignment dependency - the access policy body
+# contains the principal_id as a plain string, not a resource attribute reference.
+resource "azapi_resource" "sentinel_connection_access_policy" {
+  type      = "Microsoft.Web/connections/accessPolicies@2016-06-01"
+  name      = azurerm_logic_app_standard.this.name
+  parent_id = azapi_resource.sentinel_connection.id
+  location  = var.location
+
+  body = {
+    properties = {
+      principal = {
+        type = "ActiveDirectory"
+        identity = {
+          objectId = azurerm_logic_app_standard.this.identity[0].principal_id
+          tenantId = var.tenant_id
+        }
+      }
+    }
+  }
+
+  depends_on = [
+    azapi_resource.sentinel_connection,       # connection must exist first
+    azurerm_logic_app_standard.this,          # principal_id must be known
+    azurerm_role_assignment.sentinel_responder, # role must be applied - the access policy
+                                               # authorises use of the connection; if the
+                                               # role doesn't exist yet, the first workflow
+                                               # run fails even though the policy exists
+  ]
+}
+
+# ── 8. Diagnostic settings ──────────────────────────────────────────────────
+resource "azurerm_monitor_diagnostic_setting" "logic_app" {
+  name                       = "diag-logic-ldo-uks-prd-01"
+  target_resource_id         = azurerm_logic_app_standard.this.id
+  log_analytics_workspace_id = azurerm_log_analytics_workspace.this.id
+
+  enabled_log { category = "WorkflowRuntime" }
+  metric { category = "AllMetrics" }
+
+  # Implicit depends_on via target_resource_id
+}
+
+# ── 9. Sentinel Automation Rule ─────────────────────────────────────────────
+resource "azurerm_sentinel_automation_rule" "high_severity_playbook" {
+  name                       = "ar-high-severity-enrich-ldo-uks-prd"
+  log_analytics_workspace_id = azurerm_log_analytics_workspace.this.id
+  display_name               = "High Severity - Run enrichment playbook"
+  order                      = 100
+  enabled                    = true
+
+  condition {
+    property  = "IncidentSeverity"
+    operator  = "Equals"
+    values    = ["High"]
+  }
+
+  action_playbook {
+    logic_app_id            = azurerm_logic_app_standard.this.id
+    tenant_id               = var.tenant_id
+    order                   = 1
+  }
+
+  depends_on = [
+    azurerm_logic_app_standard.this,             # must exist before rule can reference it
+    azapi_resource.sentinel_connection_access_policy, # connection auth must be in place
+    azurerm_role_assignment.sentinel_responder,  # Logic App must have Sentinel access
+  ]
+}
+```
+
+### Common ordering failures
+
+| Failure | Root cause | Fix |
+|:--|:--|:--|
+| Automation Rule creation fails - Logic App not found | Automation rule was applied before Logic App was fully created | Add `depends_on = [azurerm_logic_app_standard.this]` to the automation rule |
+| Logic App fails to start - cannot read Key Vault secret | Key Vault role assignment not applied before Logic App first boot | Use a User-assigned identity whose role assignment is applied fully before the Logic App is created; or accept the retry behaviour |
+| Access policy returns 403 on first workflow run | Role assignment not complete when the access policy was created | Add the role assignment resource to the access policy `depends_on` |
+| API connection auth fails - "connection not authorised" | Access policy was not created, or was created before the identity existed | Ensure `depends_on` on the access policy includes both the Logic App and the role assignments |
+| Automation rule silently not triggering | Logic App Contributor role missing on the Logic App itself | Assign `Logic App Contributor` to the Sentinel workspace managed identity on the Logic App resource |
+
+### When to use explicit `depends_on` vs attribute references
+
+Prefer attribute references (e.g. `principal_id = azurerm_logic_app_standard.this.identity[0].principal_id`) over `depends_on` wherever possible - attribute references create precise, minimal dependencies and preserve parallelism.
+
+Use explicit `depends_on` only when:
+- A resource must wait for another to be fully applied, but shares no attribute reference with it
+- An `azapi_resource` body contains values derived from Terraform resources as literal strings (not references), so Terraform cannot infer the dependency
+- A side effect must complete before the next resource is created (e.g. a role assignment must be active - not just planned - before an access policy is created)
+
+Avoid long `depends_on` chains on modules - they force the entire module (all its resources) to complete before anything in the `depends_on` can start, collapsing all parallelism. Pass specific resource IDs as module inputs instead.
+
+---
+
+## Observability
+
+### Run history
+
+Logic App run history is stored for:
+- **Consumption:** 90 days
+- **Standard stateful:** 90 days (default, configurable)
+- **Standard stateless:** No run history stored (by design - use Application Insights)
+
+For Standard stateless workflows, enable Application Insights to capture run data:
+
+```hcl
+app_settings = {
+  "APPINSIGHTS_INSTRUMENTATIONKEY"  = azurerm_application_insights.this.instrumentation_key
+  "APPLICATIONINSIGHTS_CONNECTION_STRING" = azurerm_application_insights.this.connection_string
+}
+```
+
+### Diagnostic settings → Log Analytics
+
+Send workflow runtime logs to Log Analytics for querying and alerting:
+
+| Log category | What it captures |
+|:--|:--|
+| `WorkflowRuntime` | All action executions, trigger fires, run outcomes |
+| `AllMetrics` | Action latency, success/failure counts, throttling |
+
+Query failed runs:
+
+```kql
+AzureDiagnostics
+| where ResourceType == "WORKFLOWS"
+| where status_s == "Failed"
+| where TimeGenerated > ago(24h)
+| project TimeGenerated, resource_workflowName_s, status_s, error_code_s, error_message_s
+| sort by TimeGenerated desc
+```
+
+### Alerting on failed runs
+
+```hcl
+resource "azurerm_monitor_metric_alert" "logic_app_failures" {
+  name                = "alert-${each.key}-failures"
+  resource_group_name = var.rg_name
+  scopes              = [module.logic_apps.logic_app_ids[each.key]]
+  severity            = 1   # Critical
+  frequency           = "PT5M"
+  window_size         = "PT15M"
+
+  criteria {
+    metric_namespace = "Microsoft.Logic/workflows"
+    metric_name      = "RunsFailed"
+    aggregation      = "Total"
+    operator         = "GreaterThan"
+    threshold        = 0
+  }
+
+  action {
+    action_group_id = azurerm_monitor_action_group.ops.id
+  }
+}
+```
+
+### Portal integration
+
+**From Sentinel to the Logic App:**
+- Sentinel → Automation → Automation rules → rule → Playbook link
+- Sentinel → Automation → Playbooks → logic app name → runs
+
+**From the Logic App to Sentinel:**
+- Logic App → Overview → Trigger history (see each firing)
+- Logic App → Monitoring → Run history (see each run's action-by-action trace)
+- Logic App → Monitoring → Alerts
+
+**Designer vs Code view:**
+- The visual designer is useful for understanding flow but is not the source of truth in a Terraform-managed deployment
+- The workflow JSON (`workflow.json` for Standard, or the ARM template for Consumption) is the source of truth
+- Changes made in the designer will **drift** from Terraform state - always make workflow logic changes via code, not the portal designer
+
+---
+
+## Anti-patterns
+
+- **User account API connections in production** - user connections break on password changes, MFA prompts, and when the account is disabled or leaves the organisation. Always use Managed Identity for Microsoft services and Service Principals with Key Vault-stored secrets for external services.
+- **Using `azurerm_resource_group_template_deployment` for API connections** - ARM deployments wrapped in Terraform are opaque: they don't surface the connection state in `terraform plan`, errors are buried in ARM deployment logs, and the deployment JSON is hard to read and review. Use `azapi_resource` instead - it is first-class Terraform, shows in the plan, and can be referenced as a resource.
+- **Not creating connection access policies** - creating the `Microsoft.Web/connections` resource is not sufficient. Without an access policy that maps the Logic App's managed identity to the connection, the connection will fail at runtime with a 403 even though the connection resource exists.
+- **Not filtering the Sentinel Incident trigger** - the trigger fires on both creation and every update. Without a condition immediately after the trigger, your playbook fires repeatedly on every enrichment, comment, or status change, creating duplicate notifications and potentially closing incidents prematurely.
+- **Using a module for non-cookie-cutter Logic Apps** - if the Logic App has custom lifecycle rules, unusual networking, per-resource storage, or complex cross-resource dependencies, a module abstraction forces you to work around it. Write the raw resources explicitly - the verbosity is the documentation.
+- **Relying on Consumption Logic App outbound IPs for allowlisting** - the shared IP ranges are large, rotate without notice, and allowlisting them permits all Consumption Logic Apps in the region, not just yours. Use identity-based auth, or switch to Standard with a dedicated IP.
+- **Retrying non-idempotent actions** - default retry policies retry Teams notifications and email sends on transient failures, resulting in duplicate messages. Set `retryPolicy: { type: none }` on all actions that have visible side effects.
+- **No `Terminate (Failed)` action in error handlers** - without it, the workflow run reports `Succeeded` even when the error handler fired. Silent failures cannot be alerted on. Always end error scope blocks with `Terminate: Failed`.
+- **Managing workflow JSON through the portal designer** - any portal change will drift from Terraform state and be overwritten on the next `apply`. Manage all workflow logic in code. Use the portal designer for exploration and debugging only.
+- **Sharing the Logic App storage account** - the storage account provides internal state queuing for the Logic App runtime. Other workloads generating storage I/O can cause queue processing delays and workflow execution failures. Always use a dedicated storage account.
+- **Deploying the Sentinel Automation Rule before the Logic App** - the automation rule references the Logic App resource ID. Creating it before the Logic App exists will fail, and a later apply may silently skip recreating it. Use `depends_on` on the automation rule.
+- **Not setting `hidden-title` on every Logic App** - the resource name is opaque by design. Without `hidden-title`, operators cannot identify what a Logic App does without opening it individually.
+- **Stateless workflows for Sentinel playbooks** - stateless workflows have a 5-minute execution limit and no run history. Sentinel enrichment playbooks calling multiple connectors sequentially frequently exceed 5 minutes under load. Use stateful unless you have measured that 5 minutes is always sufficient.
+
+---
+
+## See Also
+
+- [Microsoft - Standard vs Consumption comparison](https://learn.microsoft.com/en-us/azure/logic-apps/single-tenant-overview-compare)
+- [Microsoft - Logic Apps limits and configuration](https://learn.microsoft.com/en-us/azure/logic-apps/logic-apps-limits-and-config)
+- [Microsoft - Sentinel automation and playbooks](https://learn.microsoft.com/en-us/azure/sentinel/automate-responses-with-playbooks)
+- [Microsoft - Secure access to Logic Apps](https://learn.microsoft.com/en-us/azure/logic-apps/logic-apps-securing-a-logic-app)
+- [Microsoft - Handle errors and exceptions](https://learn.microsoft.com/en-us/azure/logic-apps/logic-apps-exception-handling)
+- [Azure/azapi Terraform provider](https://registry.terraform.io/providers/azure/azapi/latest/docs) - used for `Microsoft.Web/connections` and access policies
+- [azapi_resource - Microsoft.Web/connections](https://learn.microsoft.com/en-us/azure/templates/microsoft.web/connections) - ARM schema reference for managed API connection resources
+- [Terraform Standards](/docs/documents/terraform-standards) - module design, provider pinning, and CI/CD patterns
+- [Azure Naming Convention](/docs/documents/azure-naming-convention) - resource name construction rules
+- [KQL Cheatsheet](/docs/cheatsheets/kql-cheatsheet) - query patterns for the Azure Monitor Logs connector
+- [Azure Cheatsheet](/docs/cheatsheets/azure-cheatsheet) - Az CLI commands for Logic App management

@@ -977,6 +977,22 @@ body.banner-hidden .site-header {
     font-size: 0.95rem;
 }
 
+/* ── Docs prose: internal vs external link distinction ─────────── */
+/* Links to internal pages (href="/...") are rendered in brand purple */
+/* so readers can distinguish them from external documentation links. */
+/* Scoped to <article> so sidebar and navbar links are unaffected.   */
+article a[href^="/"] {
+    color: var(--brand-accent);
+    text-decoration-color: rgba(139, 92, 246, 0.35);
+    text-underline-offset: 2px;
+}
+
+article a[href^="/"]:hover {
+    color: var(--brand-accent);
+    text-decoration-color: var(--brand-accent);
+    opacity: 0.85;
+}
+
 /* ── Nextra mobile nav ─────────────────────────────────────────── */
 /* When our site-header is visible the Nextra navbar sits at         */
 /* top: site-header-height, so the mobile nav needs extra padding    */

@@ -1403,6 +1403,8 @@ def get_credential(env: str = "prod") -> TokenCredential:
             return DefaultAzureCredential()
 ```
 
+> **See also:** [Azure - Auth & Context](/docs/cheatsheets/azure-cheatsheet) for creating the service principals and managed identities used by `DefaultAzureCredential`.
+
 ---
 
 ## Azure SDK Patterns
@@ -1638,6 +1640,28 @@ def main() -> int:
 if __name__ == "__main__":
     sys.exit(main())
 ```
+
+**Multiline help text with `textwrap.dedent()`:**
+
+```python
+import argparse
+import textwrap
+
+parser = argparse.ArgumentParser(
+    description="Sort Terraform blocks and regenerate docs.",
+    epilog=textwrap.dedent('''\
+        Examples:
+          python script.py --sort-variables --format-terraform
+          python script.py --sort-variables --generate-readme --readme-header-file HEADER.md
+    '''),
+    formatter_class=argparse.RawDescriptionHelpFormatter,  # preserve newlines in epilog
+)
+parser.add_argument("--sort-variables", action="store_true")
+parser.add_argument("--generate-readme", action="store_true")
+parser.add_argument("--readme-header-file", type=str, default="")
+```
+
+Always import `textwrap` when using multiline `epilog` or `description` with `dedent()` to preserve formatting.
 
 ### `typer` - modern CLI with type hints (recommended)
 

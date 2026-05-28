@@ -50,7 +50,7 @@ jobs:
         run: npm ci
 
       - name: Audit dependencies
-        # Informational only — findings are printed to the log but never block the build
+        # Informational only - findings are printed to the log but never block the build
         run: npm audit --audit-level=none
         continue-on-error: true
 

@@ -920,6 +920,8 @@ var operation = await subscription.GetResourceGroups()
     .CreateOrUpdateAsync(WaitUntil.Completed, "rg-myapp-prod", rgData);
 ```
 
+> **See also:** [Azure](/docs/cheatsheets/azure-cheatsheet) - Az CLI commands for the resources this SDK manages (Key Vault, Blob Storage, resource groups, AKS).
+
 ---
 
 ## Kusto (Azure Data Explorer) SDK
@@ -1198,6 +1200,8 @@ await ingestClient.IngestFromStorageAsync(
     "https://mystg.blob.core.windows.net/raw/data.json?sv=...",
     ingestProps);
 ```
+
+> **See also:** [KQL](/docs/cheatsheets/kql-cheatsheet) - the query language used in ADX and Log Analytics. Covers query structure, joins, aggregations, and threat hunting patterns that complement this SDK reference.
 
 ---
 

@@ -221,6 +221,8 @@ rm "/tmp/${FILE}"
 echo "JetBrains Toolbox installed."
 ```
 
+> **See also:** [Containers](/docs/cheatsheets/containers-cheatsheet) for Docker and Podman setup on Ubuntu/Fedora. [Bash](/docs/cheatsheets/bash-cheatsheet) for scripting these setup steps with strict mode, logging, and error handling.
+
 ---
 
 ## Fedora / RHEL
@@ -287,6 +289,8 @@ Invoke-WebRequest -Uri "https://github.com/sakai135/wsl-vpnkit/releases/latest/d
 wsl --import wsl-vpnkit "$env:USERPROFILE\wsl-vpnkit" wsl-vpnkit.tar.gz --version 2
 wsl -d wsl-vpnkit
 wsl.exe -d wsl-vpnkit --cd /app service wsl-vpnkit start
+
+> **See also:** [Windows - WSL2](/docs/cheatsheets/windows-cheatsheet) for WSL2 config from the Windows side (memory limits, network mode, `wsl.conf`).
 
 ---
 
