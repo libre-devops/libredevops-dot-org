@@ -65,7 +65,7 @@ export default async function AboutPage() {
                         <p>
                             Libre DevOps is a portfolio and knowledge base maintained by{' '}
                             <a
-                                href="https://linkedin.com/in/craig-thacker"
+                                href="https://craigthacker.dev"
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="content-link"
