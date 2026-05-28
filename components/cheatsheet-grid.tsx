@@ -20,6 +20,19 @@ const KqlIcon = (
     </svg>
 );
 
+const AiIcon = (
+    <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none"
+        stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+        aria-hidden="true" style={{ flexShrink: 0, opacity: 0.85 }}>
+        <rect x="6" y="4" width="12" height="14" rx="2"/>
+        <circle cx="9" cy="9" r="1" fill="currentColor"/>
+        <circle cx="15" cy="9" r="1" fill="currentColor"/>
+        <path d="M9 13h6"/>
+        <rect x="4" y="18" width="4" height="2"/>
+        <rect x="16" y="18" width="4" height="2"/>
+    </svg>
+);
+
 function DevIcon({ name, alt, width = 28 }: { name: string; alt: string; width?: number }) {
     return (
         <img
@@ -34,11 +47,11 @@ function DevIcon({ name, alt, width = 28 }: { name: string; alt: string; width?:
 
 const CHEATSHEETS: Cheatsheet[] = [
     {
-        title: 'Terraform',
-        href: '/docs/cheatsheets/terraform',
-        description: 'Practical snippets for Azure infrastructure - number formatting, type conversions, dynamic blocks, state management, OS detection, and workflow automation.',
-        tags: ['HCL', 'Azure', 'IaC'],
-        icon: <DevIcon name="terraform/terraform-original.svg" alt="Terraform" />,
+        title: 'AI',
+        href: '/docs/cheatsheets/ai-cheatsheet',
+        description: 'AI models (Claude, GPT, Codex), Azure OpenAI, Copilot, Security Copilot custom agents, MDASH, Bedrock, FastAPI, MCP, grounding strategies, and responsible AI policy setup.',
+        tags: ['AI', 'LLM', 'Azure', 'Security'],
+        icon: AiIcon,
     },
     {
         title: 'Ansible',
@@ -46,13 +59,6 @@ const CHEATSHEETS: Cheatsheet[] = [
         description: 'Installation, static and dynamic inventory, ad-hoc commands, playbook structure, roles, variables, Jinja2 templates, vault encryption, collections, and common modules.',
         tags: ['Ansible', 'IaC', 'Automation', 'Linux'],
         icon: <DevIcon name="ansible/ansible-original.svg" alt="Ansible" />,
-    },
-    {
-        title: 'Git',
-        href: '/docs/cheatsheets/git-cheatsheet',
-        description: 'Configuration templates, core operations, branching, remotes, undoing changes, history inspection, and bulk automation scripts for GitHub and Azure DevOps.',
-        tags: ['Git', 'GitHub', 'Azure DevOps'],
-        icon: <DevIcon name="git/git-original.svg" alt="Git" />,
     },
     {
         title: 'AWS',
@@ -69,20 +75,6 @@ const CHEATSHEETS: Cheatsheet[] = [
         icon: <DevIcon name="azure/azure-original.svg" alt="Azure" />,
     },
     {
-        title: 'Go',
-        href: '/docs/cheatsheets/go-cheatsheet',
-        description: 'Modules, types, interfaces, error handling, generics, goroutines, channels, HTTP server, slog, testing, and Azure SDK authentication with blob storage and Key Vault.',
-        tags: ['Go', 'Concurrency', 'Azure SDK'],
-        icon: <DevIcon name="go/go-original.svg" alt="Go" width={40} />,
-    },
-    {
-        title: 'KQL',
-        href: '/docs/cheatsheets/kql-cheatsheet',
-        description: 'KQL fundamentals, time filtering, string ops, aggregations, joins, and threat hunting queries across Defender and Sentinel tables - processes, network, identity, email, alerts, and incidents.',
-        tags: ['KQL', 'Sentinel', 'Defender', 'ADX'],
-        icon: KqlIcon,
-    },
-    {
         title: 'Bash',
         href: '/docs/cheatsheets/bash-cheatsheet',
         description: 'Script boilerplate, strict mode, colour output helpers, argument parsing, PATH deduplication, and directory-iteration patterns.',
@@ -95,6 +87,34 @@ const CHEATSHEETS: Cheatsheet[] = [
         description: 'Docker setup scripts, Podman pod creation, Docker Compose examples, Kubernetes pod manifests, and nginx reverse proxy configs.',
         tags: ['Docker', 'Podman', 'Kubernetes'],
         icon: <DevIcon name="docker/docker-original.svg" alt="Docker" />,
+    },
+    {
+        title: '.NET',
+        href: '/docs/cheatsheets/dotnet-cheatsheet',
+        description: 'dotnet CLI, interfaces, classes, records, pattern matching, LINQ, async patterns, dependency injection, Azure SDK authentication, Key Vault, Blob Storage, ARM, Kusto SDK, Log Analytics, and xUnit testing.',
+        tags: ['.NET', 'C#', 'Azure SDK', 'Kusto'],
+        icon: <DevIcon name="dotnetcore/dotnetcore-original.svg" alt=".NET" />,
+    },
+    {
+        title: 'Git',
+        href: '/docs/cheatsheets/git-cheatsheet',
+        description: 'Configuration templates, core operations, branching, remotes, undoing changes, history inspection, and bulk automation scripts for GitHub and Azure DevOps.',
+        tags: ['Git', 'GitHub', 'Azure DevOps'],
+        icon: <DevIcon name="git/git-original.svg" alt="Git" />,
+    },
+    {
+        title: 'Go',
+        href: '/docs/cheatsheets/go-cheatsheet',
+        description: 'Modules, types, interfaces, error handling, generics, goroutines, channels, HTTP server, slog, testing, and Azure SDK authentication with blob storage and Key Vault.',
+        tags: ['Go', 'Concurrency', 'Azure SDK'],
+        icon: <DevIcon name="go/go-original.svg" alt="Go" width={40} />,
+    },
+    {
+        title: 'KQL',
+        href: '/docs/cheatsheets/kql-cheatsheet',
+        description: 'KQL fundamentals, time filtering, string ops, aggregations, joins, and threat hunting queries across Defender and Sentinel tables - processes, network, identity, email, alerts, and incidents.',
+        tags: ['KQL', 'Sentinel', 'Defender', 'ADX'],
+        icon: KqlIcon,
     },
     {
         title: 'Linux',
@@ -120,8 +140,8 @@ const CHEATSHEETS: Cheatsheet[] = [
     {
         title: 'Python',
         href: '/docs/cheatsheets/python-cheatsheet',
-        description: 'Virtual environment helpers, Azure SDK authentication, metadata service queries, Azure Functions with Managed Identity, and Terraform file sorting utilities.',
-        tags: ['Python', 'Azure SDK', 'Terraform'],
+        description: 'Virtual environment helpers, uv package manager, FastAPI, async patterns, Azure SDK authentication, metadata service queries, and Terraform utilities.',
+        tags: ['Python', 'FastAPI', 'Azure SDK'],
         icon: <DevIcon name="python/python-original.svg" alt="Python" />,
     },
     {
@@ -132,11 +152,11 @@ const CHEATSHEETS: Cheatsheet[] = [
         icon: <DevIcon name="kalilinux/kalilinux-original.svg" alt="Security" />,
     },
     {
-        title: 'Windows',
-        href: '/docs/cheatsheets/windows-cheatsheet',
-        description: 'TCP port listeners, Scoop package management, WSL2 configuration, firewall rules, system diagnostics, and environment variable management.',
-        tags: ['Windows', 'PowerShell', 'WSL2'],
-        icon: <DevIcon name="windows8/windows8-original.svg" alt="Windows" />,
+        title: 'Terraform',
+        href: '/docs/cheatsheets/terraform',
+        description: 'Practical snippets for Azure infrastructure - number formatting, type conversions, dynamic blocks, state management, OS detection, and workflow automation.',
+        tags: ['HCL', 'Azure', 'IaC'],
+        icon: <DevIcon name="terraform/terraform-original.svg" alt="Terraform" />,
     },
     {
         title: 'TypeScript',
@@ -146,11 +166,11 @@ const CHEATSHEETS: Cheatsheet[] = [
         icon: <DevIcon name="typescript/typescript-original.svg" alt="TypeScript" />,
     },
     {
-        title: '.NET',
-        href: '/docs/cheatsheets/dotnet-cheatsheet',
-        description: 'dotnet CLI, interfaces, classes, records, pattern matching, LINQ, async patterns, dependency injection, Azure SDK authentication, Key Vault, Blob Storage, ARM, Kusto SDK, Log Analytics, and xUnit testing.',
-        tags: ['.NET', 'C#', 'Azure SDK', 'Kusto'],
-        icon: <DevIcon name="dotnetcore/dotnetcore-original.svg" alt=".NET" />,
+        title: 'Windows',
+        href: '/docs/cheatsheets/windows-cheatsheet',
+        description: 'TCP port listeners, Scoop package management, WSL2 configuration, firewall rules, system diagnostics, and environment variable management.',
+        tags: ['Windows', 'PowerShell', 'WSL2'],
+        icon: <DevIcon name="windows8/windows8-original.svg" alt="Windows" />,
     },
 ];
 
