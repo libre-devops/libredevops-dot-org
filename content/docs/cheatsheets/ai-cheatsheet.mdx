@@ -44,12 +44,48 @@ Reference guide for AI models, services, responsible AI policy setup, integratio
 - Cost: Per-incident or per-analyst-month pricing
 - Outputs: Natural language risk assessments, recommended responses, evidence summaries
 
-**Security Copilot Custom Agents** - Build domain-specific security agents
-- Use cases: SOC-specific triage (org's SIEM rules), incident response workflows, compliance checks
-- Configuration: Define agent persona, grounding data, and tool access in Azure portal or via API
-- Grounding with Log Analytics: Connect to Log Analytics workspace; agent queries KQL natively
-- Example agent: "Threat hunter" that correlates events across Log Analytics, Sentinel, Defender
-- Access: Security Copilot portal → Custom Agents → Create with KQL grounding, Sentinel playbooks, custom rules
+**Security Copilot Custom Agents** - AI-powered systems for security automation and orchestration
+
+Agent Components:
+- **Tools/Skills** - Functions/actions the agent can perform (incident triage, threat hunting, remediation)
+- **Triggers** - Conditions that initiate agent (alert fired, schedule, manual invocation)
+- **Orchestrators** - Logic determining task execution order and dependencies
+- **Instructions** - System directives/guardrails agent must follow
+- **Feedback** - Store responses in memory to guide subsequent runs
+
+Development Personas & Permissions:
+- **Developers** (Copilot contributor role): Build and test agents, publish at user scope
+- **Administrators** (Copilot owner role): Install agents, setup/initiate, review usage metrics, publish at workspace scope
+- **End users** (analysts, IT admins): Interact with agents, provide feedback on workflows
+
+Development Approaches:
+1. **NL2Agent** - Describe agent in natural language; AI generates manifest
+2. **Agent Builder UI** - Visual interface in Security Copilot portal for configuration
+3. **YAML Manifest** - Write manifest in IDE, upload to Security Copilot
+4. **MCP Tools** - Create agents using Model Context Protocol in MCP-compatible IDE
+
+Agent Lifecycle (Build → Test → Publish):
+- Build in standalone experience or MCP tool
+- Test functionality and behavior within Security Copilot
+- Publish at user scope (self) or workspace scope (all users in tenant)
+
+Grounding & Integration:
+- **Log Analytics grounding**: Connect workspace; agent executes KQL queries natively
+- **Data sources**: Sentinel, Microsoft 365 Defender, Entra ID, third-party SIEM via connectors
+- **Integration patterns**: Incident response workflows, compliance checks, threat correlation
+
+Example Agent - "Threat Hunter":
+- Correlates events across Log Analytics, Sentinel, Defender
+- Queries raw telemetry with KQL for pattern detection
+- Recommends containment/remediation based on threat severity
+- Provides evidence summary for analyst review
+
+Access & Management:
+- Security Copilot portal → Build → My agents (view deployed custom agents)
+- Agents page: "Ready for setup" (unconfigured) vs "Agents in use" (active)
+- Agent types range from prompt-and-response to fully autonomous
+
+Reference: [Security Copilot Agent Development Overview](https://learn.microsoft.com/en-us/copilot/security/developer/custom-agent-overview)
 
 ### OpenAI Models
 
