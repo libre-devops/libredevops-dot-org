@@ -108,6 +108,55 @@ terraform {
 
 The provider **configuration** block (`features {}`, credentials, alias) belongs in the workspace root, not in a reusable module. Pass an aliased provider into a child module via `providers = {}` if the module genuinely needs it.
 
+### Provider selection - azurerm vs azapi
+
+Choose a single Azure provider and commit to it across your entire Terraform codebase. Both `azurerm` and `azapi` are valid but have different tradeoffs. The decision is primarily: **does azurerm support all the resources you need?**
+
+| Provider | Speed | Validation | Safety | Use case |
+|:--|:--|:--|:--|:--|
+| **azurerm** | Slower - uses pre-built abstractions | Strong - validates against provider schema | Safer - fewer edge cases | Stable, well-tested resources; most production workloads |
+| **azapi** | Faster - calls ARM API directly | Weak - minimal validation | Own issues - less stable, more edge cases | Resources not yet in azurerm, cutting-edge features |
+
+**How to decide:**
+
+1. **Start with azurerm.** It covers the vast majority of Azure services with stable, well-tested resource definitions.
+2. **Switch to azapi only if azurerm lacks a resource you need.** Check the [azurerm documentation](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs) and GitHub issues first.
+3. **Once chosen, commit to it.** Mixing providers within the same workspace or module creates cognitive overhead, increases testing burden, and makes code harder to review.
+
+**When mixing is necessary:**
+
+If a service is available in both providers, always use azurerm. If a service exists **only** in azapi (e.g. a very new Azure feature), use azapi only for that resource and azurerm for everything else. Document the exception in a code comment.
+
+```hcl
+# Example: using azurerm for all resources except one new service only in azapi
+terraform {
+  required_providers {
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = "~> 3.0"
+    }
+    azapi = {
+      source  = "azure/azapi"
+      version = "~> 1.0"
+    }
+  }
+}
+
+# Standard resources with azurerm
+resource "azurerm_resource_group" "this" {
+  name     = "rg-ldo-uks-prd"
+  location = "uksouth"
+}
+
+# New resource only available in azapi - document why
+resource "azapi_resource" "new_service" {
+  # This service is not yet available in azurerm provider v3.x
+  type = "Microsoft.NewService/services@2024-01-01"
+  name = "new-service-instance"
+  # ...
+}
+```
+
 ### Version management on developer machines
 
 The `required_version` constraint in `terraform.tf` is the authoritative version declaration - it enforces the correct Terraform version at runtime regardless of what is installed locally. Managing multiple versions across different projects still needs a version manager on the machine itself.
@@ -838,19 +887,249 @@ Both `moved {}` and `import {}` blocks are reviewed in pull requests, leave an a
 
 > After any `import {}` block or `terraform import` command, always run `terraform plan` and confirm zero drift before committing the configuration. ([HashiCorp - moved blocks](https://developer.hashicorp.com/terraform/language/modules/develop/refactoring))
 
-### State separation and HCP Stacks
+### State separation and HCP Terraform / Stacks
 
 If you are reaching for state surgery because a monolithic state file has grown too large or you need to split resources across teams, the problem is workspace design - not state manipulation.
 
-The correct solutions, in order of preference:
+#### Workspace redesign (always first)
 
-1. **Redesign workspace boundaries** - one state file per application component per environment. Resources that change together belong together; resources with different owners or blast radii belong in separate workspaces.
+One state file per application component per environment. Resources that change together belong together; resources with different owners or blast radii belong in separate workspaces. This is the simplest and most portable solution.
 
-2. **HCP Terraform Stacks** - if you are an HCP Terraform customer, [Terraform Stacks](https://developer.hashicorp.com/terraform/language/stacks) provides a native way to compose multiple configurations, share outputs between them, and deploy across environments without manual state surgery or `terraform_remote_state` coupling. Stacks is designed specifically for the "how do I manage dependencies between state files" problem.
+#### HCP Terraform (if you have an HCP subscription)
 
-3. **`terraform_remote_state` data source** - for referencing outputs from one workspace in another without coupling their applies. Use sparingly - it creates an implicit dependency between workspaces that is not visible in either codebase.
+[HCP Terraform](https://cloud.hashicorp.com/products/terraform) is HashiCorp's managed Terraform platform. It provides:
 
-Never use `terraform state pull` + edit + `terraform state push` to split or merge state files manually. This approach is error-prone, un-reviewable, and will eventually cause a state conflict or an accidental destroy.
+- **Remote state** - state stored in HCP, encrypted at rest, with rollback and audit logs
+- **Runs** - VCS-triggered plans and applies with cost estimation, policy enforcement (Sentinel), and approval gates
+- **Variable scope** - organisation, project, and workspace-level variables with sensitive value masking
+- **Modules registry** - publish and version your modules, with automatic version constraints
+- **Team management** - role-based access control (RBAC), team overrides, and audit logging
+- **Run tasks** - policy enforcement at plan-time (e.g. cost threshold checks, compliance validation)
+
+HCP Terraform is not required to use Terraform, but it is strongly recommended for production. It eliminates local state management, provides a single source of truth, and enforces a review-and-approve workflow.
+
+#### Terraform Stacks (GA - requires Terraform 1.13+)
+
+[Terraform Stacks](https://developer.hashicorp.com/terraform/language/stacks) is an HCP Terraform feature (requires HCP subscription) that composes multiple configurations into a single deployable unit. Each component maintains its own state file and applies independently while sharing outputs declaratively through the Stack deployment configuration.
+
+**When to use Stacks:**
+
+- Your infrastructure consists of multiple loosely-coupled components (e.g. networking, platform, observability) that should deploy independently but coordinate via outputs
+- Teams own different components and need independent apply workflows but shared variable management
+- You need environment-specific composition (e.g. prod uses high-availability components, dev uses single-instance variants)
+- You want to avoid `terraform_remote_state` data source coupling, which creates invisible dependencies
+- You have upstream and downstream Stacks that need to coordinate (e.g. a networking stack feeds VPC IDs to application stacks)
+
+**Stacks architecture:**
+
+```
+infrastructure-stacks/
+├── stacks/
+│   └── networking.tfstack.hcl           # Stack definition
+│   └── platform.tfstack.hcl
+├── deployments/
+│   └── production.deployment.hcl        # Stack deployment configuration
+│   └── development.deployment.hcl
+├── components/
+│   ├── networking/                      # Component source
+│   │   ├── main.tf
+│   │   ├── outputs.tf
+│   │   └── variables.tf
+│   ├── platform/
+│   │   ├── main.tf
+│   │   ├── outputs.tf
+│   │   └── variables.tf
+│   └── observability/
+│       ├── main.tf
+│       ├── outputs.tf
+│       └── variables.tf
+```
+
+**Component definition (.tfcomponent.hcl):**
+
+Each component is a `.tfcomponent.hcl` file alongside its Terraform configuration:
+
+```hcl
+# components/networking/.tfcomponent.hcl
+component {
+  source = "../"
+  
+  inputs = {
+    environment = var.environment
+    location    = var.location
+    cidr_block  = var.cidr_block
+  }
+  
+  providers = {
+    azurerm = provider.azurerm.this
+  }
+}
+```
+
+**Stack definition (.tfstack.hcl):**
+
+Declares what components belong to this stack and their inputs:
+
+```hcl
+# stacks/networking.tfstack.hcl
+required_version = ">= 1.13"
+
+required_providers {
+  azurerm = {
+    source  = "hashicorp/azurerm"
+    version = "~> 3.0"
+  }
+}
+
+variable "environment" {
+  type = string
+}
+
+variable "location" {
+  type = string
+}
+
+variable "cidr_block" {
+  type = string
+}
+
+component "vnet" {
+  source = "../components/networking"
+  inputs = {
+    environment = var.environment
+    location    = var.location
+    cidr_block  = var.cidr_block
+  }
+}
+
+output "vnet_id" {
+  value = component.vnet.outputs.vnet_id
+}
+
+output "subnet_ids" {
+  value = component.vnet.outputs.subnet_ids
+}
+```
+
+**Deployment configuration (.deployment.hcl) - Upstream and Downstream Stacks:**
+
+The deployment configuration orchestrates which stacks deploy together and how they share data. This is where upstream/downstream relationships are defined.
+
+```hcl
+# deployments/production.deployment.hcl
+required_version = ">= 1.13"
+
+# Upstream stack: networking provides data to downstream stacks
+deployment "networking_stack" {
+  path = "../stacks/networking"
+  
+  inputs = {
+    environment = "production"
+    location    = "uksouth"
+    cidr_block  = "10.0.0.0/16"
+  }
+}
+
+# Expose networking outputs for downstream stacks to consume
+publish_output "vnet_id_network" {
+  value = deployment.networking_stack.vnet_id
+}
+
+publish_output "subnets_network" {
+  value = deployment.networking_stack.subnet_ids
+}
+
+# Downstream stack: platform consumes data from upstream networking stack
+deployment "platform_stack" {
+  path = "../stacks/platform"
+  
+  inputs = {
+    environment  = "production"
+    location     = "uksouth"
+    vnet_id      = deployment.networking_stack.vnet_id
+    subnet_ids   = deployment.networking_stack.subnet_ids
+  }
+}
+
+deployment "observability_stack" {
+  path = "../stacks/observability"
+  
+  inputs = {
+    environment = "production"
+    location    = "uksouth"
+  }
+}
+```
+
+**Upstream and Downstream Stacks:**
+
+Stacks can reference outputs from other stacks in the same HCP Terraform project using `upstream_input` blocks. This enables multi-stack orchestration where later stacks depend on earlier ones:
+
+```hcl
+# In a separate HCP Terraform Stack that depends on the networking stack
+upstream_input "network_stack" {
+  type   = "stack"
+  source = "app.terraform.io/myorg/myproject/networking"
+}
+
+deployment "app_stack" {
+  path = "../stacks/application"
+  
+  inputs = {
+    vnet_id   = upstream_input.network_stack.vnet_id_network
+    subnet_ids = upstream_input.network_stack.subnets_network
+  }
+}
+```
+
+Example scenario: A networking Stack exposes VNet and subnet IDs. An application Stack (downstream) references those outputs and passes them to components that deploy Logic Apps or App Service Plans into that VNet. When the networking Stack is updated, HCP Terraform automatically triggers the application Stack run to incorporate the changes.
+
+**Stacks best practices:**
+
+- Each component is independently deployable and testable
+- Use component `outputs` for inter-component communication within a stack
+- Use `deployment` block outputs and `upstream_input` for cross-stack communication
+- Keep downstream stacks loose: a downstream stack should not care which upstream stack provides its data, only the shape of the data
+- Limits: A stack can reference up to 20 upstream stacks and expose to up to 25 downstream stacks
+- All stacks in an upstream/downstream relationship must be in the same HCP Terraform project
+- HCP Terraform automatically triggers downstream Stack runs when upstream outputs change
+- Use `terraform plan` and `terraform apply` at the Stack level; HCP Terraform orchestrates component-level operations
+
+**Comparison: Stacks vs alternatives**
+
+| Approach | State files | Inter-component coupling | Blast radius | Workflow |
+|:--|:--|:--|:--|:--|
+| **Monolithic (bad)** | 1 large file | Tight - all resources depend on each other | Entire application | Single apply affects everything |
+| **Separate workspaces + `terraform_remote_state`** | Multiple, but implicit coupling | Implicit (data source dependency not visible in code) | Per-workspace, but downstream consumers affected | Manual coordination between applies |
+| **Terraform Stacks** | Multiple (one per component), explicit composition | Explicit (stack config shows all inputs/outputs) | Per-component, with clear dependency graph | Orchestrated apply across components |
+
+#### `terraform_remote_state` (if not using Stacks)
+
+For referencing outputs from one workspace in another without the full composition of Stacks. Use sparingly - it creates an implicit dependency between workspaces that is not visible in either codebase.
+
+```hcl
+data "terraform_remote_state" "networking" {
+  backend = "remote"
+  config = {
+    organization = var.tfe_organization
+    workspaces = {
+      name = "networking-${var.environment}"
+    }
+  }
+}
+
+resource "azurerm_app_service_plan" "this" {
+  name = "plan-${var.environment}"
+  # ... reference the remote output
+  tags = {
+    networking_workspace = data.terraform_remote_state.networking.outputs.workspace_id
+  }
+}
+```
+
+#### Never use state surgery
+
+Never use `terraform state pull` + edit + `terraform state push` to split or merge state files manually. This approach is error-prone, un-reviewable, and will eventually cause a state conflict or an accidental destroy. If state separation is unavoidable, fix it via workspace redesign or use HCP Terraform / Stacks instead.
 
 ---
 
@@ -2080,6 +2359,11 @@ git push origin v1.2.0
 - [HashiCorp - check blocks](https://developer.hashicorp.com/terraform/language/checks)
 - [HashiCorp - terraform test](https://developer.hashicorp.com/terraform/language/tests)
 - [HashiCorp - moved blocks](https://developer.hashicorp.com/terraform/language/modules/develop/refactoring)
-- [HashiCorp - Terraform Stacks](https://developer.hashicorp.com/terraform/language/stacks)
+- [HCP Terraform](https://cloud.hashicorp.com/products/terraform) - managed Terraform service with remote state, runs, and policy enforcement
+- [HashiCorp - Terraform Stacks overview](https://developer.hashicorp.com/terraform/language/stacks) - Stacks language reference and concepts
+- [HashiCorp - Terraform Stacks component configuration](https://developer.hashicorp.com/terraform/language/stacks/component/config) - GA syntax for `.tfcomponent.hcl` files
+- [HashiCorp - Passing data between Stacks](https://developer.hashicorp.com/terraform/language/stacks/deploy/pass-data) - upstream and downstream Stack communication
+- [HashiCorp - Terraform Stacks design patterns](https://developer.hashicorp.com/terraform/language/stacks/design) - multi-component orchestration and composition
+- [HashiCorp - Terraform Stacks explained](https://www.hashicorp.com/en/blog/terraform-stacks-explained) - use cases and architecture overview
 - [Terraform Cheatsheet](/docs/cheatsheets/terraform) - quick-reference commands and patterns
 - [Azure Naming Convention](/docs/documents/azure-naming-convention) - resource naming standards used in Terraform modules

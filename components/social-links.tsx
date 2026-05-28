@@ -1,4 +1,4 @@
-import { GithubIcon, Key, LinkedinIcon, Mail, Shield } from 'lucide-react';
+import { Github, Key, Linkedin, Mail, Shield } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { socialLinks } from '@/lib/site';
@@ -21,8 +21,8 @@ function TerraformIcon() {
 }
 
 const iconMap: Record<string, ReactNode> = {
-    github: <GithubIcon size={16} />,
-    linkedin: <LinkedinIcon size={16} />,
+    github: <Github size={16} />,
+    linkedin: <Linkedin size={16} />,
     terraform: <TerraformIcon />,
     key: <Key size={16} />,
     mail: <Mail size={16} />,

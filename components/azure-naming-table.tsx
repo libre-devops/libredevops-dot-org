@@ -7,6 +7,7 @@ export interface AzureResource {
     length: string;
     construct: string;
     example: string;
+    note?: string;
 }
 
 export interface OtherResource {
@@ -20,6 +21,8 @@ export interface OtherResource {
 }
 
 export function AzureResourceTable({ rows }: { rows: AzureResource[] }) {
+    const hasNotes = rows.some(r => r.note);
+
     return (
         <div style={{ overflowX: 'auto', marginTop: '1rem' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
@@ -33,6 +36,7 @@ export function AzureResourceTable({ rows }: { rows: AzureResource[] }) {
                         <th style={{ textAlign: 'left', padding: '6px 8px', borderBottom: '1px solid var(--border-color, #333)', whiteSpace: 'nowrap' }}>Length</th>
                         <th style={{ textAlign: 'left', padding: '6px 8px', borderBottom: '1px solid var(--border-color, #333)', whiteSpace: 'nowrap' }}>Construct</th>
                         <th style={{ textAlign: 'left', padding: '6px 8px', borderBottom: '1px solid var(--border-color, #333)', whiteSpace: 'nowrap' }}>Example</th>
+                        {hasNotes && <th style={{ textAlign: 'left', padding: '6px 8px', borderBottom: '1px solid var(--border-color, #333)', whiteSpace: 'nowrap' }}>Note</th>}
                     </tr>
                 </thead>
                 <tbody>
@@ -46,6 +50,7 @@ export function AzureResourceTable({ rows }: { rows: AzureResource[] }) {
                             <td style={{ padding: '4px 8px' }}>{r.length}</td>
                             <td style={{ padding: '4px 8px' }}><code style={{ fontSize: '0.75rem' }}>{r.construct}</code></td>
                             <td style={{ padding: '4px 8px' }}><code style={{ fontSize: '0.75rem' }}>{r.example}</code></td>
+                            {hasNotes && <td style={{ padding: '4px 8px', fontSize: '0.75rem', fontStyle: 'italic', color: 'var(--text-muted, #666)' }}>{r.note}</td>}
                         </tr>
                     ))}
                 </tbody>

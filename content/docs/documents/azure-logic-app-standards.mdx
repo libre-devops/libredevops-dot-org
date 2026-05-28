@@ -70,6 +70,64 @@ Start at `WS1` and scale based on observed CPU and memory under load.
 
 ---
 
+## Organizational Templates (public preview)
+
+**Organizational templates** allow you to create reusable workflow templates that your team can instantiate with pre-configured triggers, actions, naming, authentication, and infrastructure. Rather than each developer starting from a blank canvas, they create a new Logic App from your template, significantly reducing setup time and ensuring consistency across the organisation.
+
+> **Status:** Public preview. See [Microsoft announcement](https://techcommunity.microsoft.com/blog/integrationsonazureblog/%F0%9F%93%A2-announcing-public-preview-organizational-templates-in-azure-logic-apps/4425994) and [official documentation](https://learn.microsoft.com/en-us/azure/logic-apps/create-workflows-from-templates?tabs=consumption).
+
+### When to use templates
+
+Templates are valuable when you have **repeatable integration patterns** used by multiple teams or projects. Common use cases:
+
+- **Sentinel playbooks:** Template includes Sentinel incident trigger, role assignments, error handling, and Teams/email notification actions. Developers create a playbook from the template and customise only the core logic.
+- **Event-driven integrations:** Template includes Azure Event Grid or Service Bus trigger, retry policy, managed identity setup, and standard error scope. Developers add their own action sequence.
+- **Scheduled KQL reports:** Template includes Recurrence trigger, Log Analytics query action, result processing loop, and email distribution. Developers modify the query and recipients.
+- **API synchronisation:** Template includes polling trigger, timestamp tracking, batch size limits, and run-after error handling. Developers add connector-specific actions.
+
+### When to skip templates
+
+- **One-off integrations:** A single Logic App that will never be reused. The overhead of creating and maintaining a template is not justified.
+- **Workflows with fundamentally different patterns:** If each instance needs a different trigger type, hosting model, or error strategy, a template adds constraint rather than value.
+- **High-velocity prototyping:** During exploration, developers may benefit from flexibility over enforced consistency.
+
+### Creating a template
+
+Before building from scratch, check the [Azure/LogicAppsTemplates](https://github.com/Azure/LogicAppsTemplates) repository for official Microsoft templates. Many common patterns (Sentinel playbooks, Event Grid handlers, Service Bus processors) already exist as templates you can adapt or use as reference implementations.
+
+1. **Build a reference workflow** in the portal or designer that exemplifies your pattern. Include:
+   - The trigger type and basic configuration
+   - Standard actions (e.g. Managed Identity connections, error scope structure)
+   - Placeholder names and parameters for customisation
+   - Documentation via action comments describing what each step does and what the developer should modify
+
+2. **Export as a template** via the Azure portal (Logic App > Templates > Export). This captures the workflow definition in a reusable JSON schema.
+
+3. **Configure template parameters** to mark which fields the developer must or may customise:
+   - Required: trigger topic/queue/schedule, email recipients, Teams channel
+   - Optional: retry counts, timeout values, condition thresholds
+
+4. **Document the template** with:
+   - Purpose and supported use cases
+   - Required permissions (which role assignments must be created)
+   - Required supporting resources (e.g. Log Analytics workspace, Event Grid topic)
+   - Example developer workflow (which fields to change, what not to touch)
+   - Troubleshooting guide for common configuration errors
+
+5. **Store the template** in your organization's Logic Apps template gallery (Azure Portal > Logic Apps > Create > Organizational templates > Add to gallery). This makes it discoverable to all teams.
+
+### Template + Terraform
+
+Even when using a template to bootstrap the workflow, infrastructure should still be managed in Terraform:
+
+- The template creates the Logic App resource and workflow definition
+- Terraform defines the supporting infrastructure: managed identities, role assignments, API connections, storage accounts, diagnostic settings, and networking
+- The template's generated workflow JSON (stored in the Logic App) can be version-controlled in a repository alongside the Terraform code
+
+This hybrid approach gives developers the speed of a template while maintaining Infrastructure-as-Code discipline.
+
+---
+
 ## Naming & Tagging
 
 ### Resource name
@@ -1363,6 +1421,8 @@ resource "azurerm_monitor_metric_alert" "logic_app_failures" {
 ## See Also
 
 - [Microsoft - Standard vs Consumption comparison](https://learn.microsoft.com/en-us/azure/logic-apps/single-tenant-overview-compare)
+- [Microsoft - Organizational templates](https://learn.microsoft.com/en-us/azure/logic-apps/create-workflows-from-templates?tabs=consumption) - create and share reusable workflow templates
+- [Azure/LogicAppsTemplates](https://github.com/Azure/LogicAppsTemplates) - official Microsoft repository with pre-built Logic Apps templates for common scenarios
 - [Microsoft - Logic Apps limits and configuration](https://learn.microsoft.com/en-us/azure/logic-apps/logic-apps-limits-and-config)
 - [Microsoft - Sentinel automation and playbooks](https://learn.microsoft.com/en-us/azure/sentinel/automate-responses-with-playbooks)
 - [Microsoft - Secure access to Logic Apps](https://learn.microsoft.com/en-us/azure/logic-apps/logic-apps-securing-a-logic-app)
