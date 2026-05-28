@@ -1,3 +1,16 @@
+diff --git a/node_modules/nextra-theme-docs/dist/components/navbar/index.client.js b/node_modules/nextra-theme-docs/dist/components/navbar/index.client.js
+index 8598843..998f84d 100644
+--- a/node_modules/nextra-theme-docs/dist/components/navbar/index.client.js
++++ b/node_modules/nextra-theme-docs/dist/components/navbar/index.client.js
+@@ -165,7 +165,7 @@ const ClientNavbar = (t0) => {
+   }
+   let t4;
+   if ($[10] !== themeConfig.search) {
+-    t4 = themeConfig.search && /* @__PURE__ */ jsx("div", { className: "x:max-md:hidden", children: themeConfig.search });
++    t4 = themeConfig.search && /* @__PURE__ */ jsx("div", { className: "x:flex-1", children: themeConfig.search });
+     $[10] = themeConfig.search;
+     $[11] = t4;
+   } else {
 diff --git a/node_modules/nextra-theme-docs/dist/schemas.js b/node_modules/nextra-theme-docs/dist/schemas.js
 index 060d0b9..f17054e 100644
 --- a/node_modules/nextra-theme-docs/dist/schemas.js

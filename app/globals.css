@@ -895,6 +895,30 @@ a {
   }
 }
 
+/* ── Site-header height token ──────────────────────────────────── */
+/* Used to offset the Nextra navbar so it sticks below ours when   */
+/* the banner is visible. Matches .site-nav padding + 36px logo.   */
+:root {
+    --site-header-height: 3.95rem; /* desktop: 2×0.85rem padding + 36px logo */
+}
+
+@media (max-width: 768px) {
+    :root {
+        --site-header-height: 3.45rem; /* mobile: 2×0.6rem padding + 36px logo */
+    }
+}
+
+/* Nextra navbar: stick below our site-header when banner is visible */
+body:not(.banner-hidden) .nextra-navbar {
+    top: var(--site-header-height) !important;
+}
+
+/* When banner is hidden, Nextra navbar returns to the very top */
+body.banner-hidden .nextra-navbar,
+html.banner-hidden-preload .nextra-navbar {
+    top: 0 !important;
+}
+
 /* Docs reading mode - hide the site banner when user opts out.
    The .banner-hidden-preload class is set on <html> by an inline script in
    app/layout.tsx so the banner never paints; the .banner-hidden class on
@@ -914,6 +938,51 @@ body.banner-hidden .site-header {
    that descendants with their own colours still override. */
 .light .nextra-search-results {
     color: var(--text-primary);
+}
+
+/* ── Cheatsheet filter search ──────────────────────────────────── */
+.cheatsheet-search-wrapper {
+    position: relative;
+    margin-top: 1.5rem;
+}
+
+.cheatsheet-search-icon {
+    position: absolute;
+    left: 0.85rem;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-tertiary);
+    pointer-events: none;
+}
+
+.cheatsheet-search-input {
+    width: 100%;
+    padding: 0.65rem 1rem 0.65rem 2.5rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    outline: none;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    /* Remove browser default search cancel button */
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+.cheatsheet-search-input::placeholder {
+    color: var(--text-tertiary);
+}
+
+.cheatsheet-search-input:focus {
+    border-color: rgba(139, 92, 246, 0.5);
+    box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.12);
+}
+
+.cheatsheet-search-empty {
+    margin-top: 2rem;
+    color: var(--text-secondary);
+    font-size: 0.95rem;
 }
 
 /* ── Docs footer ───────────────────────────────────────────────── */

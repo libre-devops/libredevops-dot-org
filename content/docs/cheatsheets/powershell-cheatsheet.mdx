@@ -326,6 +326,138 @@ $rows = @(
 ) | ForEach-Object { [PSCustomObject]$_ }
 ```
 
+### PSCustomObject — patterns and idioms
+
+**Building arrays from pipelines**
+
+```powershell
+# Select-Object creates a PSCustomObject directly (no explicit cast needed)
+$report = Get-AzResource | Select-Object Name, ResourceType,
+    @{ Name = 'RG'; Expression = { $_.ResourceGroupName } },
+    @{ Name = 'AgeHours'; Expression = { ((Get-Date) - $_.ChangedTime).TotalHours -as [int] } }
+
+# ForEach-Object for richer logic
+$report = Get-AzResourceGroup | ForEach-Object {
+    $resources = Get-AzResource -ResourceGroupName $_.ResourceGroupName
+    [PSCustomObject]@{
+        Name      = $_.ResourceGroupName
+        Location  = $_.Location
+        Count     = $resources.Count
+        HasAppSvc = $resources.ResourceType -contains 'Microsoft.Web/sites'
+    }
+}
+```
+
+**Nested objects**
+
+```powershell
+$config = [PSCustomObject]@{
+    Database = [PSCustomObject]@{
+        Host    = 'db.example.com'
+        Port    = 5432
+        TlsMode = 'require'
+    }
+    App = [PSCustomObject]@{
+        Port    = 8080
+        Workers = 4
+    }
+}
+
+$config.Database.Host   # db.example.com
+$config.App.Port        # 8080
+```
+
+**Converting to/from hashtable**
+
+```powershell
+# PSCustomObject → hashtable
+function ConvertTo-Hashtable {
+    param ([Parameter(Mandatory, ValueFromPipeline)][PSCustomObject]$Object)
+    process {
+        $ht = [ordered]@{}
+        foreach ($prop in $Object.PSObject.Properties) {
+            $ht[$prop.Name] = $prop.Value
+        }
+        $ht
+    }
+}
+$ht = $obj | ConvertTo-Hashtable
+
+# Hashtable → PSCustomObject (cast)
+$obj = [PSCustomObject]$ht
+
+# Round-trip via JSON (handles nested objects too)
+$json = $obj | ConvertTo-Json -Depth 10
+$copy = $json | ConvertFrom-Json
+```
+
+**Type names and default display**
+
+```powershell
+# Assign a type name — shows in Get-Member and Format-* output
+$obj.PSObject.TypeNames.Insert(0, 'LibreDevOps.DeployResult')
+
+# Add a custom display property with Update-TypeData (session-scoped)
+Update-TypeData -TypeName 'LibreDevOps.DeployResult' `
+    -MemberType ScriptProperty `
+    -MemberName 'Summary' `
+    -Value { "[$($this.Status)] $($this.Name) @ $($this.Region)" } `
+    -Force
+
+# Define default display columns (analogous to Format.ps1xml)
+Update-TypeData -TypeName 'LibreDevOps.DeployResult' `
+    -DefaultDisplayPropertySet 'Name', 'Status', 'Region', 'Duration' `
+    -Force
+
+$obj.Summary
+$obj | Format-Table   # uses DefaultDisplayPropertySet columns
+```
+
+**Sorting, grouping, and comparing**
+
+```powershell
+# Sort by multiple properties
+$report | Sort-Object Location, Name
+
+# Group and summarise
+$report | Group-Object Location | ForEach-Object {
+    [PSCustomObject]@{ Region = $_.Name; Count = $_.Count }
+}
+
+# Diff two object arrays on specific properties
+Compare-Object $before $after -Property Name, Status |
+    Where-Object SideIndicator -eq '=>' |   # new/changed
+    Select-Object Name, Status
+```
+
+**Using PSCustomObjects as function output**
+
+```powershell
+function Get-DeployStatus {
+    [CmdletBinding()]
+    [OutputType([PSCustomObject])]
+    param ([Parameter(Mandatory)][string[]]$ResourceGroup)
+
+    foreach ($rg in $ResourceGroup) {
+        $resources = Get-AzResource -ResourceGroupName $rg -ErrorAction SilentlyContinue
+        $obj = [PSCustomObject]@{
+            ResourceGroup = $rg
+            ResourceCount = $resources.Count
+            Status        = if ($resources.Count -gt 0) { 'Active' } else { 'Empty' }
+            CheckedAt     = [datetime]::UtcNow
+        }
+        $obj.PSObject.TypeNames.Insert(0, 'LibreDevOps.DeployStatus')
+        $obj   # emit to pipeline - do NOT use return inside a foreach pipeline emitter
+    }
+}
+
+# Caller can pipe, sort, export, or filter naturally
+Get-DeployStatus -ResourceGroup 'rg-prod', 'rg-staging', 'rg-dev' |
+    Where-Object Status -eq 'Empty' |
+    Select-Object ResourceGroup, CheckedAt |
+    Export-Csv 'empty-rgs.csv' -NoTypeInformation
+```
+
 ### Pipeline patterns
 
 ```powershell
@@ -383,6 +515,113 @@ Write-Warning "$($errs.Count) access errors suppressed"
 git status
 if (-not $?) { throw "git exited with code $LASTEXITCODE" }
 ```
+
+### try / catch / finally — full reference
+
+Every `catch` block receives the current error as `$_` (an `ErrorRecord`). Multiple `catch` clauses are tested top-to-bottom; the first matching type wins.
+
+```powershell
+try {
+    # Only terminating errors are caught. Convert non-terminating ones first:
+    $rg = Get-AzResourceGroup -Name $Name -ErrorAction Stop
+    Invoke-RestMethod -Uri 'https://api.example.com/deploy' -ErrorAction Stop
+}
+catch [Microsoft.Azure.Commands.ResourceManager.Cmdlets.SdkModels.Exceptions.PSResourceGroupNotFoundException] {
+    # Specific .NET exception type - catch before the broader clause
+    Write-Warning "RG '$Name' not found - creating it."
+    New-AzResourceGroup -Name $Name -Location 'uksouth'
+}
+catch [System.Net.Http.HttpRequestException], [System.Net.WebException] {
+    # Multiple types in a single catch (PS 3+)
+    Write-Error "Network failure during deploy: $($_.Exception.Message)"
+    throw   # re-throw so the caller sees the error
+}
+catch {
+    # Catch-all - inspect the ErrorRecord
+    $ex   = $_.Exception
+    $type = $ex.GetType().FullName
+    $line = $_.InvocationInfo.ScriptLineNumber
+    Write-Error "[$type] at line $line: $ex"
+    throw
+}
+finally {
+    # Runs unconditionally - whether try succeeded, caught, or a catch re-threw.
+    # Use for cleanup: closing connections, removing temp files, etc.
+    # NOTE: if finally itself throws, the original exception is lost.
+    Disconnect-AzAccount -ErrorAction SilentlyContinue
+    Remove-Item $tmpFile -ErrorAction SilentlyContinue
+}
+```
+
+### ErrorRecord inspection
+
+```powershell
+catch {
+    $_.Exception                          # underlying .NET exception object
+    $_.Exception.Message                  # human-readable message string
+    $_.Exception.GetType().FullName       # fully-qualified exception class name
+    $_.Exception.InnerException           # wrapped inner exception (if any)
+    $_.InvocationInfo.Line                # source line that triggered the error
+    $_.InvocationInfo.ScriptLineNumber    # line number
+    $_.InvocationInfo.ScriptName          # script file path
+    $_.ScriptStackTrace                   # full PS call stack as a string
+    $_.CategoryInfo.Category              # e.g. ObjectNotFound, PermissionDenied
+    $_.FullyQualifiedErrorId              # e.g. 'ResourceGroupNotFound,Microsoft.Azure...'
+    $_.TargetObject                       # the object the cmdlet was operating on
+}
+```
+
+### trap vs try/catch
+
+`trap` is a scope-level statement handler (PS 1.x era). `try/catch` is block-scoped and structured. Prefer `try/catch` for all new code — `trap` is mainly useful as a last-resort script-level safety net.
+
+| | `try / catch` | `trap` |
+|---|---|---|
+| **Scope** | Tied to a specific `try` block | Entire enclosing scope (function, script) |
+| **Specificity** | Per-block, ordered type matching | Single handler per exception type per scope |
+| **Flow control** | Re-throw with `throw`; swallow by not throwing | `break` exits the scope, `continue` resumes after the error line |
+| **Nesting** | Inner `try` shadows outer | Inner scope `trap` shadows outer scope |
+| **When to use** | Structured error handling in functions and scripts | Script-level safety nets; cleanup-on-exit guards |
+
+```powershell
+# trap — handles any terminating error in the current scope
+trap [System.IO.IOException] {
+    Write-Warning "IO error: $_"
+    continue   # resume execution after the line that errored
+}
+
+trap {
+    Write-Error "Unhandled terminating error: $_"
+    break      # exit the current scope (propagate to caller)
+}
+
+# Script-level safety net combining trap + cleanup list
+$script:Cleanup = [System.Collections.Generic.List[scriptblock]]::new()
+
+trap {
+    Write-Error "Fatal: $_"
+    foreach ($action in $script:Cleanup) { & $action }
+    exit 1
+}
+
+$script:Cleanup.Add({ Remove-Item $tmpDir -Recurse -ErrorAction SilentlyContinue })
+$script:Cleanup.Add({ Disconnect-AzAccount -ErrorAction SilentlyContinue })
+
+# --- try/catch does the same thing with explicit structure ---
+try {
+    & ./risky-operation.ps1
+}
+catch {
+    Write-Error "Fatal: $_"
+    throw
+}
+finally {
+    Remove-Item $tmpDir -Recurse -ErrorAction SilentlyContinue
+    Disconnect-AzAccount -ErrorAction SilentlyContinue
+}
+```
+
+**Key gotcha:** `trap` only catches *terminating* errors. With `$ErrorActionPreference = 'Continue'` (the default), most cmdlet errors are non-terminating and slip past both `trap` and `catch`. Always use `-ErrorAction Stop` on cmdlets you want caught, or set `$ErrorActionPreference = 'Stop'` at the top of your script.
 
 ### Switch statement
 
@@ -480,6 +719,145 @@ function Invoke-MyOperation {
         }
     }
 }
+```
+
+### CmdletBinding reference
+
+```powershell
+[CmdletBinding(
+    SupportsShouldProcess,            # adds -WhatIf and -Confirm; required to call $PSCmdlet.ShouldProcess()
+    ConfirmImpact = 'High',           # None | Low | Medium | High — auto-prompts when -Confirm not set
+    DefaultParameterSetName = 'ByName',
+    SupportsPaging,                   # adds -First, -Skip, -IncludeTotalCount
+    PositionalBinding = $false        # disable auto-positional parameter binding
+)]
+```
+
+### Parameter attributes — quick reference
+
+```powershell
+param (
+    # Mandatory, positional, pipeline-aware
+    [Parameter(
+        Mandatory,
+        Position = 0,
+        ValueFromPipeline,                  # accepts whole objects from pipeline
+        ValueFromPipelineByPropertyName,    # matches property name to param name
+        HelpMessage = 'The resource name'
+    )]
+    [string]$Name,
+
+    # Validation attributes (stackable)
+    [ValidateNotNullOrEmpty()]
+    [ValidateLength(1, 64)]
+    [ValidatePattern('^[a-z][a-z0-9-]{0,62}$')]
+    [string]$Slug,
+
+    [ValidateRange(1, 65535)]
+    [int]$Port = 443,
+
+    [ValidateSet('dev', 'staging', 'prod')]
+    [string]$Environment = 'dev',
+
+    [ValidateCount(1, 10)]              # min/max number of elements in an array
+    [string[]]$Regions,
+
+    [ValidateScript({
+        Test-Path $_ -PathType Leaf    # scriptblock must return $true or throw
+    })]
+    [string]$ConfigFile,
+
+    # Parameter sets
+    [Parameter(Mandatory, ParameterSetName = 'ById')]
+    [ValidatePattern('^\d+$')]
+    [string]$Id,
+
+    [Parameter(Mandatory, ParameterSetName = 'ByName')]
+    [string]$DisplayName,
+
+    # Common extras
+    [switch]$Force,
+    [switch]$PassThru    # return the processed object when normally silent
+)
+```
+
+### begin / process / end — pipeline processing
+
+```powershell
+function Measure-DeployTime {
+    [CmdletBinding()]
+    [OutputType([PSCustomObject])]
+    param (
+        [Parameter(Mandatory, ValueFromPipeline)]
+        [string]$ResourceGroup
+    )
+
+    begin {
+        # Runs once before any pipeline input.
+        # Initialise accumulators, open connections, load modules.
+        $results  = [System.Collections.Generic.List[PSCustomObject]]::new()
+        $sw       = [System.Diagnostics.Stopwatch]::StartNew()
+        Write-Verbose "Measure-DeployTime: starting batch"
+    }
+
+    process {
+        # Runs once per pipeline object (or per element in an array arg).
+        # $ResourceGroup is bound to each incoming value.
+        $itemSw = [System.Diagnostics.Stopwatch]::StartNew()
+        try {
+            $rg = Get-AzResourceGroup -Name $ResourceGroup -ErrorAction Stop
+            $results.Add([PSCustomObject]@{
+                Name      = $ResourceGroup
+                Location  = $rg.Location
+                Status    = 'OK'
+                ElapsedMs = $itemSw.ElapsedMilliseconds
+            })
+        }
+        catch {
+            Write-Warning "Failed for '$ResourceGroup': $_"
+            $results.Add([PSCustomObject]@{ Name = $ResourceGroup; Status = 'Error'; ElapsedMs = $itemSw.ElapsedMilliseconds })
+        }
+    }
+
+    end {
+        # Runs once after all pipeline input is processed.
+        # Emit collected results, close connections, summarise.
+        $sw.Stop()
+        Write-Verbose "Batch complete in $($sw.ElapsedMilliseconds)ms"
+        $results   # emit to pipeline
+    }
+}
+
+# Pipeline usage — process runs once per item
+'rg-dev', 'rg-staging', 'rg-prod' | Measure-DeployTime -Verbose
+```
+
+### ShouldProcess / WhatIf / Confirm
+
+```powershell
+function Remove-StaleResources {
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
+    param (
+        [Parameter(Mandatory)][string]$ResourceGroupName,
+        [int]$OlderThanDays = 30
+    )
+
+    $cutoff    = (Get-Date).AddDays(-$OlderThanDays)
+    $resources = Get-AzResource -ResourceGroupName $ResourceGroupName |
+                 Where-Object { $_.ChangedTime -lt $cutoff }
+
+    foreach ($res in $resources) {
+        # ShouldProcess returns $true normally, $false under -WhatIf, prompts under -Confirm
+        if ($PSCmdlet.ShouldProcess($res.Name, "Remove resource")) {
+            Remove-AzResource -ResourceId $res.Id -Force
+            Write-Verbose "Removed $($res.Name)"
+        }
+    }
+}
+
+Remove-StaleResources -ResourceGroupName 'rg-old' -WhatIf       # shows what would happen
+Remove-StaleResources -ResourceGroupName 'rg-old' -Confirm       # prompts for each
+Remove-StaleResources -ResourceGroupName 'rg-old' -Force         # (with [switch]$Force) skips confirmation
 ```
 
 ### Retry helper
