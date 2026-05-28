@@ -24,6 +24,22 @@ const projects: Project[] = [
         docs: '/docs/documents/azure-naming-convention',
     },
     {
+        title: 'Terraform Standards',
+        description:
+            'Production-ready standards for Terraform module development, file structure, provider pinning, state management, CI/CD pipelines, and registry publishing. Includes maintainer scripts for sorting variables, outputs, and generating documentation.',
+        tags: ['Terraform', 'Standards', 'Best Practices', 'IaC'],
+        repo: 'https://github.com/libre-devops',
+        docs: '/docs/documents/terraform-standards',
+    },
+    {
+        title: 'Azure Logic App Standards',
+        description:
+            'Comprehensive standards for deploying production-grade Azure Logic Apps. Covers hosting model selection, naming conventions, trigger patterns, networking, error handling, Terraform patterns, and dependency management with decision trees and real-world examples.',
+        tags: ['Azure', 'Logic Apps', 'Standards', 'Best Practices'],
+        repo: 'https://github.com/libre-devops',
+        docs: '/docs/documents/azure-logic-app-standards',
+    },
+    {
         title: 'Terraform Modules',
         description:
             'A collection of opinionated Terraform modules for Azure infrastructure - covering compute, networking, identity, storage, and more. All modules follow the Libre DevOps naming convention and are published to the Terraform Registry.',
