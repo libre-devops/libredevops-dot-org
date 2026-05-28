@@ -18,6 +18,8 @@
   --radius-lg:     22px;
   --cb-bg:         #0d1117;
   --cb-header-bg:  #161b22;
+  /* Nextra requires --nextra-bg as space-separated RGB (used in rgb()/rgba()) */
+  --nextra-bg:     13 17 23;
 }
 
 /* Light theme overrides */
@@ -31,6 +33,7 @@
   --border-color:  #d0d7de;
   --cb-bg:         #0d1117;
   --cb-header-bg:  #161b22;
+  --nextra-bg:     246 248 250;
 }
 
 /* ── Base ──────────────────────────────────────────────────────── */
@@ -912,3 +915,23 @@ body.banner-hidden .site-header {
 .light .nextra-search-results {
     color: var(--text-primary);
 }
+
+/* ── Docs footer ───────────────────────────────────────────────── */
+.docs-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    width: 100%;
+}
+
+@media (max-width: 768px) {
+    .docs-footer {
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+    }
+}
+

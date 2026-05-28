@@ -25,8 +25,8 @@ export default async function DocsLayout({
                 />
             }
             footer={
-                <div key="docs-footer" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem', width: '100%' }}>
-                    <span style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', paddingLeft: '0.5rem' }}>
+                <div key="docs-footer" className="docs-footer">
+                    <span style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
                         Libre DevOps
                     </span>
                     <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
