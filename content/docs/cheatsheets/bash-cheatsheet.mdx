@@ -593,6 +593,378 @@ kcov --include-pattern=lib/ coverage ./test/bats/bin/bats test/
 
 ---
 
+## Process Management & Health Checks
+
+### Monitor a process, restart if dead
+
+```bash
+#!/usr/bin/env bash
+# Ensure a service is always running; restart if it exits
+
+SERVICE_PID_FILE="/var/run/my-service.pid"
+SERVICE_CMD="python3 /opt/service/main.py"
+LOG_FILE="/var/log/my-service.log"
+
+check_and_restart() {
+    if [[ -f "$SERVICE_PID_FILE" ]]; then
+        local pid=$(cat "$SERVICE_PID_FILE")
+        if ! kill -0 "$pid" 2>/dev/null; then
+            echo "Process $pid is dead, restarting..." | tee -a "$LOG_FILE"
+            rm -f "$SERVICE_PID_FILE"
+            start_service
+        fi
+    else
+        start_service
+    fi
+}
+
+start_service() {
+    echo "Starting service..." | tee -a "$LOG_FILE"
+    $SERVICE_CMD >> "$LOG_FILE" 2>&1 &
+    echo $! > "$SERVICE_PID_FILE"
+}
+
+# Run every 30 seconds
+while true; do
+    check_and_restart
+    sleep 30
+done
+```
+
+### Health check with retry logic
+
+```bash
+#!/usr/bin/env bash
+# Check if a service is healthy; retry with exponential backoff
+
+health_check() {
+    local endpoint="$1"
+    local max_retries=5
+    local retry=0
+    local backoff=1
+
+    while (( retry < max_retries )); do
+        if curl -sf --max-time 5 "$endpoint" > /dev/null; then
+            echo "✓ Health check passed"
+            return 0
+        fi
+        
+        echo "⚠ Health check failed (attempt $((retry + 1))/$max_retries), retrying in ${backoff}s..."
+        sleep "$backoff"
+        backoff=$((backoff * 2))  # exponential backoff
+        ((retry++))
+    done
+    
+    echo "✗ Health check failed after $max_retries attempts"
+    return 1
+}
+
+# Usage
+health_check "http://localhost:8080/health" || exit 1
+```
+
+---
+
+## Networking & Service Discovery
+
+### Wait for a port to be ready
+
+```bash
+#!/usr/bin/env bash
+# Block until a service is listening on a port
+
+wait_for_port() {
+    local host="$1"
+    local port="$2"
+    local timeout="${3:-30}"
+    local elapsed=0
+    
+    echo "Waiting for $host:$port..."
+    
+    while (( elapsed < timeout )); do
+        if nc -z "$host" "$port" 2>/dev/null; then
+            echo "✓ $host:$port is ready"
+            return 0
+        fi
+        
+        echo "  Not ready yet, retrying... (${elapsed}s/$timeout)"
+        sleep 2
+        elapsed=$((elapsed + 2))
+    done
+    
+    echo "✗ Timeout waiting for $host:$port"
+    return 1
+}
+
+# Usage
+wait_for_port localhost 5432  # PostgreSQL
+wait_for_port redis-server 6379  # Redis
+```
+
+### Resolve service from DNS
+
+```bash
+#!/usr/bin/env bash
+# Service discovery - resolve a hostname to IPs
+
+get_service_ips() {
+    local service_name="$1"
+    
+    # Use getent to query DNS (more portable than nslookup)
+    getent hosts "$service_name" | awk '{print $1}' | sort -u
+}
+
+# Load balance across resolved IPs
+load_balance_to_service() {
+    local service="$1"
+    local ips=($(get_service_ips "$service"))
+    
+    if (( ${#ips[@]} == 0 )); then
+        echo "Error: No IPs found for $service"
+        return 1
+    fi
+    
+    # Simple round-robin
+    local idx=$((RANDOM % ${#ips[@]}))
+    echo "${ips[$idx]}"
+}
+
+# Usage
+SELECTED_IP=$(load_balance_to_service "api-service")
+curl "http://$SELECTED_IP:8080/health"
+```
+
+---
+
+## Cloud CLI Patterns (Azure / AWS)
+
+### Azure CLI with managed identity
+
+```bash
+#!/usr/bin/env bash
+# Authenticate using managed identity (no secrets in code)
+
+# Azure CLI automatically uses managed identity in Azure VMs, AKS pods, etc.
+# Explicitly enable with:
+az login --identity
+
+# Run commands
+az vm list-ip-addresses --subscription "my-subscription"
+az keyvault secret show --vault-name "my-vault" --name "database-password" --query value -o tsv
+
+# Retry pattern for transient failures
+retry_az() {
+    local cmd=("$@")
+    local max_retries=3
+    local retry=0
+    
+    while (( retry < max_retries )); do
+        if "${cmd[@]}"; then
+            return 0
+        fi
+        
+        echo "Command failed, retrying... ($((retry + 1))/$max_retries)"
+        sleep $((2 ** retry))  # exponential backoff
+        ((retry++))
+    done
+    
+    echo "Command failed after $max_retries attempts"
+    return 1
+}
+
+# Usage
+retry_az az deployment group create \
+    --resource-group "my-rg" \
+    --template-file "template.json" \
+    --parameters "environment=prod"
+```
+
+### Batch operations with Azure CLI
+
+```bash
+#!/usr/bin/env bash
+# Apply operations to multiple resources
+
+apply_to_resources() {
+    local resource_group="$1"
+    local resource_type="$2"
+    local operation="$3"
+    
+    # List all resources of type
+    local resources=$(az resource list \
+        --resource-group "$resource_group" \
+        --resource-type "$resource_type" \
+        --query "[].name" -o tsv)
+    
+    for resource in $resources; do
+        echo "Applying $operation to $resource..."
+        eval "az $resource_type $operation --name $resource --resource-group $resource_group"
+    done
+}
+
+# Usage: apply_to_resources "my-rg" "Microsoft.Storage/storageAccounts" "update --set kind=StorageV2"
+```
+
+---
+
+## Container & Kubernetes Helpers
+
+### Kubernetes port-forward with automatic cleanup
+
+```bash
+#!/usr/bin/env bash
+# Forward a pod's port; clean up on exit
+
+port_forward_pod() {
+    local pod="$1"
+    local local_port="$2"
+    local remote_port="${3:-$local_port}"
+    local namespace="${4:-default}"
+    
+    local pf_pid
+    
+    # Trap to clean up on exit
+    cleanup() {
+        echo "Killing port-forward (PID: $pf_pid)"
+        kill "$pf_pid" 2>/dev/null || true
+    }
+    trap cleanup EXIT INT TERM
+    
+    echo "Port-forwarding: localhost:$local_port -> $pod:$remote_port"
+    kubectl port-forward -n "$namespace" "pod/$pod" "$local_port:$remote_port" &
+    pf_pid=$!
+    
+    wait "$pf_pid"
+}
+
+# Usage
+port_forward_pod "api-server-abc123" 8080 8080 "production"
+```
+
+### Wait for Kubernetes deployment to be ready
+
+```bash
+#!/usr/bin/env bash
+# Block until a deployment has all replicas ready
+
+wait_for_deployment() {
+    local deployment="$1"
+    local namespace="${2:-default}"
+    local timeout="${3:-300}"
+    local elapsed=0
+    
+    echo "Waiting for deployment/$deployment to be ready..."
+    
+    while (( elapsed < timeout )); do
+        local ready=$(kubectl get deployment "$deployment" -n "$namespace" \
+            -o jsonpath='{.status.conditions[?(@.type=="Available")].status}')
+        
+        if [[ "$ready" == "True" ]]; then
+            echo "✓ Deployment ready"
+            return 0
+        fi
+        
+        echo "  Waiting... (${elapsed}s/$timeout)"
+        sleep 5
+        elapsed=$((elapsed + 5))
+    done
+    
+    echo "✗ Deployment did not become ready within $timeout seconds"
+    kubectl describe deployment "$deployment" -n "$namespace"
+    return 1
+}
+
+# Usage
+wait_for_deployment "api-service" "production" 300
+```
+
+---
+
+## Deployment & Rollback Patterns
+
+### Blue-green deployment with health check
+
+```bash
+#!/usr/bin/env bash
+# Deploy to inactive slot, verify health, then swap
+
+blue_green_deploy() {
+    local app_name="$1"
+    local new_version="$2"
+    local health_endpoint="$3"
+    
+    # Determine current slot
+    local current_slot=$(az appservice web config show --name "$app_name" \
+        --query "swapSlotsConfiguration.slotSwapConfiguration" -o tsv)
+    local target_slot=$([[ "$current_slot" == "staging" ]] && echo "production" || echo "staging")
+    
+    echo "Deploying $new_version to $target_slot..."
+    
+    # Deploy to inactive slot
+    az webapp deployment slot create --name "$app_name" --slot "$target_slot" \
+        --configuration-source "$current_slot" || true
+    
+    # Push code
+    git push "https://$app_name.scm.azurewebsites.net:443/$app_name.git" HEAD:"refs/heads/main"
+    
+    # Wait for deployment
+    sleep 30
+    
+    # Health check before swap
+    local target_url="https://$app_name-$target_slot.azurewebsites.net$health_endpoint"
+    if ! curl -sf "$target_url" > /dev/null; then
+        echo "✗ Health check failed on $target_slot, aborting swap"
+        return 1
+    fi
+    
+    echo "✓ Health check passed, swapping slots..."
+    az appservice web deployment slot swap --name "$app_name" \
+        --slot "$target_slot"
+    
+    echo "✓ Deployment complete"
+}
+
+# Usage
+blue_green_deploy "my-api-app" "v2.1.0" "/health"
+```
+
+### Rollback with version pinning
+
+```bash
+#!/usr/bin/env bash
+# Rollback to previous version if current deployment fails
+
+rollback_deployment() {
+    local deployment="$1"
+    local namespace="${2:-default}"
+    local health_check_cmd="$3"
+    
+    echo "Checking current deployment health..."
+    
+    if ! eval "$health_check_cmd"; then
+        echo "✗ Health check failed, rolling back..."
+        
+        # Rollback: set replicas to 0 for current version, restore previous
+        kubectl rollout undo "deployment/$deployment" -n "$namespace"
+        
+        echo "Waiting for rollback to complete..."
+        kubectl rollout status "deployment/$deployment" -n "$namespace"
+        
+        echo "✓ Rolled back to previous version"
+        return 0
+    fi
+    
+    echo "✓ Deployment healthy, no rollback needed"
+    return 0
+}
+
+# Usage
+rollback_deployment "api-service" "prod" \
+    "curl -sf http://api-service:8080/health > /dev/null"
+```
+
+---
+
 ## Quick One-Liners ⚡️
 
 ```bash
