@@ -1066,9 +1066,9 @@ DeviceNetworkEvents
 
 ## Anti-patterns
 
-- **No time filter on queries** - a query without `| where TimeGenerated > ago(...)` scans the entire table (potentially months of data), is extremely slow, and can exhaust query limits. Always scope the time range first.
-- **`contains` over `has` for whole-word matches** - `contains` does a character-level substring scan; `has` uses the inverted index and is orders of magnitude faster for whole-token matching. Use `has` for single words and `has_any` for sets.
-- **`take N` as a "sample"** - `take` returns arbitrary rows in no guaranteed order; it is not a random or representative sample. Use `sample N` for random sampling or `top N by` for intentional ranking.
-- **String concatenation to build KQL** - building query strings by concatenating user input enables KQL injection. Use `declare query_parameters` with typed parameters for any dynamic values.
-- **Joining two large unfiltered tables** - joining unfiltered high-volume tables can produce enormous intermediate datasets and time out. Filter both sides with time and column predicates before the `join`.
-- **`mv-expand` on a high-cardinality array without subsequent scoping** - `mv-expand` on a large array column multiplies row count dramatically. Always add a `where`, `take`, or `top` after `mv-expand` to bound the result set.
+- ⚠️ **No time filter on queries** - a query without `| where TimeGenerated > ago(...)` scans the entire table (potentially months of data), is extremely slow, and can exhaust query limits. Always scope the time range first.
+- 🔬 **`contains` over `has` for whole-word matches** - `contains` does a character-level substring scan; `has` uses the inverted index and is orders of magnitude faster for whole-token matching. Use `has` for single words and `has_any` for sets.
+- 🔬 **`take N` as a "sample"** - `take` returns arbitrary rows in no guaranteed order; it is not a random or representative sample. Use `sample N` for random sampling or `top N by` for intentional ranking.
+- 🚨 **String concatenation to build KQL** - building query strings by concatenating user input enables KQL injection. Use `declare query_parameters` with typed parameters for any dynamic values.
+- ⚠️ **Joining two large unfiltered tables** - joining unfiltered high-volume tables can produce enormous intermediate datasets and time out. Filter both sides with time and column predicates before the `join`.
+- 🔬 **`mv-expand` on a high-cardinality array without subsequent scoping** - `mv-expand` on a large array column multiplies row count dramatically. Always add a `where`, `take`, or `top` after `mv-expand` to bound the result set.

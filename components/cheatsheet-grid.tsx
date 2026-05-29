@@ -75,6 +75,13 @@ const CHEATSHEETS: Cheatsheet[] = [
         icon: <DevIcon name="azure/azure-original.svg" alt="Azure" />,
     },
     {
+        title: 'Azure DevOps',
+        href: '/docs/cheatsheets/azure-devops-cheatsheet',
+        description: 'az devops CLI, YAML pipelines, templates and extends governance, Workload Identity Federation service connections, agent and container jobs, environments and approvals, the permission model, and anti-patterns.',
+        tags: ['Azure DevOps', 'Pipelines', 'YAML', 'CI/CD'],
+        icon: <DevIcon name="azuredevops/azuredevops-original.svg" alt="Azure DevOps" />,
+    },
+    {
         title: 'Bash',
         href: '/docs/cheatsheets/bash-cheatsheet',
         description: 'Script boilerplate, strict mode, colour output helpers, argument parsing, PATH deduplication, and directory-iteration patterns.',
@@ -103,6 +110,13 @@ const CHEATSHEETS: Cheatsheet[] = [
         icon: <DevIcon name="git/git-original.svg" alt="Git" />,
     },
     {
+        title: 'GitHub Actions',
+        href: '/docs/cheatsheets/github-actions-cheatsheet',
+        description: 'Workflow syntax, events and triggers, expressions and contexts, secrets and least-privilege GITHUB_TOKEN permissions, OIDC cloud auth, reusable workflows, runners, containers, caching, environments, and supply-chain hardening.',
+        tags: ['GitHub Actions', 'CI/CD', 'YAML', 'OIDC'],
+        icon: <DevIcon name="githubactions/githubactions-original.svg" alt="GitHub Actions" />,
+    },
+    {
         title: 'Go',
         href: '/docs/cheatsheets/go-cheatsheet',
         description: 'Modules, types, interfaces, error handling, generics, goroutines, channels, HTTP server, slog, testing, and Azure SDK authentication with blob storage and Key Vault.',
@@ -119,15 +133,15 @@ const CHEATSHEETS: Cheatsheet[] = [
     {
         title: 'Linux',
         href: '/docs/cheatsheets/linux-cheatsheet',
-        description: 'Ubuntu and Fedora/RHEL setup scripts - Homebrew, PowerShell, Starship, pyenv, tfenv, developer tools, CA certificates, and WSL2 configuration.',
-        tags: ['Ubuntu', 'Fedora', 'WSL2'],
+        description: 'Production Linux ops - permissions and ACLs, users and sudo, processes and signals, systemd units and timers, journald, package managers, networking, firewalls, SSH hardening, LVM and storage, performance triage, security hardening, plus workstation and WSL2 setup.',
+        tags: ['Linux', 'systemd', 'Networking', 'Security'],
         icon: <DevIcon name="linux/linux-original.svg" alt="Linux" />,
     },
     {
         title: 'Nginx',
         href: '/docs/cheatsheets/nginx-cheatsheet',
-        description: 'HTTPS reverse proxy configs with WebSocket support, HTTP to HTTPS redirects, and service-specific headers for Jenkins, Gitea, and Nexus.',
-        tags: ['Nginx', 'HTTPS', 'Proxy'],
+        description: 'Production reverse proxy - config layout, hardened TLS snippets, proxying and WebSockets, upstreams and load balancing, security headers, rate limiting, caching, structured logging, performance tuning, and location-matching rules.',
+        tags: ['Nginx', 'Reverse Proxy', 'TLS', 'Load Balancing'],
         icon: <DevIcon name="nginx/nginx-original.svg" alt="Nginx" />,
     },
     {

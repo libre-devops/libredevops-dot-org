@@ -922,178 +922,188 @@ HCP Terraform is not required to use Terraform, but it is strongly recommended f
 
 **Stacks architecture:**
 
+A Stack is a directory of `*.tfcomponent.hcl` files (the stack *configuration* - providers, variables, components, outputs) plus one or more `*.tfdeploy.hcl` files (the *deployments*, one per environment). All `.tfcomponent.hcl` files merge into a single configuration and all `.tfdeploy.hcl` files merge into a single deployment file. Each `component` sources an ordinary Terraform module (registry or local).
+
 ```
-infrastructure-stacks/
-├── stacks/
-│   └── networking.tfstack.hcl           # Stack definition
-│   └── platform.tfstack.hcl
-├── deployments/
-│   └── production.deployment.hcl        # Stack deployment configuration
-│   └── development.deployment.hcl
-├── components/
-│   ├── networking/                      # Component source
-│   │   ├── main.tf
-│   │   ├── outputs.tf
-│   │   └── variables.tf
-│   ├── platform/
-│   │   ├── main.tf
-│   │   ├── outputs.tf
-│   │   └── variables.tf
-│   └── observability/
-│       ├── main.tf
-│       ├── outputs.tf
-│       └── variables.tf
+infrastructure-stack/
+├── providers.tfcomponent.hcl     # required_providers + provider config (OIDC)
+├── variables.tfcomponent.hcl     # stack-level variable declarations
+├── components.tfcomponent.hcl    # component blocks (each sources a module)
+├── outputs.tfcomponent.hcl       # stack outputs (type is mandatory)
+├── deployments.tfdeploy.hcl      # deployment blocks: production, staging, ...
+└── modules/                      # the modules the components reference
+    ├── networking/   # main.tf, variables.tf, outputs.tf
+    └── platform/     # main.tf, variables.tf, outputs.tf
 ```
 
-**Component definition (.tfcomponent.hcl):**
+> The GA file extensions are **`.tfcomponent.hcl`** (configuration) and **`.tfdeploy.hcl`** (deployments). The beta `.tfstack.hcl` / `.deployment.hcl` extensions are no longer used.
 
-Each component is a `.tfcomponent.hcl` file alongside its Terraform configuration:
+**Stack configuration (`.tfcomponent.hcl`):**
+
+The configuration declares `required_providers`, the stack `variable`s, the `provider` blocks, the `component`s (each sourcing a module), and the stack `output`s. Split across files for readability - they all merge into one configuration. There is no `terraform {}` block, and every `output` requires an explicit `type`.
 
 ```hcl
-# components/networking/.tfcomponent.hcl
-component {
-  source = "../"
-  
+# providers.tfcomponent.hcl
+required_providers {
+  azurerm = {
+    source  = "hashicorp/azurerm"
+    version = "~> 4.0"
+  }
+}
+
+# OIDC token is injected per-deployment (see deployments.tfdeploy.hcl) and is
+# marked ephemeral so it is never written to state.
+variable "identity_token" {
+  type      = string
+  ephemeral = true
+}
+variable "azure_client_id"       { type = string }
+variable "azure_tenant_id"       { type = string }
+variable "azure_subscription_id" { type = string }
+
+provider "azurerm" "this" {
+  config {
+    features {}
+    use_cli         = false
+    use_oidc        = true
+    oidc_token      = var.identity_token
+    client_id       = var.azure_client_id
+    tenant_id       = var.azure_tenant_id
+    subscription_id = var.azure_subscription_id
+  }
+}
+```
+
+```hcl
+# variables.tfcomponent.hcl
+variable "environment" { type = string }
+variable "location"    { type = string }
+variable "cidr_block"  { type = string }
+```
+
+```hcl
+# components.tfcomponent.hcl - each component sources a module and is handed the provider
+component "networking" {
+  source = "./modules/networking"
+
   inputs = {
     environment = var.environment
     location    = var.location
     cidr_block  = var.cidr_block
   }
-  
+
   providers = {
     azurerm = provider.azurerm.this
   }
 }
 ```
 
-**Stack definition (.tfstack.hcl):**
-
-Declares what components belong to this stack and their inputs:
-
 ```hcl
-# stacks/networking.tfstack.hcl
-required_version = ">= 1.13"
-
-required_providers {
-  azurerm = {
-    source  = "hashicorp/azurerm"
-    version = "~> 3.0"
-  }
-}
-
-variable "environment" {
-  type = string
-}
-
-variable "location" {
-  type = string
-}
-
-variable "cidr_block" {
-  type = string
-}
-
-component "vnet" {
-  source = "../components/networking"
-  inputs = {
-    environment = var.environment
-    location    = var.location
-    cidr_block  = var.cidr_block
-  }
-}
-
+# outputs.tfcomponent.hcl - reference component outputs as component.<name>.<output> (no .outputs)
 output "vnet_id" {
-  value = component.vnet.outputs.vnet_id
+  type  = string
+  value = component.networking.vnet_id
 }
 
 output "subnet_ids" {
-  value = component.vnet.outputs.subnet_ids
+  type  = map(string)
+  value = component.networking.subnet_ids
 }
 ```
 
-**Deployment configuration (.deployment.hcl) - Upstream and Downstream Stacks:**
+**Deployments (`.tfdeploy.hcl`):**
 
-The deployment configuration orchestrates which stacks deploy together and how they share data. This is where upstream/downstream relationships are defined.
+Deployments are concrete instances of the stack (one per environment), each supplying input values. Azure auth is OIDC: an `identity_token` is exchanged for short-lived credentials and `store` blocks pull the ARM identifiers from an HCP Terraform variable set - no client secret is stored. A `deployment` provides inputs to the whole stack; it does not point at sub-stacks via a `path`.
 
 ```hcl
-# deployments/production.deployment.hcl
-required_version = ">= 1.13"
+# deployments.tfdeploy.hcl
+identity_token "azurerm" {
+  audience = ["api://AzureADTokenExchange"]
+}
 
-# Upstream stack: networking provides data to downstream stacks
-deployment "networking_stack" {
-  path = "../stacks/networking"
-  
+# Pull ARM_* identifiers from an HCP Terraform variable set
+store "varset" "azure" {
+  id       = "varset-xxxxxxxxxxxxxxxx"
+  category = "env"
+}
+
+deployment "production" {
   inputs = {
     environment = "production"
     location    = "uksouth"
     cidr_block  = "10.0.0.0/16"
+
+    # OIDC: short-lived, never persisted to state
+    identity_token        = identity_token.azurerm.jwt
+    azure_client_id       = store.varset.azure.ARM_CLIENT_ID
+    azure_tenant_id       = store.varset.azure.ARM_TENANT_ID
+    azure_subscription_id = store.varset.azure.ARM_SUBSCRIPTION_ID
   }
 }
 
-# Expose networking outputs for downstream stacks to consume
-publish_output "vnet_id_network" {
-  value = deployment.networking_stack.vnet_id
-}
-
-publish_output "subnets_network" {
-  value = deployment.networking_stack.subnet_ids
-}
-
-# Downstream stack: platform consumes data from upstream networking stack
-deployment "platform_stack" {
-  path = "../stacks/platform"
-  
+deployment "staging" {
   inputs = {
-    environment  = "production"
-    location     = "uksouth"
-    vnet_id      = deployment.networking_stack.vnet_id
-    subnet_ids   = deployment.networking_stack.subnet_ids
-  }
-}
+    environment = "staging"
+    location    = "ukwest"
+    cidr_block  = "10.1.0.0/16"
 
-deployment "observability_stack" {
-  path = "../stacks/observability"
-  
-  inputs = {
-    environment = "production"
-    location    = "uksouth"
+    identity_token        = identity_token.azurerm.jwt
+    azure_client_id       = store.varset.azure.ARM_CLIENT_ID
+    azure_tenant_id       = store.varset.azure.ARM_TENANT_ID
+    azure_subscription_id = store.varset.azure.ARM_SUBSCRIPTION_ID
   }
 }
 ```
 
-**Upstream and Downstream Stacks:**
+The Azure AD application (or user-assigned managed identity) needs a federated credential whose subject trusts the HCP Terraform organisation/project/stack/deployment, with audience `api://AzureADTokenExchange`.
 
-Stacks can reference outputs from other stacks in the same HCP Terraform project using `upstream_input` blocks. This enables multi-stack orchestration where later stacks depend on earlier ones:
+**Cross-stack composition (`publish_output` / `upstream_input`):**
+
+A stack exposes values to other stacks with `publish_output` in its `.tfdeploy.hcl`, and consumes another stack's published outputs with `upstream_input`. This replaces `terraform_remote_state`, makes the dependency explicit, and lets HCP Terraform re-run downstream stacks automatically when an upstream output changes.
 
 ```hcl
-# In a separate HCP Terraform Stack that depends on the networking stack
-upstream_input "network_stack" {
+# networking stack - deployments.tfdeploy.hcl: publish outputs for downstream stacks
+publish_output "vnet_id" {
+  value = deployment.production.vnet_id
+}
+
+publish_output "subnet_ids" {
+  value = deployment.production.subnet_ids
+}
+```
+
+```hcl
+# application stack - deployments.tfdeploy.hcl: consume the networking stack
+upstream_input "networking" {
   type   = "stack"
   source = "app.terraform.io/myorg/myproject/networking"
 }
 
-deployment "app_stack" {
-  path = "../stacks/application"
-  
+deployment "production" {
   inputs = {
-    vnet_id   = upstream_input.network_stack.vnet_id_network
-    subnet_ids = upstream_input.network_stack.subnets_network
+    environment = "production"
+    vnet_id     = upstream_input.networking.vnet_id
+    subnet_ids  = upstream_input.networking.subnet_ids
+
+    identity_token        = identity_token.azurerm.jwt
+    azure_client_id       = store.varset.azure.ARM_CLIENT_ID
+    azure_tenant_id       = store.varset.azure.ARM_TENANT_ID
+    azure_subscription_id = store.varset.azure.ARM_SUBSCRIPTION_ID
   }
 }
 ```
 
-Example scenario: A networking Stack exposes VNet and subnet IDs. An application Stack (downstream) references those outputs and passes them to components that deploy Logic Apps or App Service Plans into that VNet. When the networking Stack is updated, HCP Terraform automatically triggers the application Stack run to incorporate the changes.
+Example scenario: a networking Stack publishes VNet and subnet IDs. An application Stack (downstream) consumes them via `upstream_input` and passes them to components that deploy Logic Apps or App Service Plans into that VNet. When the networking Stack is updated, HCP Terraform automatically triggers the application Stack run to incorporate the changes.
 
 **Stacks best practices:**
 
-- Each component is independently deployable and testable
-- Use component `outputs` for inter-component communication within a stack
-- Use `deployment` block outputs and `upstream_input` for cross-stack communication
-- Keep downstream stacks loose: a downstream stack should not care which upstream stack provides its data, only the shape of the data
-- Limits: A stack can reference up to 20 upstream stacks and expose to up to 25 downstream stacks
-- All stacks in an upstream/downstream relationship must be in the same HCP Terraform project
-- HCP Terraform automatically triggers downstream Stack runs when upstream outputs change
-- Use `terraform plan` and `terraform apply` at the Stack level; HCP Terraform orchestrates component-level operations
+- Each component is independently deployable and testable; reference component outputs within the stack as `component.<name>.<output>` (there is no `.outputs` indirection in GA).
+- Authenticate with OIDC via an `identity_token`; mark the token `variable` as `ephemeral = true` so it never lands in state, and pull ARM identifiers from a `store "varset"` rather than hardcoding them.
+- Every Stacks `output` needs an explicit `type`, and the configuration has no `terraform {}` block - `required_providers` is declared at the top level of a `.tfcomponent.hcl` file.
+- Use `publish_output` / `upstream_input` for cross-stack data instead of `terraform_remote_state`; keep downstream stacks loose by depending on the shape of the data, not on which upstream provides it.
+- Limits: a stack can reference up to 20 upstream stacks and expose to up to 25 downstream stacks, and all related stacks must live in the same HCP Terraform project.
+- Plan and apply at the stack level; HCP Terraform orchestrates the per-component operations and re-runs downstream stacks when upstream outputs change.
+
 
 **Comparison: Stacks vs alternatives**
 
@@ -2362,7 +2372,9 @@ git push origin v1.2.0
 - [HCP Terraform](https://cloud.hashicorp.com/products/terraform) - managed Terraform service with remote state, runs, and policy enforcement
 - [HashiCorp - Terraform Stacks overview](https://developer.hashicorp.com/terraform/language/stacks) - Stacks language reference and concepts
 - [HashiCorp - Terraform Stacks component configuration](https://developer.hashicorp.com/terraform/language/stacks/component/config) - GA syntax for `.tfcomponent.hcl` files
+- [HashiCorp - Terraform Stacks deployment configuration](https://developer.hashicorp.com/terraform/language/stacks/deploy/config) - GA syntax for `.tfdeploy.hcl` files (deployments, identity tokens, stores)
 - [HashiCorp - Passing data between Stacks](https://developer.hashicorp.com/terraform/language/stacks/deploy/pass-data) - upstream and downstream Stack communication
+- [Mattias Fjellström - Terraform Stacks deep dive on Azure](https://mattias.engineer/blog/2025/terraform-stacks-deep-dive-azure/) - GA `.tfcomponent.hcl` / `.tfdeploy.hcl` walkthrough with Azure OIDC
 - [HashiCorp - Terraform Stacks design patterns](https://developer.hashicorp.com/terraform/language/stacks/design) - multi-component orchestration and composition
 - [HashiCorp - Terraform Stacks explained](https://www.hashicorp.com/en/blog/terraform-stacks-explained) - use cases and architecture overview
 - [Terraform Cheatsheet](/docs/cheatsheets/terraform) - quick-reference commands and patterns

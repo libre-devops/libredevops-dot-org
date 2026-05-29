@@ -2019,10 +2019,10 @@ class AppConfig:
 
 ## Anti-patterns
 
-- **Bare `except:`** - catches `KeyboardInterrupt`, `SystemExit`, and `BaseException`. Always catch a specific type or at minimum `except Exception`.
-- **`yaml.load()` instead of `yaml.safe_load()`** - `yaml.load()` can execute arbitrary Python via tagged objects. Always use `yaml.safe_load()` unless you control 100% of the input.
-- **`shell=True` in subprocess** - expands shell metacharacters and enables injection. Build the command as a list and omit `shell=True`.
-- **`print()` for diagnostics** - bypasses log levels, handlers, and formatters; goes to stdout and mixes with real output. Use `logging.getLogger(__name__)` in modules.
-- **f-string in structured log messages** - `log.info(f"user {uid} logged in")` builds the string even when INFO is disabled. Use lazy formatting: `log.info("user %s logged in", uid)`.
-- **Mutable default arguments** - `def process(items=[])` shares the list across all calls. Use `None` as the default and create the mutable object inside the function.
-- **Importing `*` from a module** - pollutes the namespace and makes IDE analysis and refactoring unreliable. Always import names explicitly.
+- ⚠️ **Bare `except:`** - catches `KeyboardInterrupt`, `SystemExit`, and `BaseException`. Always catch a specific type or at minimum `except Exception`.
+- 🚨 **`yaml.load()` instead of `yaml.safe_load()`** - `yaml.load()` can execute arbitrary Python via tagged objects. Always use `yaml.safe_load()` unless you control 100% of the input.
+- 🚨 **`shell=True` in subprocess** - expands shell metacharacters and enables injection. Build the command as a list and omit `shell=True`.
+- ⚠️ **`print()` for diagnostics** - bypasses log levels, handlers, and formatters; goes to stdout and mixes with real output. Use `logging.getLogger(__name__)` in modules.
+- 🔬 **f-string in structured log messages** - `log.info(f"user {uid} logged in")` builds the string even when INFO is disabled. Use lazy formatting: `log.info("user %s logged in", uid)`.
+- ⚠️ **Mutable default arguments** - `def process(items=[])` shares the list across all calls. Use `None` as the default and create the mutable object inside the function.
+- 🔬 **Importing `*` from a module** - pollutes the namespace and makes IDE analysis and refactoring unreliable. Always import names explicitly.

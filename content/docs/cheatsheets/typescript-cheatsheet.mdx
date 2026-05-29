@@ -989,10 +989,10 @@ pnpm vitest run          # CI (no watch)
 
 ## Anti-patterns
 
-- **`any` type** - silently disables type checking for that value and everything downstream. Use `unknown` and narrow before use, or define the actual shape with an interface or type.
-- **Trusting unvalidated JSON from external sources** - `res.json() as User` is a compile-time assertion, not runtime validation. Parse with Zod or a type guard before treating the value as typed.
-- **`console.log` in server-side code** ⚠️ - synchronous, unstructured, and bypasses redaction. Use pino or another structured logger with levels.
-- **Untyped `fetch` responses** - wrapping `fetch` with `as SomeType` does not validate the shape at runtime. Use a typed wrapper with Zod parsing or explicit type guards.
-- **Numeric `enum`** - numeric enums produce surprising reverse-mappings at runtime (`Direction[0] === 'Up'`). Prefer `const enum` (inlined, no runtime object) or discriminated unions for domain modelling.
-- **Ignoring settled results in `Promise.allSettled`** - iterating without checking `r.status === 'fulfilled'` silently drops errors. Always handle both `fulfilled` and `rejected` cases.
-- **Barrel files with circular re-exports** - `index.ts` that re-exports everything can create circular dependency chains and slow down tree-shaking. Import from the source file directly in performance-sensitive paths.
+- ⚠️ **`any` type** - silently disables type checking for that value and everything downstream. Use `unknown` and narrow before use, or define the actual shape with an interface or type.
+- 🚨 **Trusting unvalidated JSON from external sources** - `res.json() as User` is a compile-time assertion, not runtime validation. Parse with Zod or a type guard before treating the value as typed.
+- ⚠️ **`console.log` in server-side code** - synchronous, unstructured, and bypasses redaction. Use pino or another structured logger with levels.
+- 🔬 **Untyped `fetch` responses** - wrapping `fetch` with `as SomeType` does not validate the shape at runtime. Use a typed wrapper with Zod parsing or explicit type guards.
+- 🔬 **Numeric `enum`** - numeric enums produce surprising reverse-mappings at runtime (`Direction[0] === 'Up'`). Prefer `const enum` (inlined, no runtime object) or discriminated unions for domain modelling.
+- 🔬 **Ignoring settled results in `Promise.allSettled`** - iterating without checking `r.status === 'fulfilled'` silently drops errors. Always handle both `fulfilled` and `rejected` cases.
+- 🔬 **Barrel files with circular re-exports** - `index.ts` that re-exports everything can create circular dependency chains and slow down tree-shaking. Import from the source file directly in performance-sensitive paths.

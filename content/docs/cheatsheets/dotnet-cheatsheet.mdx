@@ -1353,10 +1353,10 @@ public static class EnumerableExtensions
 
 ## Anti-patterns
 
-- **`Console.WriteLine` in service code** - bypasses the logging pipeline with no levels, no structured fields, and no redaction. Use `ILogger<T>` everywhere.
-- **`async void`** - exceptions are unobservable and crash the process; the only valid use is event handlers. Use `async Task` for everything else.
-- **Logging and rethrowing at every layer** - log once at the boundary that owns the user-facing failure (controller, worker). Inner methods throw; the boundary logs once with full context.
-- **Not propagating `CancellationToken`** - passing `default` or `CancellationToken.None` silently opts out of cancellation. Accept and forward `ct` through every async call.
-- **`IFoo` with a single `Foo` and no tests substituting it** - premature abstraction with real costs (extra file, DI registration, harder to read). Inject the concrete type; add the interface when you have a second implementation or a test fake.
-- **`ConfigureAwait(false)` in ASP.NET Core** - the synchronisation context is absent in ASP.NET Core; `ConfigureAwait(false)` is a no-op there and misleads readers. Remove it from ASP.NET Core project code; keep it in library code that may be consumed outside of ASP.NET Core.
-- **Swallowing exceptions with empty `catch {}`** - silently absorbs failures that should propagate. Always log with `logger.LogError(ex, ...)` or rethrow, never swallow.
+- ⚠️ **`Console.WriteLine` in service code** - bypasses the logging pipeline with no levels, no structured fields, and no redaction. Use `ILogger<T>` everywhere.
+- 🚨 **`async void`** - exceptions are unobservable and crash the process; the only valid use is event handlers. Use `async Task` for everything else.
+- 🔬 **Logging and rethrowing at every layer** - log once at the boundary that owns the user-facing failure (controller, worker). Inner methods throw; the boundary logs once with full context.
+- ⚠️ **Not propagating `CancellationToken`** - passing `default` or `CancellationToken.None` silently opts out of cancellation. Accept and forward `ct` through every async call.
+- 🔬 **`IFoo` with a single `Foo` and no tests substituting it** - premature abstraction with real costs (extra file, DI registration, harder to read). Inject the concrete type; add the interface when you have a second implementation or a test fake.
+- 🔬 **`ConfigureAwait(false)` in ASP.NET Core** - the synchronisation context is absent in ASP.NET Core; `ConfigureAwait(false)` is a no-op there and misleads readers. Remove it from ASP.NET Core project code; keep it in library code that may be consumed outside of ASP.NET Core.
+- 🚨 **Swallowing exceptions with empty `catch {}`** - silently absorbs failures that should propagate. Always log with `logger.LogError(ex, ...)` or rethrow, never swallow.

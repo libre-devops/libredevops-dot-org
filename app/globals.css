@@ -324,6 +324,65 @@ a {
   border-color: var(--brand-accent);
 }
 
+/* ── Scroll to top / bottom controls ───────────────────────────── */
+.scroll-nav {
+  position: fixed;
+  left: calc(1rem + env(safe-area-inset-left, 0px));
+  bottom: calc(1.5rem + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  z-index: 40;
+}
+
+.scroll-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 999px;
+  background: rgba(139, 92, 246, 0.12);
+  color: var(--brand-accent);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  backdrop-filter: blur(8px);
+  opacity: 0.55;
+  cursor: pointer;
+  transition: opacity 0.2s ease, background 0.2s ease, transform 0.2s ease;
+}
+
+.scroll-nav-btn:hover,
+.scroll-nav-btn:focus-visible {
+  opacity: 1;
+  background: rgba(139, 92, 246, 0.22);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+@media (max-width: 768px) {
+  .scroll-nav {
+    left: calc(0.75rem + env(safe-area-inset-left, 0px));
+    bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .scroll-nav-btn {
+    width: 2.25rem;
+    height: 2.25rem;
+    opacity: 0.7;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scroll-nav-btn {
+    transition: none;
+  }
+
+  .scroll-nav-btn:hover,
+  .scroll-nav-btn:focus-visible {
+    transform: none;
+  }
+}
+
 /* ── Content pages (About, Projects) ──────────────────────────── */
 .content-section {
   padding: 4rem 2rem;
@@ -647,6 +706,7 @@ a {
      on every page when sent to the print pipeline. */
   .site-header,
   .print-btn-wrapper,
+  .scroll-nav,
   .nextra-navbar,
   .nextra-sidebar-container,
   .nextra-toc,

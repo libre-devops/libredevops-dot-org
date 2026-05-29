@@ -174,9 +174,9 @@ $env:MY_VAR = "value"
 
 ## Anti-patterns
 
-- **`irm <url> | iex` without reviewing the script** - executes arbitrary code from the network at current privilege. Inspect the URL in a browser first, or download to a file and review before running.
-- **`Set-ExecutionPolicy Bypass -Scope Process` in production scripts** - silently disables PowerShell script signing controls for that session. Use a properly signed script or `RemoteSigned` at minimum.
-- **`wsl --unregister <distro>` without a backup** 🚨 - permanently and irrecoverably deletes the distro's filesystem. Export first: `wsl --export Ubuntu-22.04 ubuntu-backup.tar`.
-- **Hardcoding credentials in `.ps1` scripts** - PowerShell history and transcript logs may capture the value. Use `Get-Credential`, Azure Key Vault, or environment variables instead.
-- **`Set-ExecutionPolicy Unrestricted -Scope LocalMachine`** - disables all script execution controls machine-wide, including for other users and service accounts. Use the minimum required scope (`CurrentUser` or `Process`).
-- **Leaving temporary firewall rules behind** - rules added with `New-NetFirewallRule` for testing persist across reboots unless explicitly removed. Always pair them with a `Remove-NetFirewallRule` in a `finally` block (as in the listener example above).
+- 🚨 **`irm <url> | iex` without reviewing the script** - executes arbitrary code from the network at current privilege. Inspect the URL in a browser first, or download to a file and review before running.
+- ⚠️ **`Set-ExecutionPolicy Bypass -Scope Process` in production scripts** - silently disables PowerShell script signing controls for that session. Use a properly signed script or `RemoteSigned` at minimum.
+- 🚨 **`wsl --unregister <distro>` without a backup** - permanently and irrecoverably deletes the distro's filesystem. Export first: `wsl --export Ubuntu-22.04 ubuntu-backup.tar`.
+- 🚨 **Hardcoding credentials in `.ps1` scripts** - PowerShell history and transcript logs may capture the value. Use `Get-Credential`, Azure Key Vault, or environment variables instead.
+- ⚠️ **`Set-ExecutionPolicy Unrestricted -Scope LocalMachine`** - disables all script execution controls machine-wide, including for other users and service accounts. Use the minimum required scope (`CurrentUser` or `Process`).
+- 🔬 **Leaving temporary firewall rules behind** - rules added with `New-NetFirewallRule` for testing persist across reboots unless explicitly removed. Always pair them with a `Remove-NetFirewallRule` in a `finally` block (as in the listener example above).

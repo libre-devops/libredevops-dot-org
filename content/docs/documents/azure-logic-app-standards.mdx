@@ -1097,7 +1097,7 @@ resource "azurerm_logic_app_trigger_recurrence" "schedule_trigger" {
 **Use when:** Responding to Sentinel incident creation or updates. Automatically enriches, correlates, or escalates high-severity incidents without manual intervention.
 
 **Considerations:**
-- Requires Sentinel connection (configured separately in Azure portal or via `azurerm_logic_app_connection`)
+- Requires Sentinel connection (configured separately in Azure portal or via `azurerm_api_connection`)
 - Only available in Standard Logic Apps (Consumption requires manual trigger configuration)
 - Incident data is passed directly; no schema validation needed (Sentinel defines the structure)
 - Supports filtering by severity, product, or custom analytics rules
@@ -1107,11 +1107,17 @@ resource "azurerm_logic_app_trigger_recurrence" "schedule_trigger" {
 **Avoid:** Logic Apps that take > 1 hour per incident (design for parallel execution); blocking on external API calls without timeout; hardcoding watchlist IDs or DCE immutable IDs (use Terraform variables instead)
 
 ```hcl
-# First, ensure the Sentinel connection exists (managed separately)
-resource "azurerm_logic_app_connection" "sentinel" {
+# First, ensure the Sentinel connection exists (managed separately).
+# Look up the managed API by name instead of hand-assembling its resource ID.
+data "azurerm_managed_api" "sentinel" {
+  name     = "azuresentinel"
+  location = var.location
+}
+
+resource "azurerm_api_connection" "sentinel" {
   name                = "sentinel-${var.environment}"
   resource_group_name = azurerm_resource_group.this.name
-  managed_api_id      = "/subscriptions/${data.azurerm_client_config.current.subscription_id}/providers/Microsoft.Web/locations/${var.location}/managedApis/azuresentinel"
+  managed_api_id      = data.azurerm_managed_api.sentinel.id
 }
 
 # Sentinel trigger definition
@@ -1123,7 +1129,7 @@ resource "azurerm_logic_app_trigger_custom" "sentinel_incident" {
     inputs = {
       host = {
         connection = {
-          name = azurerm_logic_app_connection.sentinel.id
+          name = azurerm_api_connection.sentinel.id
         }
       }
       path = "/incident"
@@ -1168,10 +1174,15 @@ resource "azurerm_logic_app_action_custom" "enrich_incident" {
 
 ```hcl
 # Service Bus connection
-resource "azurerm_logic_app_connection" "service_bus" {
+data "azurerm_managed_api" "service_bus" {
+  name     = "servicebus"
+  location = var.location
+}
+
+resource "azurerm_api_connection" "service_bus" {
   name                = "servicebus-${var.environment}"
   resource_group_name = azurerm_resource_group.this.name
-  managed_api_id      = "/subscriptions/${data.azurerm_client_config.current.subscription_id}/providers/Microsoft.Web/locations/${var.location}/managedApis/servicebus"
+  managed_api_id      = data.azurerm_managed_api.service_bus.id
 }
 
 # Queue trigger - references queue name from Terraform variable
@@ -1183,7 +1194,7 @@ resource "azurerm_logic_app_trigger_custom" "service_bus_trigger" {
     inputs = {
       host = {
         connection = {
-          name = azurerm_logic_app_connection.service_bus.id
+          name = azurerm_api_connection.service_bus.id
         }
       }
       method = "GET"
@@ -1212,10 +1223,15 @@ resource "azurerm_logic_app_trigger_custom" "service_bus_trigger" {
 
 ```hcl
 # Event Grid connection
-resource "azurerm_logic_app_connection" "event_grid" {
+data "azurerm_managed_api" "event_grid" {
+  name     = "azureeventgrid"
+  location = var.location
+}
+
+resource "azurerm_api_connection" "event_grid" {
   name                = "eventgrid-${var.environment}"
   resource_group_name = azurerm_resource_group.this.name
-  managed_api_id      = "/subscriptions/${data.azurerm_client_config.current.subscription_id}/providers/Microsoft.Web/locations/${var.location}/managedApis/azureeventgrid"
+  managed_api_id      = data.azurerm_managed_api.event_grid.id
 }
 
 # Event Grid trigger - blob storage events
@@ -1227,7 +1243,7 @@ resource "azurerm_logic_app_trigger_custom" "event_grid_trigger" {
     inputs = {
       host = {
         connection = {
-          name = azurerm_logic_app_connection.event_grid.id
+          name = azurerm_api_connection.event_grid.id
         }
       }
       # Reference storage account from Terraform - do not hardcode
@@ -1273,7 +1289,7 @@ resource "azurerm_logic_app_trigger_custom" "event_grid_trigger" {
 2. **Sentinel triggers in Standard Logic Apps** - Allows direct Sentinel role assignment and private resource access
 3. **Recurrence triggers - always use UTC** - Avoid timezone confusion; use `time_zone = "UTC"` with fixed `start_time` (ISO 8601 format)
 4. **HTTP triggers - require schema** - Document expected body structure; clients must validate against schema
-5. **Custom triggers - use connection references** - Never hardcode credentials; reference `azurerm_logic_app_connection` resources
+5. **Custom triggers - use connection references** - Never hardcode credentials; reference `azurerm_api_connection` resources
 6. **Polling intervals** - Service Bus (30s), Event Grid (push), Recurrence (configurable)
 
 **Example: Complete trigger + action dependency chain:**
@@ -1354,12 +1370,12 @@ Workflow actions are defined as separate Terraform resources using `azurerm_logi
    path = "/queue/@{encodeURIComponent('${var.incident_queue_name}')}/messages"
    ```
 
-4. **Connection references** - Always reference `azurerm_logic_app_connection` resources, never hardcode connection IDs:
+4. **Connection references** - Always reference `azurerm_api_connection` resources, never hardcode connection IDs:
 
    ```hcl
    host = {
      connection = {
-       name = azurerm_logic_app_connection.sentinel.id
+       name = azurerm_api_connection.sentinel.id
      }
    }
    ```
@@ -1446,7 +1462,7 @@ resource "azurerm_logic_app_action_http" "webhook_call" {
 **Use when:** Using Jira, Teams, Service Bus, Log Analytics, or other managed connectors. Avoid reimplementing connector logic with HTTP.
 
 **Considerations:**
-- Connector must be pre-registered as `azurerm_logic_app_connection`
+- Connector must be pre-registered as `azurerm_api_connection`
 - Each connector has specific operation IDs (e.g., `CreateIssue`, `SendMessage`, `QueryLogs`)
 - Retry: Managed by connector (usually 2 attempts); HTTP actions retry separately
 - Output: Connector action output is available to subsequent actions
@@ -1455,10 +1471,15 @@ resource "azurerm_logic_app_action_http" "webhook_call" {
 
 ```hcl
 # First, register the connector (manages authentication)
-resource "azurerm_logic_app_connection" "jira" {
+data "azurerm_managed_api" "jira" {
+  name     = "jira"
+  location = var.location
+}
+
+resource "azurerm_api_connection" "jira" {
   name                = "jira-${var.environment}"
   resource_group_name = azurerm_resource_group.this.name
-  managed_api_id      = "/subscriptions/${data.azurerm_client_config.current.subscription_id}/providers/Microsoft.Web/locations/${var.location}/managedApis/jira"
+  managed_api_id      = data.azurerm_managed_api.jira.id
 }
 
 # Then use in custom action - reference connector and store project key as variable
@@ -1475,7 +1496,7 @@ resource "azurerm_logic_app_action_custom" "create_jira_ticket" {
     inputs = {
       host = {
         connection = {
-          name = azurerm_logic_app_connection.jira.id
+          name = azurerm_api_connection.jira.id
         }
       }
       method   = "post"
@@ -1543,7 +1564,7 @@ resource "azurerm_logic_app_action_scope" "scope_enrichment" {
       type = "ApiConnection"
       inputs = {
         host = {
-          connection = { name = azurerm_logic_app_connection.sentinel.id }
+          connection = { name = azurerm_api_connection.sentinel.id }
         }
         method = "patch"
         path   = "/incidents/@{variables('incident_id')}"
@@ -1571,7 +1592,7 @@ resource "azurerm_logic_app_action_scope" "scope_error_handler" {
       type = "ApiConnection"
       inputs = {
         host = {
-          connection = { name = azurerm_logic_app_connection.log_analytics.id }
+          connection = { name = azurerm_api_connection.log_analytics.id }
         }
         method = "post"
         # Reference DCE immutable ID from Terraform - not hardcoded
@@ -1590,7 +1611,7 @@ resource "azurerm_logic_app_action_scope" "scope_error_handler" {
       type = "ApiConnection"
       inputs = {
         host = {
-          connection = { name = azurerm_logic_app_connection.teams.id }
+          connection = { name = azurerm_api_connection.teams.id }
         }
         method = "post"
         path   = "/webhooks"

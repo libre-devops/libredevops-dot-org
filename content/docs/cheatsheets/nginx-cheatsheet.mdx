@@ -1,157 +1,344 @@
 ---
 title: Nginx Cheatsheet
-description: Nginx reverse proxy configurations for HTTPS termination, WebSocket proxying, and service-specific headers. Assumes nginx 1.24+.
+description: Production Nginx reference - config layout, TLS hardening, reverse proxy and WebSockets, upstreams and load balancing, security headers, rate limiting, caching, logging, performance tuning, and anti-patterns. Assumes nginx 1.26+ / OpenSSL 3.x.
 ---
 
 # Nginx Cheat Sheet
 
-Production-ready Nginx configurations for running as a reverse proxy in front of containerised or locally-running services.
+Production Nginx reference for platform and DevOps engineers running Nginx as a reverse proxy and TLS terminator in front of containerised or locally-running services. Covers config layout, hardened TLS, proxying and WebSockets, upstreams, security headers, rate limiting, caching, structured logging, and performance tuning.
 
-You can format and validate your Nginx config at [nginxbeautifier.github.io](https://nginxbeautifier.github.io/).
-
-> **Versions:** nginx 1.24+ · OpenSSL 3.x
+> **Versions:** nginx 1.26+ (stable) / OpenSSL 3.x. The `http2 on;` directive requires nginx 1.25.1+ (older builds use `listen 443 ssl http2;`). For the containers these configs proxy see [Containers](/docs/cheatsheets/containers-cheatsheet); for TLS certificate inspection and cipher testing see [Security](/docs/cheatsheets/security-cheatsheet).
 
 ---
 
-## HTTPS Reverse Proxy with Podman endpoints 🏠 Personal homelab config
+## Config Layout & Commands
 
-Nginx running on the host terminates TLS and forwards to services running in Podman containers on localhost. Each service gets its own `server` block - replace the certificate paths and domain names to match your setup.
-
-```nginx
-events
-{
-    worker_connections 4096;
-}
-
-http
-{
-    upstream gitea
-    {
-        server 127.0.0.1:3000 fail_timeout=0;
-    }
-
-    upstream jenkins
-    {
-        server 127.0.0.1:8080 fail_timeout=0;
-    }
-
-    upstream nexus
-    {
-        server 127.0.0.1:8081 fail_timeout=0;
-    }
-
-    server
-    {
-        listen 443 ssl;
-        server_name gitea.libredevops.org;
-
-        ssl_certificate     /etc/nginx/ssl/fullchain.cer;
-        ssl_certificate_key /etc/nginx/ssl/wildcard.libredevops.org.key;
-
-        location /
-        {
-            proxy_pass              http://gitea;
-            proxy_http_version      1.1;
-            proxy_set_header        Host                $host;
-            proxy_set_header        X-Real-IP           $remote_addr;
-            proxy_set_header        X-Forwarded-For     $proxy_add_x_forwarded_for;
-            proxy_set_header        X-Forwarded-Proto   $scheme;
-            proxy_set_header        Upgrade             $http_upgrade;
-            proxy_set_header        Connection          "upgrade";
-            proxy_redirect          http:// https://;
-        }
-    }
-
-    server
-    {
-        listen 443 ssl;
-        server_name jenkins.libredevops.org;
-
-        ssl_certificate     /etc/nginx/ssl/fullchain.cer;
-        ssl_certificate_key /etc/nginx/ssl/wildcard.libredevops.org.key;
-
-        location /
-        {
-            proxy_pass              http://jenkins;
-            proxy_http_version      1.1;
-            proxy_set_header        Host                $host;
-            proxy_set_header        X-Real-IP           $remote_addr;
-            proxy_set_header        X-Forwarded-For     $proxy_add_x_forwarded_for;
-            proxy_set_header        X-Forwarded-Proto   $scheme;
-            proxy_set_header        Upgrade             $http_upgrade;
-            proxy_set_header        Connection          "upgrade";
-            proxy_redirect          http:// https://;
-
-            # Required for the Jenkins CLI over SSL
-            proxy_buffering         off;
-            proxy_request_buffering off;
-
-            # Workaround for JENKINS-45651
-            add_header 'X-SSH-Endpoint' 'jenkins.libredevops.org:50022' always;
-        }
-    }
-
-    server
-    {
-        listen 443 ssl;
-        server_name nexus.libredevops.org;
-
-        ssl_certificate     /etc/nginx/ssl/fullchain.cer;
-        ssl_certificate_key /etc/nginx/ssl/wildcard.libredevops.org.key;
-
-        location /
-        {
-            proxy_pass              http://nexus;
-            proxy_http_version      1.1;
-            proxy_set_header        Host                $host;
-            proxy_set_header        X-Real-IP           $remote_addr;
-            proxy_set_header        X-Forwarded-For     $proxy_add_x_forwarded_for;
-            proxy_set_header        X-Forwarded-Proto   $scheme;
-            proxy_set_header        Upgrade             $http_upgrade;
-            proxy_set_header        Connection          "upgrade";
-            proxy_redirect          http:// https://;
-        }
-    }
-}
+```text
+/etc/nginx/nginx.conf            # main: events{} + http{} + includes
+/etc/nginx/conf.d/*.conf         # http-level configs (RHEL/Fedora default)
+/etc/nginx/sites-available/      # vhosts (Debian/Ubuntu convention)
+/etc/nginx/sites-enabled/        # symlinks to active vhosts
+/etc/nginx/snippets/             # reusable include fragments (tls, headers)
 ```
-
-> **See also:** [Containers](/docs/cheatsheets/containers-cheatsheet) for the Podman/Docker endpoints these configs proxy. [Security](/docs/cheatsheets/security-cheatsheet) for openssl TLS certificate inspection and cipher testing.
-
----
-
-## HTTP redirect to HTTPS ✅ Required - always redirect plaintext HTTP to HTTPS
-
-Force all HTTP traffic to HTTPS with a 301 redirect. Add this server block alongside your SSL blocks.
-
-```nginx
-server
-{
-    listen 80;
-    server_name _;
-    return 301 https://$host$request_uri;
-}
-```
-
----
-
-## Useful Nginx commands
 
 ```bash
-nginx -t                    # test configuration syntax
-nginx -s reload             # reload without downtime
-nginx -s stop               # fast shutdown
-systemctl status nginx      # service status
-tail -f /var/log/nginx/access.log   # stream access log
-tail -f /var/log/nginx/error.log    # stream error log
+nginx -t                         # validate config syntax (ALWAYS before reload)
+nginx -T                         # validate + dump the full effective config
+nginx -V                         # build flags + compiled-in modules
+nginx -s reload                  # graceful reload (or: systemctl reload nginx)
+systemctl reload nginx           # preferred on systemd hosts
 ```
+
+> ✅ Always run `nginx -t` before `reload`. A reload of a broken config is rejected and the old workers keep serving, but a *restart* with a broken config leaves you down. Treat `nginx -t` as a mandatory pre-flight in deploy scripts.
+
+---
+
+## Reverse Proxy (the core pattern)
+
+A hardened vhost terminating TLS and proxying to an upstream, with correct forwarded headers, WebSocket support, and explicit timeouts. The `include` snippets are defined in the sections below.
+
+```nginx
+upstream app {
+    server 127.0.0.1:3000 max_fails=3 fail_timeout=10s;
+    keepalive 32;                       # reuse upstream connections
+}
+
+server {
+    listen 443 ssl;
+    http2 on;                           # nginx 1.25.1+
+    server_name app.example.com;
+
+    ssl_certificate     /etc/nginx/ssl/app.example.com/fullchain.pem;
+    ssl_certificate_key /etc/nginx/ssl/app.example.com/privkey.pem;
+    include snippets/tls.conf;
+    include snippets/security-headers.conf;
+
+    location / {
+        proxy_pass http://app;
+        proxy_http_version 1.1;         # required for keepalive + WebSockets
+
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade           $http_upgrade;
+        proxy_set_header Connection        $connection_upgrade;   # see WebSockets
+
+        proxy_connect_timeout 5s;
+        proxy_send_timeout    60s;
+        proxy_read_timeout    60s;
+    }
+}
+```
+
+> ⚠️ Mind the `proxy_pass` trailing slash. `proxy_pass http://app;` (no path) preserves the request URI; `proxy_pass http://app/;` (with `/`) strips the matched `location` prefix. Mismatched slashes are the most common "404 behind the proxy" cause.
+
+---
+
+## HTTP to HTTPS Redirect
+
+```nginx
+server {
+    listen 80;
+    listen [::]:80;
+    server_name app.example.com;
+    return 301 https://$host$request_uri;   # 'return' is cheaper and clearer than 'rewrite'
+}
+```
+
+> ✅ Use `return 301` for redirects, not `rewrite`. `return` is unambiguous and avoids the regex engine; reserve `rewrite` for genuine URL transformations.
+
+---
+
+## TLS Hardening
+
+Keep TLS settings in one snippet and `include` it from every SSL server block - one place to update when recommendations change.
+
+```nginx
+# /etc/nginx/snippets/tls.conf
+ssl_protocols       TLSv1.2 TLSv1.3;          # never TLSv1 / TLSv1.1
+ssl_prefer_server_ciphers off;                # let TLS1.3 clients choose
+ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
+
+ssl_session_cache   shared:SSL:10m;
+ssl_session_timeout 1d;
+ssl_session_tickets off;
+
+ssl_stapling        on;                        # OCSP stapling
+ssl_stapling_verify on;
+
+# HSTS - only add once you are certain HTTPS is permanent for this host + subdomains
+add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
+```
+
+> ⚠️ HSTS with `includeSubDomains`/`preload` is sticky - browsers refuse plaintext for `max-age` even if you roll back. Ship it only when every subdomain is HTTPS-only, and start with a short `max-age` before raising it.
+
+---
+
+## Security Headers
+
+```nginx
+# /etc/nginx/snippets/security-headers.conf
+add_header X-Frame-Options        "SAMEORIGIN"                       always;
+add_header X-Content-Type-Options "nosniff"                         always;
+add_header Referrer-Policy        "strict-origin-when-cross-origin" always;
+add_header Content-Security-Policy "default-src 'self'"             always;  # tune per app
+server_tokens off;                                                            # hide version
+```
+
+> 🚨 `add_header` does **not** merge across levels. If you add even one `add_header` inside a `location`, **all** `add_header` directives inherited from the `server`/`http` level are dropped for that location. Re-`include` the headers snippet in any location that adds its own headers, and use `always` so headers apply to error responses too.
+
+---
+
+## Upstreams & Load Balancing
+
+```nginx
+upstream api {
+    least_conn;                         # default is round-robin; also: ip_hash, random
+    server 10.0.0.11:8080 weight=3 max_fails=3 fail_timeout=10s;
+    server 10.0.0.12:8080            max_fails=3 fail_timeout=10s;
+    server 10.0.0.13:8080 backup;       # only used when others are down
+    keepalive 32;                       # connection pool (needs proxy_http_version 1.1)
+}
+```
+
+| Method | Directive | Use when |
+|:--|:--|:--|
+| Round-robin | (default) | Stateless backends, even capacity |
+| Least connections | `least_conn;` | Uneven/long-lived request durations |
+| IP hash | `ip_hash;` | Sticky sessions without shared session store |
+| Weighted | `weight=N` | Backends with different capacity |
+
+> 🔬 Open-source Nginx only does **passive** health checks (`max_fails` / `fail_timeout` mark a peer down after failed real requests). Active health checks (`health_check`) are an Nginx Plus feature - on OSS, lean on `max_fails` plus application-level readiness.
+
+---
+
+## WebSockets & Streaming
+
+```nginx
+# http context - maps the Upgrade header so non-WS requests don't get "Connection: upgrade"
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+```
+
+```nginx
+location /ws/ {
+    proxy_pass http://app;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade    $http_upgrade;
+    proxy_set_header Connection $connection_upgrade;
+
+    proxy_buffering off;                # stream SSE/WebSocket frames immediately
+    proxy_read_timeout 3600s;           # long-lived connections
+}
+```
+
+> ✅ Use the `map $http_upgrade $connection_upgrade` pattern rather than hardcoding `Connection "upgrade"`. Hardcoding sends `upgrade` on every request, including plain HTTP, which some upstreams reject.
+
+---
+
+## Static Files & Caching
+
+```nginx
+location /static/ {
+    root /srv/app;                      # serves /srv/app/static/...
+    expires 30d;
+    add_header Cache-Control "public, immutable";
+    access_log off;                     # don't log asset noise
+    try_files $uri =404;
+}
+
+location / {
+    try_files $uri $uri/ /index.html;   # SPA fallback to index
+}
+```
+
+```nginx
+# http context - compression
+gzip on;
+gzip_vary on;
+gzip_comp_level 5;
+gzip_min_length 256;
+gzip_types text/plain text/css application/json application/javascript application/xml image/svg+xml;
+```
+
+> 🔬 `root` vs `alias`: `root /srv/app;` in `location /static/` maps to `/srv/app/static/...` (the location is appended); `alias /srv/app/assets/;` *replaces* the matched prefix. Mixing them up serves the wrong path or 404s.
+
+---
+
+## Rate & Connection Limiting
+
+```nginx
+# http context - define shared-memory zones keyed on client IP
+limit_req_zone  $binary_remote_addr zone=req:10m  rate=10r/s;
+limit_conn_zone $binary_remote_addr zone=conn:10m;
+
+server {
+    # apply where needed (login endpoints, APIs)
+    location /api/ {
+        limit_req  zone=req burst=20 nodelay;   # allow short bursts, reject beyond
+        limit_conn conn 20;
+        limit_req_status 429;
+        proxy_pass http://api;
+    }
+}
+```
+
+> ⚠️ Behind a load balancer or CDN, `$binary_remote_addr` is the proxy's IP, so rate limits apply to all clients collectively. Use `$http_x_forwarded_for` (validated via `set_real_ip_from` / `real_ip_header`) so limits key on the true client.
+
+---
+
+## Logging
+
+```nginx
+# http context - structured JSON access log (easy to ship to Loki/ELK/Sentinel)
+log_format json escape=json
+  '{"time":"$time_iso8601","remote_addr":"$remote_addr",'
+  '"method":"$request_method","uri":"$request_uri","status":$status,'
+  '"bytes":$body_bytes_sent,"req_time":$request_time,'
+  '"upstream_time":"$upstream_response_time","host":"$host",'
+  '"xff":"$http_x_forwarded_for","ua":"$http_user_agent"}';
+
+access_log /var/log/nginx/access.log json;
+error_log  /var/log/nginx/error.log  warn;
+```
+
+```bash
+tail -F /var/log/nginx/access.log    # -F survives logrotate
+tail -F /var/log/nginx/error.log
+```
+
+> ✅ Log `$upstream_response_time` alongside `$request_time`. The gap between them tells you whether latency is in your backend or in Nginx/network, which is the first question in any "the site is slow" incident.
+
+---
+
+## Performance Tuning
+
+```nginx
+# nginx.conf - main + events + http
+worker_processes      auto;             # one per CPU core
+worker_rlimit_nofile  65535;            # raise FD limit (also raise the systemd LimitNOFILE)
+
+events {
+    worker_connections 4096;
+    multi_accept       on;
+}
+
+http {
+    sendfile        on;
+    tcp_nopush      on;
+    tcp_nodelay     on;
+    keepalive_timeout 65;
+    types_hash_max_size 4096;
+    server_tokens   off;
+    client_max_body_size 25m;           # default is 1m - raise for uploads or get 413s
+
+    open_file_cache max=10000 inactive=60s;   # cache file metadata for static serving
+    open_file_cache_valid 60s;
+}
+```
+
+> 🔬 `worker_connections` is per worker, so max simultaneous clients is roughly `worker_processes * worker_connections`, halved for proxying (each client uses one connection to Nginx and one to the upstream). Raising it without also raising `worker_rlimit_nofile` and the OS file-descriptor limit just produces "too many open files" errors.
+
+---
+
+## Health & Status
+
+```nginx
+location = /nginx_status {
+    stub_status;                        # active connections, requests, accepts
+    allow 127.0.0.1;
+    allow 10.0.0.0/8;                   # monitoring subnet
+    deny  all;
+}
+```
+
+---
+
+## Location Matching Priority
+
+Nginx does not pick the first match - it picks by modifier precedence:
+
+| Modifier | Example | Precedence |
+|:--|:--|:--|
+| `=` | `location = /healthz` | Exact match, checked first (fastest) |
+| `^~` | `location ^~ /static/` | Prefix match, stops regex search if it wins |
+| `~` / `~*` | `location ~* \.(jpg|css)$` | Regex (case-sensitive / insensitive), in file order |
+| (none) | `location /api/` | Plain prefix, lowest precedence |
+
+> 🔬 Among regex locations the **first match in file order** wins, but a longer plain-prefix match is remembered and used only if no regex matches. Order your regex locations deliberately.
 
 ---
 
 ## Anti-patterns
 
-- **No HTTP→HTTPS redirect** - without a port 80 block returning 301, browsers and crawlers will be served plaintext. Always add the redirect block.
-- **`ssl_protocols` including `TLSv1` or `TLSv1.1`** - deprecated protocols with known weaknesses (BEAST, POODLE). Use only `ssl_protocols TLSv1.2 TLSv1.3;`.
-- **No `proxy_read_timeout` / `proxy_send_timeout`** - without these, a hung upstream holds a worker connection open indefinitely and exhausts the connection pool under load. Set explicit timeouts.
-- **No security response headers** - missing `X-Frame-Options`, `X-Content-Type-Options`, and `Content-Security-Policy` exposes the app to clickjacking and MIME-sniffing attacks without any browser-level mitigation.
-- **Wildcard `server_name _` on an SSL vhost** - SSL requires SNI matching; a catchall HTTPS block will serve the wrong certificate for unrecognised hostnames. Use explicit `server_name` values for every TLS block.
-- **Buffering enabled for streaming responses** - when proxying SSE, WebSocket upgrades, or chunked transfer responses, `proxy_buffering on` (the default) delays delivery. Set `proxy_buffering off` for those locations.
+- 🚨 **`ssl_protocols` including `TLSv1` or `TLSv1.1`** - deprecated protocols with known weaknesses (BEAST, POODLE). Use only `ssl_protocols TLSv1.2 TLSv1.3;`.
+
+- 🚨 **`add_header` inside a `location` without re-including inherited headers** - any `add_header` in a block silently drops all `add_header` directives from parent levels, so your security headers vanish on that route. Re-`include` the headers snippet and use `always`.
+
+- ⚠️ **No HTTP to HTTPS redirect** - without a port 80 block returning 301, browsers and crawlers are served plaintext. Always add the redirect server block.
+
+- ⚠️ **No `proxy_*_timeout` set** - a hung upstream holds a worker connection open indefinitely and exhausts the pool under load. Set explicit `proxy_connect_timeout`, `proxy_send_timeout`, and `proxy_read_timeout`.
+
+- ⚠️ **No security response headers** - missing `X-Frame-Options`, `X-Content-Type-Options`, and `Content-Security-Policy` leaves the app open to clickjacking and MIME-sniffing with no browser-level mitigation.
+
+- ⚠️ **Leaving `client_max_body_size` at the 1m default** - uploads larger than 1 MB fail with a confusing `413 Request Entity Too Large`. Raise it on routes that accept uploads.
+
+- ⚠️ **`server_tokens on` (the default)** - it advertises the exact Nginx version in responses and error pages, helping attackers target known CVEs. Set `server_tokens off;`.
+
+- 🔬 **Wildcard `server_name _` on a TLS vhost** - TLS needs SNI matching; a catch-all HTTPS block serves the wrong certificate for unrecognised hostnames. Use explicit `server_name` values on every TLS block.
+
+- 🔬 **`proxy_buffering on` (default) for SSE/WebSocket/streaming** - it delays delivery by buffering the response. Set `proxy_buffering off;` on streaming locations.
+
+- 🔬 **`if` inside `location` for anything but `return`/`rewrite`** - Nginx's `if` has surprising scoping ("if is evil"); complex logic inside it misbehaves. Prefer `try_files`, `map`, or separate `location` blocks.
+
+---
+
+## References
+
+- [Nginx documentation](https://nginx.org/en/docs/) - directive reference by module
+- [Mozilla SSL Configuration Generator](https://ssl-config.mozilla.org/) - current TLS settings for your Nginx + OpenSSL versions
+- [Nginx admin guide](https://docs.nginx.com/nginx/admin-guide/) - reverse proxy, load balancing, security
+- [Pitfalls and common mistakes](https://www.nginx.com/resources/wiki/start/topics/tutorials/config_pitfalls/) - the canonical "if is evil" / root vs alias guidance

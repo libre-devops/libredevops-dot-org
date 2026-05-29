@@ -1,305 +1,595 @@
 ---
 title: Linux Cheatsheet
-description: Ubuntu, Fedora/RHEL, and WSL2 setup scripts - package managers, developer tools, CA certificates, and environment configuration. Targets Ubuntu 22.04+ / Fedora 38+.
+description: Production Linux reference for platform and DevOps engineers - permissions, users, processes, systemd, journald, packages, networking, firewalls, SSH, storage, performance, security hardening, plus workstation setup. Targets Ubuntu 22.04+ / Fedora 38+ / RHEL 9+.
 ---
 
 # Linux Cheat Sheet
 
-Setup scripts and one-liners for Ubuntu, Fedora/RHEL, and WSL2 environments.
+Production Linux reference for platform, DevOps, and SRE engineers. Covers day-to-day operations and incident work: permissions, users and sudo, processes, systemd and journald, packages, networking, firewalls, SSH, storage, performance triage, and security hardening - plus a condensed workstation/WSL2 setup section at the end.
 
-> **Versions:** Ubuntu 22.04+ · Fedora 38+ / RHEL 9+ · WSL2
-
----
-
-## Homebrew
-
-### Install Homebrew on Linux 🏠 Personal setup helper
-
-```bash
-#!/usr/bin/env bash
-echo -en "\n" | /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" && \
-    echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' >> ~/.bashrc && \
-    eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)" && \
-    source ~/.bashrc && \
-    brew install gcc
-```
+> **Versions:** Ubuntu 22.04+ / Debian 12+ (apt, `systemd`) and Fedora 38+ / RHEL 9+ (dnf, `firewalld`, SELinux). Networking examples use `iproute2` (`ip`, `ss`), not the deprecated `net-tools` (`ifconfig`, `netstat`). For shell scripting idioms (strict mode, traps, arg parsing) see the [Bash cheatsheet](/docs/cheatsheets/bash-cheatsheet); for Docker/Podman see [Containers](/docs/cheatsheets/containers-cheatsheet).
 
 ---
 
-## Ubuntu
-
-### Install Podman
+## System & Distro Info
 
 ```bash
-#!/usr/bin/env bash
-sudo apt-get update -qq
-sudo apt-get -qq -y install podman
+uname -a                       # kernel, arch, hostname
+cat /etc/os-release            # distro id/version (scriptable: $ID, $VERSION_ID)
+hostnamectl                    # hostname, OS, kernel, virtualization
+uptime                         # load averages + how long up
+who -b ; last -x | head        # last boot; login/reboot history
+lscpu ; nproc                  # CPU topology; logical core count
+free -h                        # memory + swap
+timedatectl                    # time, timezone, NTP sync status
 ```
 
-### Install PowerShell Core
+> ✅ Branch scripts on `/etc/os-release` (`. /etc/os-release; echo "$ID"`), not on the presence of `apt`/`dnf` - it's the stable, machine-readable source of truth.
+
+---
+
+## Files, Directories & Permissions
+
+### Inspect
 
 ```bash
-#!/usr/bin/env bash
-sudo apt-get update && sudo apt-get install -y wget apt-transport-https software-properties-common
-wget -q "https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/packages-microsoft-prod.deb"
-sudo dpkg -i packages-microsoft-prod.deb
-sudo apt-get update && sudo apt-get install -y powershell
-pwsh -Command "Set-PSRepository -Name 'PSGallery' -InstallationPolicy Trusted"
-sudo pwsh -Command Install-Module -Name Az -Force -AllowClobber -Scope AllUsers -Repository PSGallery
+ls -lah                        # long, human sizes, hidden
+stat file                      # perms, owner, timestamps, inode
+file binary                    # detect type
+find /var/log -type f -name '*.log' -mtime -1     # modified in last 24h
+find . -type f -size +100M -exec ls -lh {} \;     # large files
+du -sh ./*  | sort -h          # dir sizes, sorted
 ```
 
-### Update CA certificates
+### Permissions (numeric + symbolic)
 
 ```bash
-#!/usr/bin/env bash
-sudo cp *.crt /usr/local/share/ca-certificates/
-sudo cp *.crt /etc/ssl/certs
-mkdir -p ~/.local/share/ca-certificates/ && cp *.crt ~/.local/share/ca-certificates/
-sudo update-ca-certificates
+chmod 640 file                 # rw- r-- ---   (owner rw, group r)
+chmod u+x,g-w file             # symbolic
+chmod -R o-rwx dir             # strip "other" recursively
+chown user:group file          # change owner + group
+chown -R app: /srv/app         # group defaults to user's primary
+umask 027                      # new files 640, dirs 750 (set in shell profile)
 ```
 
-### Configure Python pip to use a custom CA bundle
+| Octal | Symbolic | Means |
+|:--|:--|:--|
+| 644 | `rw-r--r--` | files: owner writes, others read |
+| 755 | `rwxr-xr-x` | dirs/binaries: owner full, others traverse/run |
+| 640 | `rw-r-----` | secrets readable by owner + group only |
+| 600 | `rw-------` | private (SSH keys, tokens) |
+
+### Special bits & ACLs
 
 ```bash
-pip config set global.cert ca.crt
-echo 'export REQUESTS_CA_BUNDLE="ca.crt"' >> ~/.bashrc
+chmod u+s /usr/bin/foo         # setuid (runs as file owner)  - audit these
+chmod g+s /srv/shared          # setgid on dir: new files inherit group
+chmod +t /tmp                  # sticky bit: only owner can delete their files
+find / -perm -4000 -type f 2>/dev/null   # audit all setuid binaries
+
+# POSIX ACLs (finer-grained than owner/group/other)
+setfacl -m u:deploy:rx /srv/app
+getfacl /srv/app
 ```
 
-### Install GitHub CLI
+> ⚠️ `chmod 777` is almost never correct. It makes a path world-writable - any user or compromised process can replace its contents. Grant the narrowest owner/group + ACL that works.
+
+---
+
+## Users, Groups & sudo
 
 ```bash
-#!/usr/bin/env bash
-type -p curl >/dev/null || sudo apt install curl -y
+id alice ; groups alice                # uid/gid/groups
+sudo useradd -m -s /bin/bash -G sudo alice    # create with home + shell + group
+sudo usermod -aG docker alice          # add to a group (-a is mandatory, else replaces!)
+sudo passwd alice                      # set/reset password
+sudo chage -l alice                    # password aging info
+sudo userdel -r alice                  # delete + home
+
+getent passwd alice                    # resolves local + LDAP/SSSD
+sudo deluser alice docker              # remove from a group (Debian)
+```
+
+### sudo, done safely
+
+```bash
+sudo visudo                            # edit /etc/sudoers (validates before save)
+sudo visudo -f /etc/sudoers.d/deploy   # prefer drop-in files over editing the main file
+```
+
+```text
+# /etc/sudoers.d/deploy  - least privilege, not blanket ALL
+deploy  ALL=(root) NOPASSWD: /usr/bin/systemctl restart myapp, /usr/bin/journalctl -u myapp
+```
+
+> ⚠️ `usermod -G` **without** `-a` replaces all of a user's supplementary groups. Always use `usermod -aG`.
+> ✅ Scope sudo to specific commands in `/etc/sudoers.d/*` rather than granting `ALL`. Validate with `visudo` so a syntax error can't lock you out of root.
+
+---
+
+## Processes & Signals
+
+```bash
+ps aux --sort=-%mem | head             # top memory consumers
+ps -eo pid,ppid,user,%cpu,%mem,etime,cmd --sort=-%cpu | head
+pgrep -af nginx                        # PIDs + full cmdline by name
+pstree -ap | less                      # process tree with PIDs
+top    # or:  htop                     # interactive; htop is friendlier
+```
+
+### Signals & control
+
+```bash
+kill -TERM <pid>     # 15: polite stop (default); let it clean up
+kill -HUP  <pid>     # 1: reload config (many daemons)
+kill -KILL <pid>     # 9: last resort, no cleanup
+pkill -f 'python app.py'               # by cmdline pattern
+kill -0 <pid>        # test existence without signalling
+
+nice -n 10 ./batch.sh                  # start low-priority
+renice -n 5 -p <pid>                   # adjust running priority
+nohup ./long.sh >out.log 2>&1 &        # survive logout (prefer a systemd unit)
+```
+
+> ✅ Reach for `SIGTERM` (the default) and give the process time to shut down cleanly; only escalate to `SIGKILL` (`-9`) when it's truly stuck. `-9` can't be trapped, so buffers and locks may be left dirty.
+
+---
+
+## systemd: Services, Units & Timers
+
+```bash
+systemctl status myapp                 # state, recent logs, main PID
+systemctl start|stop|restart myapp
+systemctl reload myapp                 # reload config without restart (if supported)
+systemctl enable --now myapp           # start now + on boot
+systemctl disable --now myapp
+systemctl mask myapp                   # forcibly prevent start (stronger than disable)
+
+systemctl list-units --type=service --state=running
+systemctl list-unit-files --state=enabled
+systemctl is-active myapp ; systemctl is-enabled myapp
+systemctl daemon-reload                # after editing unit files
+systemd-analyze blame                  # slowest units at boot
+```
+
+### A minimal service unit
+
+```ini
+# /etc/systemd/system/myapp.service
+[Unit]
+Description=My App
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=app
+ExecStart=/srv/app/bin/myapp --config /etc/myapp/config.yaml
+Restart=on-failure
+RestartSec=5
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/myapp
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl edit myapp              # creates a drop-in override (preferred over editing the unit)
+sudo systemctl daemon-reload && sudo systemctl restart myapp
+```
+
+### Timers (the modern cron)
+
+```ini
+# /etc/systemd/system/backup.timer
+[Timer]
+OnCalendar=*-*-* 02:00:00
+Persistent=true                        # run on boot if a scheduled run was missed
+[Install]
+WantedBy=timers.target
+```
+
+```bash
+systemctl enable --now backup.timer
+systemctl list-timers --all
+```
+
+> ✅ Prefer a systemd service over `nohup ... &`, and a systemd timer over a crontab for anything important - you get logging, restart policy, dependency ordering, sandboxing, and `Persistent=true` catch-up.
+
+---
+
+## Logs & journald
+
+```bash
+journalctl -u myapp -f                  # follow a unit (like tail -f)
+journalctl -u myapp --since "1 hour ago" --no-pager
+journalctl -u myapp -p err -b           # priority err+ for current boot
+journalctl -b -1                        # previous boot
+journalctl -k                           # kernel ring buffer (dmesg)
+journalctl --disk-usage
+sudo journalctl --vacuum-time=7d        # prune older than 7 days
+
+dmesg -T --level=err,warn               # kernel errors with human timestamps
+tail -F /var/log/syslog /var/log/auth.log    # -F survives logrotate
+```
+
+> ✅ Use `tail -F` (capital F) on log files - it re-opens the file across `logrotate`, unlike `-f` which keeps following the now-rotated inode.
+
+---
+
+## Package Management
+
+### Debian / Ubuntu (apt / dpkg)
+
+```bash
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y nginx
+sudo apt remove --purge nginx          # remove config too
+sudo apt autoremove --purge            # drop orphaned deps
+apt policy nginx                       # installed + candidate versions
+apt-mark hold nginx                    # pin: don't auto-upgrade
+dpkg -l | grep nginx ; dpkg -L nginx   # installed packages; files in a package
+dpkg -S /usr/sbin/nginx                # which package owns a file
+```
+
+### Fedora / RHEL (dnf / rpm)
+
+```bash
+sudo dnf upgrade --refresh -y
+sudo dnf install -y nginx
+sudo dnf remove nginx
+dnf repoquery --installed
+dnf versionlock add nginx              # pin (needs python3-dnf-plugin-versionlock)
+rpm -qa | grep nginx ; rpm -ql nginx   # installed; files
+rpm -qf /usr/sbin/nginx                # which package owns a file
+```
+
+> ✅ For unattended security patching use `unattended-upgrades` (Debian/Ubuntu) or `dnf-automatic` (Fedora/RHEL), scoped to the security repo, with automatic reboots only inside a maintenance window.
+
+---
+
+## Networking
+
+```bash
+ip addr ; ip -br a                      # interfaces/addresses (brief)
+ip route ; ip route get 1.1.1.1        # routing table; chosen route to a target
+ip link set eth0 up|down
+ss -tulpn                               # listening TCP/UDP sockets + owning process
+ss -tnp state established               # active connections
+resolvectl status                       # DNS servers (systemd-resolved)
+dig +short example.com ; dig -x 1.1.1.1 # forward; reverse lookup
+getent hosts example.com                # resolves via nsswitch (hosts file + DNS)
+
+curl -fsSL https://api.example.com/health     # -f fail on HTTP error, -sS quiet but show errors
+curl -o /dev/null -s -w '%{http_code} %{time_total}s\n' https://example.com
+nc -zv host 443                         # TCP port reachability
+```
+
+> ✅ `ss` replaces `netstat`, `ip` replaces `ifconfig`/`route`. The `net-tools` commands are deprecated and often not installed on modern minimal images.
+
+---
+
+## Firewalls
+
+### ufw (Ubuntu)
+
+```bash
+sudo ufw default deny incoming ; sudo ufw default allow outgoing
+sudo ufw allow 22/tcp ; sudo ufw allow from 10.0.0.0/8 to any port 5432
+sudo ufw enable ; sudo ufw status numbered
+```
+
+### firewalld (Fedora/RHEL)
+
+```bash
+sudo firewall-cmd --get-active-zones
+sudo firewall-cmd --permanent --add-service=https
+sudo firewall-cmd --permanent --add-port=8080/tcp
+sudo firewall-cmd --reload ; sudo firewall-cmd --list-all
+```
+
+### nftables (the modern backend)
+
+```bash
+sudo nft list ruleset
+sudo nft add rule inet filter input tcp dport 22 accept
+```
+
+> ⚠️ Before tightening firewall rules on a remote box, stage a rollback (e.g. an `at`-scheduled `ufw disable` / `firewall-cmd --reload`) so a mistaken rule that drops your SSH session doesn't lock you out permanently.
+
+---
+
+## SSH & Remote Access
+
+```bash
+ssh-keygen -t ed25519 -C "you@host"        # modern key (not RSA)
+ssh-copy-id -i ~/.ssh/id_ed25519.pub user@host
+ssh -i ~/.ssh/id_ed25519 user@host
+scp file user@host:/path/                  # or use rsync for anything non-trivial
+ssh -J bastion user@private-host           # jump host (ProxyJump)
+ssh -L 5432:db.internal:5432 user@bastion  # local port-forward to a private service
+```
+
+```text
+# ~/.ssh/config - stop typing flags
+Host prod-bastion
+  HostName bastion.example.com
+  User deploy
+  IdentityFile ~/.ssh/id_ed25519
+  IdentitiesOnly yes
+
+Host prod-*
+  ProxyJump prod-bastion
+```
+
+### Harden sshd
+
+```text
+# /etc/ssh/sshd_config.d/hardening.conf  (drop-in)
+PermitRootLogin no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+```
+
+```bash
+sudo sshd -t && sudo systemctl reload ssh   # validate config BEFORE reloading
+```
+
+> ✅ Always `sshd -t` before reloading sshd. A config typo that fails to start the daemon will lock you out of a remote machine.
+
+---
+
+## Disks, Filesystems & LVM
+
+```bash
+df -hT                                  # usage + filesystem type
+du -xsh /var/* 2>/dev/null | sort -h    # -x stays on one filesystem
+lsblk -f                                # block devices + filesystems + mountpoints
+mount | column -t ; findmnt             # current mounts (findmnt is clearer)
+blkid                                   # UUIDs for /etc/fstab
+
+# Mount + persist
+sudo mount /dev/sdb1 /mnt/data
+# /etc/fstab  (use UUID, not /dev/sdX which can reorder across boots)
+# UUID=xxxx-xxxx  /mnt/data  ext4  defaults,noatime  0 2
+sudo systemctl daemon-reload && sudo mount -a    # test fstab without rebooting
+```
+
+### LVM essentials
+
+```bash
+pvcreate /dev/sdb ; vgcreate data /dev/sdb
+lvcreate -L 50G -n app data
+mkfs.ext4 /dev/data/app
+lvextend -r -L +20G /dev/data/app       # grow LV + resize filesystem in one step
+```
+
+> ⚠️ Reference filesystems by `UUID=` in `/etc/fstab`, never `/dev/sdb1`. Device names are not stable across reboots or disk additions, and a wrong mount can fail boot. Add `nofail` for non-critical mounts.
+
+---
+
+## Performance & Troubleshooting
+
+```bash
+uptime                                  # load avg - compare against nproc
+vmstat 1 5                              # CPU/mem/IO/swap over 5 samples
+iostat -xz 1                            # per-disk IO (sysstat package)
+free -h ; cat /proc/meminfo
+top -o %MEM                             # sort by memory
+
+lsof -p <pid>                           # files/sockets a process holds
+lsof -i :443                            # what's on a port
+fuser -k 8080/tcp                       # kill whatever holds a TCP port
+strace -fp <pid>                        # syscalls of a running process
+strace -f -e trace=openat ./app         # which files it opens
+
+# Disk filling up?  find the biggest dirs fast:
+sudo du -xh / 2>/dev/null | sort -h | tail -20
+# Deleted-but-held files still consuming space:
+sudo lsof +L1
+```
+
+> 🔬 High load average with low CPU usually means IO wait or uninterruptible-sleep processes (`ps -eo state,cmd | grep '^D'`), not a CPU bottleneck. Check `iostat -xz 1` before scaling cores.
+
+---
+
+## Archives, Transfer & Sync
+
+```bash
+tar czf out.tgz dir/                    # create gzip
+tar xzf out.tgz -C /target              # extract to dir
+tar tzf out.tgz | head                  # list without extracting
+tar caf out.tar.zst dir/                # -a picks compressor by extension (zstd)
+
+rsync -avz --progress src/ user@host:/dst/        # archive, compress, show progress
+rsync -avz --delete --dry-run src/ /dst/          # mirror; ALWAYS dry-run --delete first
+rsync -e 'ssh -i ~/.ssh/id_ed25519' -avz src/ user@host:/dst/
+```
+
+> ⚠️ `rsync --delete` removes anything in the destination not in the source. Always run it with `--dry-run` first, and mind the trailing slash: `src/` copies contents, `src` copies the directory itself.
+
+---
+
+## Scheduling
+
+```bash
+crontab -e ; crontab -l                 # per-user cron
+# m h dom mon dow  command   (always use absolute paths; cron has a minimal PATH/env)
+# 0 2 * * *  /usr/local/bin/backup.sh >> /var/log/backup.log 2>&1
+```
+
+For anything important, prefer a **systemd timer** (see the systemd section): logging via journald, restart/retry policy, and `Persistent=true` to catch up missed runs after downtime. Use `OnCalendar=` syntax; validate with `systemd-analyze calendar "*-*-* 02:00:00"`.
+
+---
+
+## Security Hardening
+
+```bash
+# Keep security patches current
+sudo apt install -y unattended-upgrades && sudo dpkg-reconfigure -plow unattended-upgrades
+
+# Brute-force protection for SSH and more
+sudo apt install -y fail2ban && sudo systemctl enable --now fail2ban
+sudo fail2ban-client status sshd
+
+# Mandatory access control - know which one is active and keep it on
+getenforce                              # SELinux (RHEL/Fedora): Enforcing
+sudo aa-status                          # AppArmor (Ubuntu/Debian)
+
+# Kernel/network sysctls (persist in /etc/sysctl.d/*.conf)
+sudo sysctl -w net.ipv4.conf.all.rp_filter=1
+sudo sysctl --system                    # reload all *.conf
+
+# Audit who did what
+sudo journalctl -u ssh --since today | grep -i 'accepted\|failed'
+sudo ausearch -m USER_LOGIN --start today   # if auditd is installed
+```
+
+> ✅ Baseline for any internet-facing host: key-only SSH with no root login, `unattended-upgrades`/`dnf-automatic` for security patches, `fail2ban`, a default-deny firewall, and SELinux/AppArmor left in enforcing mode. Disabling MAC "to make it work" is a classic regression.
+
+---
+
+## Workstation & Environment Setup
+
+Condensed setup snippets for a dev workstation or WSL2. These are convenience helpers, not server-hardening steps.
+
+### Version managers (pyenv / tfenv / goenv)
+
+```bash
+# Build deps for pyenv (Ubuntu/Debian)
+sudo apt-get install -y git build-essential libssl-dev zlib1g-dev libbz2-dev \
+    libreadline-dev libsqlite3-dev libncursesw5-dev xz-utils tk-dev libffi-dev \
+    liblzma-dev curl
+# Fedora/RHEL: sudo dnf install -y git gcc make zlib-devel bzip2-devel readline-devel \
+#    sqlite-devel openssl-devel tk-devel libffi-devel xz-devel ncurses-devel
+
+git clone https://github.com/pyenv/pyenv.git ~/.pyenv
+cat >> ~/.bashrc <<'EOF'
+export PYENV_ROOT="$HOME/.pyenv"
+command -v pyenv >/dev/null || export PATH="$PYENV_ROOT/bin:$PATH"
+eval "$(pyenv init -)"
+EOF
+
+git clone --depth=1 https://github.com/tfutils/tfenv.git ~/.tfenv
+echo 'export PATH="$HOME/.tfenv/bin:$PATH"' >> ~/.bashrc
+
+git clone https://github.com/syndbg/goenv.git ~/.goenv
+cat >> ~/.bashrc <<'EOF'
+export GOENV_ROOT="$HOME/.goenv"
+export PATH="$GOENV_ROOT/bin:$PATH"
+eval "$(goenv init -)"
+EOF
+```
+
+> ✅ Pin versions explicitly (`pyenv install 3.12.6 && pyenv global 3.12.6`, `tfenv install 1.9.8 && tfenv use 1.9.8`). `tfenv install latest` resolves at runtime and silently drifts between machines.
+
+### CLI tools (apt repos, keyed correctly)
+
+```bash
+# GitHub CLI
 curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
   | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
 sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
-  | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
-sudo apt update && sudo apt install gh -y
+  | sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
+sudo apt update && sudo apt install -y gh
+
+# PowerShell Core
+wget -q "https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/packages-microsoft-prod.deb"
+sudo dpkg -i packages-microsoft-prod.deb && sudo apt-get update && sudo apt-get install -y powershell
+
+# Python CLI tools - isolated, not system-wide
+sudo apt-get install -y pipx && pipx ensurepath
+pipx install checkov ; pipx install black ; pipx install pipenv
 ```
 
-### Install VSCode
+> ✅ Install apt repo keys into `/usr/share/keyrings/` and reference them with `signed-by=` in the source list. The legacy `apt-key add` is deprecated and trusts the key for *all* repos.
+
+### CA certificates (corporate TLS interception)
 
 ```bash
-#!/usr/bin/env bash
-sudo apt-get install wget gpg
-wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > packages.microsoft.gpg
-sudo install -D -o root -g root -m 644 packages.microsoft.gpg /etc/apt/keyrings/packages.microsoft.gpg
-sudo sh -c 'echo "deb [arch=amd64,arm64,armhf signed-by=/etc/apt/keyrings/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main" > /etc/apt/sources.list.d/vscode.list'
-sudo apt-get install -y apt-transport-https
-sudo apt-get update && sudo apt-get install code -y
-```
+# Debian/Ubuntu
+sudo cp custom-ca.crt /usr/local/share/ca-certificates/ && sudo update-ca-certificates
+# Fedora/RHEL
+sudo cp custom-ca.crt /etc/pki/ca-trust/source/anchors/ && sudo update-ca-trust
 
-### Install Azure Functions Core Tools
-
-```bash
-curl https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > microsoft.gpg
-sudo mv microsoft.gpg /etc/apt/trusted.gpg.d/microsoft.gpg
-sudo sh -c 'echo "deb [arch=amd64] https://packages.microsoft.com/repos/microsoft-ubuntu-$(lsb_release -cs)-prod $(lsb_release -cs) main" > /etc/apt/sources.list.d/dotnetdev.list'
-sudo apt-get update && sudo apt-get install azure-functions-core-tools-4 -y
-```
-
-### Install Starship prompt 🏠 Personal setup helper
-
-```bash
-#!/usr/bin/env bash
-# Download DroidSansMono Nerd Font
-FONT_URL=$(curl -s https://api.github.com/repos/ryanoasis/nerd-fonts/releases/latest \
-  | grep -o "https://github.com/ryanoasis/nerd-fonts/releases/download/.*/DroidSansMono.zip")
-curl -L "$FONT_URL" -o DroidSansMono.zip
-unzip DroidSansMono.zip -d ~/.fonts && rm DroidSansMono.zip
-fc-cache -fv
-
-curl -sS https://starship.rs/install.sh | sh
-
-mkdir -p ~/.config
-cat > ~/.config/starship.toml <<'EOF'
-command_timeout = 10000
-"$schema" = "https://starship.rs/config-schema.json"
-add_newline = true
-
-[azure]
-disabled = false
-format = "on [$symbol($subscription)]($style) "
-symbol = "# "
-style = "blue bold"
-
-[character]
-success_symbol = "[➜](bold green)"
-
-[package]
-disabled = true
-EOF
-
-echo 'eval "$(starship init bash)"' >> ~/.bashrc
-```
-
-### Install Pyenv
-
-```bash
-#!/usr/bin/env bash
-sudo apt-get install -y \
-    git build-essential gcc make openssl libssl-dev zlib1g-dev libbz2-dev \
-    libreadline-dev libsqlite3-dev python-is-python3 wget curl \
-    libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev \
-    libffi-dev liblzma-dev python3-pip unzip zip python3-tk
-
-git clone https://github.com/pyenv/pyenv.git ~/.pyenv
-echo 'export PYENV_ROOT="$HOME/.pyenv"' >> ~/.bashrc
-echo 'command -v pyenv >/dev/null || export PATH="$PYENV_ROOT/bin:$PATH"' >> ~/.bashrc
-echo 'eval "$(pyenv init -)"' >> ~/.bashrc
-source ~/.bashrc
-pyenv install 3.12.0
-pyenv global 3.12.0
-```
-
-### Install tfenv, pkenv, goenv
-
-```bash
-# tfenv
-git clone --depth=1 https://github.com/tfutils/tfenv.git ~/.tfenv
-echo 'export PATH=$PATH:$HOME/.tfenv/bin' >> ~/.bashrc
-
-# pkenv (Packer)
-git clone https://github.com/iamhsa/pkenv.git ~/.pkenv
-echo 'export PATH="${HOME}/.pkenv/bin:$PATH"' >> ~/.bashrc
-
-# goenv
-git clone https://github.com/syndbg/goenv.git ~/.goenv
-echo 'export GOENV_ROOT="$HOME/.goenv"' >> ~/.bashrc
-echo 'export PATH="$GOENV_ROOT/bin:$PATH"' >> ~/.bashrc
-echo 'eval "$(goenv init -)"' >> ~/.bashrc
-echo 'export PATH="$GOROOT/bin:$PATH"' >> ~/.bashrc
-echo 'export PATH="$PATH:$GOPATH/bin"' >> ~/.bashrc
-```
-
-### Install common DevOps tools via pipx and Homebrew
-
-```bash
-#!/usr/bin/env bash
-source ~/.bashrc
-sudo apt-get update && sudo apt-get install -y zip unzip
-pip3 install pipx && pipx ensurepath && source ~/.bashrc
-
-pipx install podman-compose
-pipx install terraform-compliance
-pipx install checkov
-pipx install azure-cli
-pipx install black
-pipx install pipenv
-pipx install bandit
-pipx install beautysh
-
-tfenv install latest && tfenv use latest
-pkenv install 1.8.6   && pkenv use 1.8.6
-goenv install 1.21.0  && goenv global 1.21.0
-
-brew install terraform-docs
-echo "alias td='terraform-docs markdown . > README.md'" >> ~/.bashrc
-```
-
-### Install JetBrains Toolbox 🏠 Personal setup helper
-
-```bash
-#!/bin/bash
-[ "$(id -u)" != "0" ] && exec sudo "$0" "$@"
-
-sudo apt-get install -y libfuse2
-
-URL=$(curl -s 'https://data.services.jetbrains.com/products/releases?code=TBA&latest=true&type=release' \
-  | grep -Po '"linux":.*?[^\\]",' | awk -F ':' '{print $3":"$4}' | sed 's/[", ]//g')
-
-FILE=$(basename "${URL}")
-wget -cO "/tmp/${FILE}" "${URL}" --read-timeout=5 --tries=0
-
-DIR="/opt/jetbrains-toolbox"
-mkdir -p "${DIR}"
-tar -xzf "/tmp/${FILE}" -C "${DIR}" --strip-components=1
-chmod -R +rwx "${DIR}"
-ln -sf "${DIR}/jetbrains-toolbox" /usr/local/bin/jetbrains-toolbox
-rm "/tmp/${FILE}"
-echo "JetBrains Toolbox installed."
-```
-
-> **See also:** [Containers](/docs/cheatsheets/containers-cheatsheet) for Docker and Podman setup on Ubuntu/Fedora. [Bash](/docs/cheatsheets/bash-cheatsheet) for scripting these setup steps with strict mode, logging, and error handling.
-
----
-
-## Fedora / RHEL
-
-### Update CA certificates
-
-```bash
-#!/usr/bin/env bash
-sudo dnf install -y ca-certificates
-sudo cp *.crt /etc/pki/ca-trust/source/anchors/
-mkdir -p ~/.pki/nssdb/ && cp *.crt ~/.pki/nssdb/
-update-ca-trust
-```
-
-### Install Pyenv on Fedora
-
-```bash
-#!/usr/bin/env bash
-sudo yum install -y \
-    zlib-devel bzip2-devel ncurses-devel libffi-devel sqlite-devel \
-    make gcc readline-devel python3-pip python3-tkinter xz-devel tk-devel git
-
-git clone https://github.com/pyenv/pyenv.git ~/.pyenv
-echo 'export PYENV_ROOT="$HOME/.pyenv"' >> ~/.bashrc
-echo 'command -v pyenv >/dev/null || export PATH="$PYENV_ROOT/bin:$PATH"' >> ~/.bashrc
-echo 'eval "$(pyenv init -)"' >> ~/.bashrc
+# Point common tools at the system bundle
+export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt   # Python requests
+export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt  # Node
 ```
 
 ---
 
 ## WSL2
 
-### Create symlinks to Windows directories 🏠 Personal config
-
 ```bash
-ln -s /mnt/c/Users          winusers
-ln -s /mnt/c/Users/craig    winhome
-ln -s /mnt/c/Users/craig/Desktop windesktop
+ip addr ; cat /etc/resolv.conf          # WSL2 gets a virtual NIC + generated resolv.conf
 ```
 
-### Run Ubuntu shell from Windows (or as root)
-
-```bash
-wsl.exe -d Ubuntu bash
-wsl.exe -u root -d Ubuntu bash
+```ini
+# /etc/wsl.conf  (inside the distro) - persist mounts, hostname, systemd
+[boot]
+systemd=true
+[network]
+generateResolvConf=true
 ```
-
-### Set WSL2 resource limits
-
-Run this in PowerShell - creates `~/.wslconfig` capping memory and CPU.
 
 ```powershell
+# %USERPROFILE%\.wslconfig  (on Windows) - cap resources for all distros
 @"
 [wsl2]
 memory=8GB
-processors=2
+processors=4
 "@ | Set-Content -Path "$Env:USERPROFILE\.wslconfig"
+# Apply: run `wsl --shutdown` in PowerShell, then reopen the distro
 ```
 
-### Install WSL2 VPN toolkit (for corporate VPN compatibility)
-
 ```powershell
-Invoke-WebRequest -Uri "https://github.com/sakai135/wsl-vpnkit/releases/latest/download/wsl-vpnkit.tar.gz" -OutFile "wsl-vpnkit.tar.gz"
+# Corporate VPN compatibility (wsl-vpnkit)
 wsl --import wsl-vpnkit "$env:USERPROFILE\wsl-vpnkit" wsl-vpnkit.tar.gz --version 2
-wsl -d wsl-vpnkit
-wsl.exe -d wsl-vpnkit --cd /app service wsl-vpnkit start
+wsl -d wsl-vpnkit --cd /app service wsl-vpnkit start
+```
 
-> **See also:** [Windows - WSL2](/docs/cheatsheets/windows-cheatsheet) for WSL2 config from the Windows side (memory limits, network mode, `wsl.conf`).
+> **See also:** [Windows - WSL2](/docs/cheatsheets/windows-cheatsheet) for the Windows-side configuration (`.wslconfig`, networking mode).
 
 ---
 
 ## Anti-patterns
 
-- **`curl | bash` as root without reviewing the script** - executes arbitrary code from the network at root privilege. Always inspect the script first, download to a temp file, or use a checksum-verified release asset.
-- **Not pinning tool versions in setup scripts** - `tfenv install latest` or `goenv install latest` will install whatever is current at runtime; a later run may break your environment. Pin to a specific version for reproducibility.
-- **Sourcing `~/.bashrc` inside a non-interactive script** - `~/.bashrc` is designed for interactive shells; scripts that source it inherit aliases, `PS1`, and interactive-only settings that can cause unpredictable behaviour. Use explicit paths or pass env vars directly.
-- **`sudo pip install` system-wide** - corrupts the system Python managed by apt/dnf and fights with OS package managers. Use `pipx` for CLI tools, `uv venv` or `python -m venv` for project environments.
-- **Modifying `/etc/profile.d/` for user-specific config** - that directory applies to all users on the system. Put personal `PATH` and env var changes in `~/.bashrc` or `~/.profile`.
-- **Hardcoding absolute paths from one user's home in shared scripts** - `/home/craig/...` paths break for any other user. Use `$HOME`, `~`, or `$(pwd)` instead.
-```
+- 🚨 **`curl | bash` as root without reviewing the script** - it executes arbitrary network-fetched code at root privilege. Download to a file, read it, verify a checksum, then run; or install from a signed package repo.
+
+- 🚨 **`chmod -R 777` to "fix" a permissions problem** - it makes paths world-writable, so any user or compromised process can tamper with them. Set the narrowest owner/group plus an ACL that actually works.
+
+- 🚨 **`sudo pip install` system-wide** - it corrupts the OS Python managed by apt/dnf and fights the package manager. Use `pipx` for CLI tools and `python -m venv` / `uv venv` for projects.
+
+- 🚨 **Disabling SELinux/AppArmor or the firewall to make something work** - that trades a config fix for a permanent security regression. Fix the policy/port instead and keep enforcement on.
+
+- ⚠️ **`usermod -G` without `-a`** - it replaces the user's supplementary groups instead of appending, silently dropping them from (for example) `docker` or `sudo`. Always `usermod -aG`.
+
+- ⚠️ **Referencing disks by `/dev/sdX` in `/etc/fstab`** - device names reorder across reboots and disk additions; a wrong mount can fail boot. Use `UUID=` and add `nofail` for non-critical mounts.
+
+- ⚠️ **Pinning nothing in setup scripts (`install latest`)** - `tfenv install latest` / `goenv install latest` resolve at runtime, so a later run silently installs a different version. Pin explicit versions for reproducibility.
+
+- ⚠️ **`nohup ... &` / hand-rolled init for long-running services** - you lose logging, restart policy, and ordering. Write a systemd unit (or timer) instead.
+
+- ⚠️ **Sourcing `~/.bashrc` inside non-interactive scripts** - it pulls in aliases, `PS1`, and interactive-only settings that cause surprising behaviour. Set the env vars the script needs explicitly.
+
+- 🔬 **`tail -f` on files that get rotated** - it keeps following the rotated-away inode and goes silent. Use `tail -F`, or `journalctl -u <unit> -f` for systemd services.
+
+- 🔬 **Hardcoding one user's home path in shared scripts** - `/home/alice/...` breaks for everyone else. Use `$HOME`, `~`, or `"$(cd "$(dirname "$0")" && pwd)"`.
+
+---
+
+## References
+
+- [Arch Wiki](https://wiki.archlinux.org) - distro-agnostic, deepest practical Linux reference
+- [systemd documentation](https://www.freedesktop.org/software/systemd/man/latest/) - units, `systemctl`, `journalctl`, timers
+- [Ubuntu Server Guide](https://documentation.ubuntu.com/server/) - apt, networking, storage on Debian/Ubuntu
+- [RHEL Documentation](https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9) - dnf, SELinux, firewalld on RHEL/Fedora
+- [OpenSSH manual](https://www.openssh.com/manual.html) - `ssh`, `sshd_config`, key management
+- [WSL documentation](https://learn.microsoft.com/en-us/windows/wsl/) - `.wslconfig`, `wsl.conf`, networking

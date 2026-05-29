@@ -1468,11 +1468,11 @@ for v := range square(ctx, generate(ctx, 1, 2, 3, 4, 5)) {
 
 ## Anti-patterns
 
-- **`log.Println` / `fmt.Println` in production code** - unstructured output with no levels, no fields, and no redaction. Use `log/slog` with `slog.Info(...)` and structured attrs.
-- **`fmt.Sprintf` in slog messages** - `slog.Info(fmt.Sprintf("order %s processed", id))` destroys structure and runs even when the level is disabled. Pass fields as attrs: `slog.Info("order processed", "order_id", id)`.
-- **Writing to a nil map** - `var m map[string]int; m["key"] = 1` panics at runtime. Always initialise with `make(map[K]V)` or a map literal before writing.
-- **Ignoring errors with `_`** - `result, _ := doSomething()` silently discards failures that may corrupt downstream state. Handle or explicitly wrap every error.
-- **Goroutine leak** - launching `go func()` without a termination signal (context cancellation, channel close, or WaitGroup) leaks goroutines indefinitely. Always provide a way to stop.
-- **Copying a `sync.Mutex`** - a `sync.Mutex` embedded in a struct must never be copied after first use; copying breaks the lock invariant. Pass structs containing mutexes by pointer.
-- **`interface{}` instead of `any`** - `interface{}` is the pre-Go 1.18 spelling; `any` is the canonical alias. Use `any` in all new code.
+- ⚠️ **`log.Println` / `fmt.Println` in production code** - unstructured output with no levels, no fields, and no redaction. Use `log/slog` with `slog.Info(...)` and structured attrs.
+- 🔬 **`fmt.Sprintf` in slog messages** - `slog.Info(fmt.Sprintf("order %s processed", id))` destroys structure and runs even when the level is disabled. Pass fields as attrs: `slog.Info("order processed", "order_id", id)`.
+- 🚨 **Writing to a nil map** - `var m map[string]int; m["key"] = 1` panics at runtime. Always initialise with `make(map[K]V)` or a map literal before writing.
+- ⚠️ **Ignoring errors with `_`** - `result, _ := doSomething()` silently discards failures that may corrupt downstream state. Handle or explicitly wrap every error.
+- ⚠️ **Goroutine leak** - launching `go func()` without a termination signal (context cancellation, channel close, or WaitGroup) leaks goroutines indefinitely. Always provide a way to stop.
+- 🔬 **Copying a `sync.Mutex`** - a `sync.Mutex` embedded in a struct must never be copied after first use; copying breaks the lock invariant. Pass structs containing mutexes by pointer.
+- 🔬 **`interface{}` instead of `any`** - `interface{}` is the pre-Go 1.18 spelling; `any` is the canonical alias. Use `any` in all new code.
 ```

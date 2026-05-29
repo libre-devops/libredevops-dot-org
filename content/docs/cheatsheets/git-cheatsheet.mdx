@@ -410,11 +410,11 @@ git cherry-pick --no-commit abc1234 # apply changes without committing
 
 ## Anti-patterns
 
-- **`git push --force` without `--lease`** - can overwrite commits pushed by others since your last fetch. Always use `--force-with-lease`, which fails if the remote has moved.
-- **Amending or rebasing already-pushed commits** - rewrites history that others may have fetched; causes divergence and requires force-pushing. Only rewrite commits that have never left your machine.
-- **Committing secrets or credentials** - once pushed, they're in history forever (and likely cached by forks/mirrors). Use environment variables or a vault, and rotate immediately if leaked.
-- **Committing directly to `main`/`master`** - bypasses review and CI. Use short-lived feature branches and PRs even for solo projects; it preserves a clean audit trail.
-- **`git stash` as long-term storage** - stashes are local and unnamed by default; easy to lose track of or apply to the wrong branch. Use a WIP branch instead for anything lasting more than a few minutes.
-- **`git clean -fd` without `-n` (dry-run) first** - irreversibly deletes untracked files and directories including build artefacts you might want. Always run `-n` to preview first.
-- **`git reset --hard` with uncommitted work** 🚨 - permanently discards all changes with no recovery path. Stash or commit first.
+- 🚨 **`git push --force` without `--lease`** - can overwrite commits pushed by others since your last fetch. Always use `--force-with-lease`, which fails if the remote has moved.
+- ⚠️ **Amending or rebasing already-pushed commits** - rewrites history that others may have fetched; causes divergence and requires force-pushing. Only rewrite commits that have never left your machine.
+- 🚨 **Committing secrets or credentials** - once pushed, they're in history forever (and likely cached by forks/mirrors). Use environment variables or a vault, and rotate immediately if leaked.
+- ⚠️ **Committing directly to `main`/`master`** - bypasses review and CI. Use short-lived feature branches and PRs even for solo projects; it preserves a clean audit trail.
+- 🔬 **`git stash` as long-term storage** - stashes are local and unnamed by default; easy to lose track of or apply to the wrong branch. Use a WIP branch instead for anything lasting more than a few minutes.
+- 🚨 **`git clean -fd` without `-n` (dry-run) first** - irreversibly deletes untracked files and directories including build artefacts you might want. Always run `-n` to preview first.
+- 🚨 **`git reset --hard` with uncommitted work** - permanently discards all changes with no recovery path. Stash or commit first.
 ```

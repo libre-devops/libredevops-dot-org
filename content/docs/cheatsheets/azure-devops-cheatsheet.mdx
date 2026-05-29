@@ -1,0 +1,651 @@
+---
+title: Azure DevOps Cheatsheet
+description: Azure DevOps platform engineering reference - az devops CLI, YAML pipelines, templates, service connections, agents, containers, environments, permissions, and anti-patterns. Assumes az CLI 2.55+ with the azure-devops extension.
+---
+
+# Azure DevOps Cheat Sheet
+
+Azure DevOps reference for platform and DevOps engineers. Covers the `az devops` CLI, YAML pipeline authoring, templates, service connections, agent and container options, environments and approvals, the permission model, and the anti-patterns that bite teams in production.
+
+> **Versions:** `az` CLI 2.55+ with the `azure-devops` extension / agent 3.x / YAML schema as of 2026. Examples assume an organisation at `https://dev.azure.com/<org>` and a project named `myproject`. Prefer **Workload Identity Federation** for service connections - PATs and secrets are called out as legacy where they appear.
+
+---
+
+## CLI & Basics
+
+### Install and sign in
+
+```bash
+# The CLI ships as an extension to the Azure CLI
+az extension add --name azure-devops
+az extension update --name azure-devops
+
+# Sign in interactively (uses your az login context)
+az login
+
+# Or authenticate the DevOps extension with a PAT (legacy / CI without OIDC)
+export AZURE_DEVOPS_EXT_PAT="<pat>"
+echo "$AZURE_DEVOPS_EXT_PAT" | az devops login --organization https://dev.azure.com/myorg
+```
+
+> ✅ **`az login` + Azure AD** - preferred; inherits your identity and conditional access
+> ⚠️ **Personal Access Token (PAT)** - scope to the minimum, set a short expiry, store in a secret manager; never commit one
+
+### Set defaults so you stop repeating yourself
+
+```bash
+az devops configure --defaults \
+  organization=https://dev.azure.com/myorg \
+  project=myproject
+
+az devops configure --list           # show current defaults
+```
+
+### Everyday read operations
+
+```bash
+az devops project list --output table
+az repos list --output table
+az pipelines list --output table
+az pipelines runs list --top 10 --output table
+az boards work-item show --id 1234 --output json
+
+# Open the current repo's project in the browser
+az repos show --repository myrepo --open
+```
+
+### Run and inspect a pipeline
+
+```bash
+# Queue a run on a branch, optionally passing parameters/variables
+az pipelines run --name "ci-build" --branch main \
+  --parameters environment=dev \
+  --variables imageTag=1.2.3
+
+az pipelines runs show --id 98765
+az pipelines runs artifact list --run-id 98765
+```
+
+---
+
+## YAML Pipelines
+
+### Minimal pipeline anatomy
+
+A pipeline is `trigger` (when) + `pool` (where) + `stages → jobs → steps` (what). Keep the file at the repo root as `azure-pipelines.yml` or under a `.azuredevops/` / `pipelines/` folder.
+
+```yaml
+trigger:
+  branches:
+    include: [ main ]
+
+pool:
+  vmImage: ubuntu-latest   # Microsoft-hosted agent
+
+stages:
+  - stage: build
+    jobs:
+      - job: compile
+        steps:
+          - task: UseDotNet@2
+            inputs:
+              packageType: sdk
+              version: 8.0.x
+          - script: dotnet build --configuration Release
+            displayName: Build
+```
+
+### Steps: `script`, `bash`, `pwsh`, and tasks
+
+```yaml
+steps:
+  - script: echo "runs in the default shell (cmd on Windows, bash on Linux)"
+  - bash: |
+      set -euo pipefail
+      echo "always bash; fail fast"
+  - pwsh: |
+      $ErrorActionPreference = 'Stop'
+      Write-Host "always PowerShell 7"
+  - task: Bash@3            # the task form gives retry, condition, env, etc.
+    inputs:
+      targetType: inline
+      script: ./scripts/test.sh
+    retryCountOnTaskFailure: 2
+```
+
+### Jobs, dependencies, and conditions
+
+```yaml
+jobs:
+  - job: build
+    steps: [ { script: make build } ]
+
+  - job: test
+    dependsOn: build                       # ordering + implicit success gate
+    condition: succeeded()
+    steps: [ { script: make test } ]
+
+  - job: notify
+    dependsOn: [ build, test ]
+    condition: always()                    # run even if upstream failed
+    steps: [ { script: ./notify.sh } ]
+```
+
+Useful conditions: `succeeded()`, `failed()`, `always()`, `succeededOrFailed()`, `eq(variables['Build.SourceBranch'], 'refs/heads/main')`, `and(...)`, `or(...)`.
+
+### Matrix and parallelism
+
+```yaml
+jobs:
+  - job: test
+    strategy:
+      matrix:
+        linux:   { imageName: ubuntu-latest }
+        windows: { imageName: windows-latest }
+        mac:     { imageName: macos-latest }
+      maxParallel: 3
+    pool:
+      vmImage: $(imageName)
+    steps:
+      - script: ./run-tests.sh
+```
+
+---
+
+## Triggers
+
+```yaml
+# CI trigger with path and branch filters
+trigger:
+  batch: true                 # queue one run for accumulated pushes
+  branches:
+    include: [ main, release/* ]
+    exclude: [ docs/* ]
+  paths:
+    include: [ src/** ]
+    exclude: [ "**/*.md" ]
+
+# PR trigger (YAML PR triggers work for GitHub repos; for Azure Repos,
+# configure PR validation via branch policies instead - see Permissions)
+pr:
+  branches:
+    include: [ main ]
+
+# Scheduled trigger (cron is UTC)
+schedules:
+  - cron: "0 2 * * *"
+    displayName: Nightly build
+    branches: { include: [ main ] }
+    always: false             # only run if the source changed since last run
+
+# Trigger off another pipeline completing
+resources:
+  pipelines:
+    - pipeline: upstream
+      source: upstream-ci
+      trigger:
+        branches: { include: [ main ] }
+```
+
+> ⚠️ For **Azure Repos**, the YAML `pr:` trigger is ignored - PR validation is driven by **branch policies** (Build Validation). Configure it there or the gate silently won't run.
+
+---
+
+## Variables, Parameters & Secrets
+
+### Variables vs runtime parameters
+
+```yaml
+parameters:                    # typed, set at queue time, expanded at compile time
+  - name: environment
+    type: string
+    default: dev
+    values: [ dev, test, prod ]
+
+variables:                     # macro variables, expanded at runtime as $(name)
+  buildConfiguration: Release
+  isMain: $[ eq(variables['Build.SourceBranch'], 'refs/heads/main') ]
+
+steps:
+  - script: echo "Deploying to ${{ parameters.environment }} as $(buildConfiguration)"
+```
+
+Expression syntax matters:
+- `${{ }}` - **compile-time** (template expansion, parameters). Resolved before the run starts.
+- `$( )` - **runtime macro**. Resolved when the step executes.
+- `$[ ]` - **runtime expression**. For variable values computed at runtime.
+
+### Variable groups and Key Vault
+
+```yaml
+variables:
+  - group: shared-nonprod          # links a variable group (Library)
+  - name: localOnly
+    value: foo
+
+# Pull secrets straight from Key Vault via a service connection
+steps:
+  - task: AzureKeyVault@2
+    inputs:
+      azureSubscription: 'sc-prod-oidc'
+      KeyVaultName: 'kv-prod-uks'
+      SecretsFilter: 'db-password,api-key'
+```
+
+> ✅ Mark secret variables as **secret** in the Library; reference them as `$(db-password)`. They are masked in logs.
+> ⚠️ Secrets are **not** auto-exported to the environment for `script`/`bash`. Map them explicitly, and never echo them:
+
+```yaml
+  - bash: ./deploy.sh
+    env:
+      DB_PASSWORD: $(db-password)   # explicit mapping; do not interpolate $(secret) into a script body
+```
+
+---
+
+## Templates
+
+Templates are how you enforce standards and stay DRY. Four kinds: **step**, **job**, **stage**, and **variable** templates. The `extends` form is the governance lever.
+
+### Step template + typed parameters
+
+```yaml
+# templates/build-steps.yml
+parameters:
+  - name: configuration
+    type: string
+    default: Release
+steps:
+  - script: dotnet build -c ${{ parameters.configuration }}
+    displayName: Build (${{ parameters.configuration }})
+```
+
+```yaml
+# azure-pipelines.yml
+steps:
+  - template: templates/build-steps.yml
+    parameters:
+      configuration: Release
+```
+
+### `extends` template to enforce policy ✅
+
+Require pipelines to extend a central template, then enforce it on protected resources with a **required template check** (see Permissions). Anything not in the template can't run against prod.
+
+```yaml
+# pipeline in an app repo
+extends:
+  template: pipeline.yml@templates      # from a repository resource
+  parameters:
+    image: myapp
+
+resources:
+  repositories:
+    - repository: templates
+      type: git
+      name: platform/pipeline-templates
+      ref: refs/tags/v3.1.0             # pin templates to a tag, not a moving branch
+```
+
+> ✅ Pin template repository resources to a **tag or commit**, not `main`. A moving ref means anyone with write to the templates repo can change what runs in prod.
+
+### `extends` vs `template` includes
+
+Both reuse YAML, but they differ in intent and what they can enforce. Includes **compose** fragments; `extends` **constrains** the whole pipeline to a parent shape that checks can require.
+
+| Aspect | `template:` include (step/job/stage) | `extends:` template |
+|:--|:--|:--|
+| Mental model | "Paste this fragment here" | "This pipeline IS this template, filled in via parameters" |
+| Scope | A step list, job, or stage | The entire pipeline definition |
+| Who controls structure | The consuming pipeline | The template author (consumer only supplies parameters) |
+| Enforceable by a check | No | **Yes** - the *Require a specific template* check on a protected resource |
+| Can inject arbitrary extra steps | Yes (consumer adds freely) | Only where the template exposes a `stepList`/`jobList` parameter |
+| Typical use | DRY reuse of common build/test steps | Central governance: every prod pipeline must extend the golden template |
+| Governance strength | Convention only | Hard gate when paired with environment/service-connection checks |
+
+> ✅ Use **includes** for everyday DRY; use **`extends` + a required-template check** on prod resources when you need to *guarantee* (not just encourage) that pipelines follow the approved shape.
+
+---
+
+## Service Connections & Authentication
+
+### Workload Identity Federation (OIDC) ✅ preferred
+
+No stored secret. The pipeline requests a short-lived token federated to an Azure AD app/managed identity.
+
+```bash
+# Create a WIF (OIDC) Azure RM service connection via CLI/REST is limited;
+# the portal flow is: Project Settings → Service connections → New →
+# Azure Resource Manager → Workload Identity federation (automatic).
+# Then grant the federated identity RBAC on the target scope:
+az role assignment create \
+  --assignee "<app-or-uami-client-id>" \
+  --role "Contributor" \
+  --scope "/subscriptions/<sub-id>/resourceGroups/rg-prod"
+```
+
+```yaml
+steps:
+  - task: AzureCLI@2
+    inputs:
+      azureSubscription: 'sc-prod-oidc'   # the WIF service connection
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: az group list -o table
+```
+
+> ✅ **Workload Identity Federation** - no secret to rotate or leak; scope RBAC tightly to the target resource group/subscription
+> ⚠️ **Service principal + secret/cert** - acceptable only where OIDC isn't supported; rotate and store in Key Vault
+> ⚠️ Always restrict a service connection to specific pipelines (uncheck "Grant access to all pipelines") and require approval for prod connections
+
+---
+
+## Agents & Pools
+
+### Microsoft-hosted vs self-hosted
+
+```yaml
+# Microsoft-hosted: clean VM per job, no maintenance, 1 hr (public) / 60 hr job limits
+pool:
+  vmImage: ubuntu-latest
+
+# Self-hosted: your infra, persistent tooling, private network access
+pool:
+  name: 'linux-selfhosted'
+  demands:
+    - agent.os -equals Linux
+    - docker                       # custom capability you registered
+```
+
+### Agent options compared
+
+`vmImage` (Microsoft-hosted), static self-hosted, **VM Scale Set (VMSS) agents**, and the newer **Managed DevOps Pools** are points on a spectrum from "fully managed, least control" to "fully self-run, most control". Managed DevOps Pools is an Azure resource (`Microsoft.DevOpsInfrastructure/pools`) that supersedes hand-rolled VMSS agents for most elastic self-hosted needs.
+
+| Option | Who manages infra | Custom image / tools | Private network (VNet) | Scaling | Best for | Watch out for |
+|:--|:--|:--|:--|:--|:--|:--|
+| **Microsoft-hosted** (`vmImage`) | Microsoft | No (fixed images) | No (public egress) | Automatic, per-job clean VM | Standard public builds, zero maintenance | Job time limits, cold tooling, no private access |
+| **Self-hosted** (static) | You (VMs/containers) | Yes | Yes | Manual / your own automation | Persistent caches, special hardware, full control | You patch, secure, scale; never on public projects |
+| **VMSS scale set agents** | You (own the VMSS) + Azure DevOps scales it | Yes (your VMSS image) | Yes | Azure DevOps adjusts VMSS capacity | Elastic self-hosted before Managed Pools existed | You maintain the image/VMSS; slower provisioning; more moving parts |
+| **Managed DevOps Pools** | Microsoft (managed service) | Yes (Azure Compute Gallery image) | Yes (inject into your VNet) | Managed scaling + standby/warm agents | New elastic self-hosted; VNet access without running a VMSS | Azure resource + quota/cost planning; newer, fewer legacy examples |
+
+> ✅ For new elastic self-hosted needs, prefer **Managed DevOps Pools** over hand-built VMSS agents - you get custom images, VNet injection, and standby agents without owning the scale set lifecycle.
+
+### Self-hosted agent registration
+
+```bash
+# On the agent host (Linux), after downloading the agent package:
+./config.sh --unattended \
+  --url https://dev.azure.com/myorg \
+  --auth pat --token "$AZP_TOKEN" \
+  --pool 'linux-selfhosted' \
+  --agent "$(hostname)" \
+  --acceptTeeEula
+sudo ./svc.sh install && sudo ./svc.sh start
+```
+
+> ⚠️ Self-hosted agents run your pipeline code with the agent's privileges and network reach. Isolate them, run as a low-privilege user, keep them off public-facing repos, and rebuild images regularly.
+
+---
+
+## Container Jobs & Services
+
+### Run an entire job inside a container
+
+```yaml
+resources:
+  containers:
+    - container: build
+      image: mcr.microsoft.com/dotnet/sdk:8.0
+    - container: redis             # a service container
+      image: redis:7
+
+jobs:
+  - job: test
+    pool: { vmImage: ubuntu-latest }
+    container: build               # steps execute inside this image
+    services:
+      redis: redis                 # reachable on the docker network by name
+    steps:
+      - script: dotnet test
+        env:
+          REDIS_HOST: redis
+```
+
+> ✅ Container jobs pin your toolchain to an image - reproducible, no agent drift. Pin image tags by digest (`@sha256:...`) for prod pipelines.
+
+---
+
+## Environments, Approvals & Deployments
+
+### Deployment jobs and strategies
+
+```yaml
+stages:
+  - stage: deploy_prod
+    jobs:
+      - deployment: web
+        environment: production          # creates/uses an Environment resource
+        strategy:
+          runOnce:                       # also: rolling, canary
+            deploy:
+              steps:
+                - script: ./deploy.sh
+```
+
+### Approvals and checks ✅
+
+On the **Environment** (or a protected service connection), add checks: **manual approval**, **business hours**, **required template**, **invoke REST API/Azure Function gate**, **exclusive lock**, **branch control**.
+
+> ✅ Gate prod with a **manual approval** + **branch control** (only `refs/heads/main`) + **required template** check. Checks live on the resource, so they apply no matter which pipeline targets it.
+
+---
+
+## Permissions & Security
+
+Azure DevOps permissions exist at **organisation**, **project**, and **object** (repo, pipeline, environment, service connection) levels, granted to **groups** (prefer) or users.
+
+### Pipeline / resource authorisation
+
+- **Limit job authorization scope** (Org & Project settings) ✅ - stops a pipeline's `System.AccessToken` from reaching other projects/repos. Enable org-wide.
+- **Protected resources** (service connections, environments, variable groups, secure files, repos) require explicit authorisation; add **approvals and checks** on them.
+- **Settable at queue time** - disable for variables you don't want overridden at run time.
+- **Make secrets available to builds of forks** ⚠️ - keep **off** for public/forked PRs, or fork PRs can exfiltrate secrets.
+
+### Branch policies (Azure Repos) ✅
+
+```text
+Project Settings → Repositories → <repo> → Policies → Branch (main):
+  ✅ Require a minimum number of reviewers (>=2, reset votes on new push)
+  ✅ Check for linked work items
+  ✅ Build Validation  → your CI pipeline (this is how PR CI runs on Azure Repos)
+  ✅ Require resolution of all comments
+  ✅ Limit merge types (squash) + restrict who can bypass policies
+```
+
+### The `System.AccessToken`
+
+```yaml
+steps:
+  - script: |
+      curl -s -H "Authorization: Bearer $(System.AccessToken)" \
+        "$(System.CollectionUri)_apis/build/builds?api-version=7.1"
+    env:
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken)   # not exposed unless mapped
+```
+
+> ⚠️ `System.AccessToken` is the build identity (`Project Collection Build Service`). Grant it the **least** repo/area permissions it needs; an over-permissioned build identity is a lateral-movement path.
+
+---
+
+## Artifacts & Caching
+
+```yaml
+steps:
+  # Pipeline artifacts (fast, for build outputs between stages/runs)
+  - publish: $(System.DefaultWorkingDirectory)/dist
+    artifact: webapp
+
+  - download: current
+    artifact: webapp
+
+  # Dependency cache (keyed on a lockfile hash)
+  - task: Cache@2
+    inputs:
+      key: 'npm | "$(Agent.OS)" | package-lock.json'
+      path: $(npm_config_cache)
+```
+
+Use **Azure Artifacts** feeds for NuGet/npm/Maven/Python with upstream sources and retention policies.
+
+---
+
+## Terraform
+
+Two distinct uses: **running** Terraform from a pipeline, and **managing Azure DevOps itself** with the `microsoft/azuredevops` provider.
+
+### Run Terraform with OIDC (no stored secret) ✅
+
+A Workload Identity Federation service connection plus `addSpnToEnvironment` exposes a short-lived `idToken`; the AzureRM provider/backend authenticate via `ARM_USE_OIDC`. Split plan and apply across stages and gate apply with an environment approval.
+
+```yaml
+stages:
+  - stage: plan
+    jobs:
+      - job: tf_plan
+        pool: { vmImage: ubuntu-latest }
+        steps:
+          - task: AzureCLI@2
+            inputs:
+              azureSubscription: 'sc-prod-oidc'   # WIF service connection
+              scriptType: bash
+              scriptLocation: inlineScript
+              addSpnToEnvironment: true            # exposes idToken / servicePrincipalId / tenantId
+              inlineScript: |
+                set -euo pipefail
+                export ARM_USE_OIDC=true
+                export ARM_OIDC_TOKEN="$idToken"
+                export ARM_CLIENT_ID="$servicePrincipalId"
+                export ARM_TENANT_ID="$tenantId"
+                export ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+                terraform init
+                terraform plan -out=tfplan
+          - publish: tfplan
+            artifact: tfplan
+
+  - stage: apply
+    dependsOn: plan
+    jobs:
+      - deployment: tf_apply
+        environment: production                    # approval check gates the apply
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: current
+                  artifact: tfplan
+                - task: AzureCLI@2
+                  inputs:
+                    azureSubscription: 'sc-prod-oidc'
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    addSpnToEnvironment: true
+                    inlineScript: |
+                      set -euo pipefail
+                      export ARM_USE_OIDC=true ARM_OIDC_TOKEN="$idToken"
+                      export ARM_CLIENT_ID="$servicePrincipalId" ARM_TENANT_ID="$tenantId"
+                      export ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+                      terraform init
+                      terraform apply -auto-approve tfplan
+```
+
+### Manage Azure DevOps with the `microsoft/azuredevops` provider
+
+```hcl
+terraform {
+  required_providers {
+    azuredevops = {
+      source  = "microsoft/azuredevops"
+      version = "~> 1.0"
+    }
+  }
+}
+
+# Auth via env: AZDO_ORG_SERVICE_URL + AZDO_PERSONAL_ACCESS_TOKEN
+# (or use the provider's Azure AD / WIF options instead of a PAT).
+provider "azuredevops" {}
+
+resource "azuredevops_project" "this" {
+  name               = "myproject"
+  visibility         = "private"
+  version_control    = "Git"
+  work_item_template = "Agile"
+}
+
+resource "azuredevops_git_repository" "app" {
+  project_id = azuredevops_project.this.id
+  name       = "app"
+  initialization { init_type = "Clean" }
+}
+
+# YAML pipeline backed by azure-pipelines.yml in the repo
+resource "azuredevops_build_definition" "ci" {
+  project_id = azuredevops_project.this.id
+  name       = "app-ci"
+  repository {
+    repo_type   = "TfsGit"
+    repo_id     = azuredevops_git_repository.app.id
+    branch_name = "refs/heads/main"
+    yml_path    = "azure-pipelines.yml"
+  }
+}
+
+# Variable group with a masked secret
+resource "azuredevops_variable_group" "shared" {
+  project_id   = azuredevops_project.this.id
+  name         = "shared-nonprod"
+  allow_access = true
+  variable { name = "region" value = "uksouth" }
+  variable {
+    name         = "apiKey"
+    secret_value = var.api_key
+    is_secret    = true
+  }
+}
+```
+
+> ✅ Keep the Terraform that *manages* Azure DevOps in its own state/repo with tight write access - it can rewrite pipelines, permissions, and service connections org-wide.
+
+---
+
+## Anti-patterns
+
+- 🚨 **Template repo refs pointing at `main`** - a moving ref means anyone with write to the templates repo can silently change what runs in prod. Pin repository resources to a tag or commit.
+
+- 🚨 **Interpolating `$(secret)` into a script body** - inline interpolation can leak the value via logs or process arguments. Map secrets through `env:` and never echo them.
+
+- 🚨 **`Grant access to all pipelines` on prod service connections** - any pipeline in the project can then use them. Authorise specific pipelines and add approvals/checks on the resource.
+
+- 🚨 **Secrets available to builds of fork PRs** - on public/forked repos this lets untrusted code exfiltrate secrets. Keep "Make secrets available to builds of forks" off.
+
+- 🚨 **Self-hosted agents attached to public projects** - untrusted PRs run arbitrary code on your infrastructure. Keep self-hosted agents off public-facing repos and isolate them.
+
+- ⚠️ **PATs as the default auth** - they expire, get stored in variables, and create rotation burden. Prefer Workload Identity Federation; if a PAT is unavoidable, scope it tightly and set a short expiry.
+
+- ⚠️ **Over-broad `System.AccessToken`** - and leaving "Limit job authorization scope" disabled. Grant the build identity the least repo/area access it needs and enable scope limiting org-wide.
+
+- ⚠️ **Classic (UI) pipelines for new work** - they aren't reviewable, versioned, or templatable. Author pipelines in YAML.
+
+- ⚠️ **Giant monolithic single-stage pipeline** - prod ends up one `git push` away. Split into stages with environment gates and approvals.
+
+- 🔬 **`condition: always()` on cleanup that assumes success** - teardown that runs unconditionally can fail or mask the real error on partial failure. Guard teardown against the failure case explicitly.
+
+---
+
+## References
+
+- [Azure Pipelines YAML schema](https://learn.microsoft.com/en-us/azure/devops/pipelines/yaml-schema/) - authoritative key reference
+- [Pipeline security walkthrough](https://learn.microsoft.com/en-us/azure/devops/pipelines/security/overview) - protected resources, checks, scopes
+- [Workload Identity Federation service connections](https://learn.microsoft.com/en-us/azure/devops/pipelines/library/connect-to-azure) - OIDC setup
+- [Templates](https://learn.microsoft.com/en-us/azure/devops/pipelines/process/templates) - step/job/stage/extends
+- [az devops CLI reference](https://learn.microsoft.com/en-us/cli/azure/devops) - full command list
+- [Microsoft-hosted agents](https://learn.microsoft.com/en-us/azure/devops/pipelines/agents/hosted) - images and limits

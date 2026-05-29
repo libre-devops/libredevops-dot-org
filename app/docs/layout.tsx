@@ -6,6 +6,7 @@ import 'nextra-theme-docs/style.css'
 import { DocsChangeButton } from '@/components/docs-change-button'
 import { NavbarToggle } from '@/components/navbar-toggle'
 import { PrintButton } from '@/components/print-button'
+import { ScrollNav } from '@/components/scroll-nav'
 
 export default async function DocsLayout({
     children
@@ -42,6 +43,7 @@ export default async function DocsLayout({
             }}
         >
             {children}
+            <ScrollNav />
         </Layout>
     )
 }

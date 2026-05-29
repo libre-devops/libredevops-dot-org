@@ -811,11 +811,11 @@ tasks:
 
 ## Anti-patterns
 
-- **Using `command` or `shell` for tasks modules already cover** - prefer idempotent modules (`apt`, `service`, `copy`, `template`) over raw shell commands; they handle check mode, diffs, and changed detection automatically.
-- **Not using `changed_when` / `failed_when` on `command`/`shell`** - these modules always report `changed`; set `changed_when: false` for read-only commands and `failed_when` for commands that return non-zero on warnings.
-- **Storing secrets in plain vars files or version control** - use `ansible-vault` for any credential. Never commit unencrypted passwords, tokens, or keys.
-- **Omitting FQCN for modules** - `apt` still works but `ansible.builtin.apt` is unambiguous across collections and avoids shadowing by custom modules.
-- **Putting all tasks in one giant playbook** - break large playbooks into roles and use `import_tasks` / `include_tasks`; it makes testing and reuse practical.
-- **Ignoring idempotency** - every task should be safe to run multiple times with the same result. Use `creates`, `removes`, `when`, and proper module state values rather than scripts that only work on a fresh system.
-- **Using `gather_facts: true` everywhere when facts aren't needed** - fact gathering adds latency on large inventories; disable with `gather_facts: false` for plays that don't need host facts.
-- **Hardcoding hosts in plays** - never put hostnames directly in `hosts:`; always use inventory groups so the same playbook works across environments.
+- ⚠️ **Using `command` or `shell` for tasks modules already cover** - prefer idempotent modules (`apt`, `service`, `copy`, `template`) over raw shell commands; they handle check mode, diffs, and changed detection automatically.
+- 🔬 **Not using `changed_when` / `failed_when` on `command`/`shell`** - these modules always report `changed`; set `changed_when: false` for read-only commands and `failed_when` for commands that return non-zero on warnings.
+- 🚨 **Storing secrets in plain vars files or version control** - use `ansible-vault` for any credential. Never commit unencrypted passwords, tokens, or keys.
+- 🔬 **Omitting FQCN for modules** - `apt` still works but `ansible.builtin.apt` is unambiguous across collections and avoids shadowing by custom modules.
+- ⚠️ **Putting all tasks in one giant playbook** - break large playbooks into roles and use `import_tasks` / `include_tasks`; it makes testing and reuse practical.
+- ⚠️ **Ignoring idempotency** - every task should be safe to run multiple times with the same result. Use `creates`, `removes`, `when`, and proper module state values rather than scripts that only work on a fresh system.
+- 🔬 **Using `gather_facts: true` everywhere when facts aren't needed** - fact gathering adds latency on large inventories; disable with `gather_facts: false` for plays that don't need host facts.
+- ⚠️ **Hardcoding hosts in plays** - never put hostnames directly in `hosts:`; always use inventory groups so the same playbook works across environments.

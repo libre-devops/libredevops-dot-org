@@ -1317,10 +1317,10 @@ kubectl annotate pod my-pod my-annotation=value -n my-namespace
 
 ## Anti-patterns
 
-- **Using `:latest` tag in production** - non-deterministic; a new pull can silently change behaviour. Pin to a specific version tag or digest (`image@sha256:...`).
-- **Running containers as root** - unnecessary privilege; use `USER nobody` in Dockerfile and `runAsNonRoot: true` in pod spec. Most apps do not need root.
-- **No resource `requests`/`limits` in Kubernetes** - without `requests`, a container can be scheduled on an overloaded node; without `limits`, it can OOM the node. Always set both.
-- **Storing sensitive values in `ConfigMap`** - ConfigMaps are not encrypted at rest or in etcd. Use `Secret` objects for credentials, and consider an external secrets operator (ESO, Vault Agent) for production.
-- **`docker system prune -af --volumes` on a shared host** - irreversibly destroys all stopped containers, images, and volumes, including ones used by other projects or users on the same machine.
-- **`kubectl delete pod --force --grace-period=0` as a routine fix** - bypasses graceful shutdown; the underlying cause (disk pressure, node issue, stuck finalizer) still needs investigation. Use this only for truly stuck pods.
-- **No `readinessProbe`** - without it, Kubernetes routes traffic to a pod immediately on startup, before the app is ready to serve. Always define readiness (and liveness) probes.
+- ⚠️ **Using `:latest` tag in production** - non-deterministic; a new pull can silently change behaviour. Pin to a specific version tag or digest (`image@sha256:...`).
+- 🚨 **Running containers as root** - unnecessary privilege; use `USER nobody` in Dockerfile and `runAsNonRoot: true` in pod spec. Most apps do not need root.
+- ⚠️ **No resource `requests`/`limits` in Kubernetes** - without `requests`, a container can be scheduled on an overloaded node; without `limits`, it can OOM the node. Always set both.
+- 🚨 **Storing sensitive values in `ConfigMap`** - ConfigMaps are not encrypted at rest or in etcd. Use `Secret` objects for credentials, and consider an external secrets operator (ESO, Vault Agent) for production.
+- 🚨 **`docker system prune -af --volumes` on a shared host** - irreversibly destroys all stopped containers, images, and volumes, including ones used by other projects or users on the same machine.
+- ⚠️ **`kubectl delete pod --force --grace-period=0` as a routine fix** - bypasses graceful shutdown; the underlying cause (disk pressure, node issue, stuck finalizer) still needs investigation. Use this only for truly stuck pods.
+- ⚠️ **No `readinessProbe`** - without it, Kubernetes routes traffic to a pod immediately on startup, before the app is ready to serve. Always define readiness (and liveness) probes.
