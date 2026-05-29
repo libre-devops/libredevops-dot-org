@@ -1,0 +1,578 @@
+---
+title: Bash Standards
+description: Production standards for writing, structuring, testing, and operating Bash - strict mode and safety, coding style and naming, quoting, functions, error handling and traps, structured logging, observability and Azure telemetry sync, ShellCheck and bats testing, and CI/CD. Targets Bash 4.4+.
+---
+
+# Bash Standards
+
+An opinionated, production-grade set of standards for writing Bash that is safe, predictable, observable, and testable. It covers strict mode, coding style and naming, quoting, functions, error handling and traps, structured logging, observability, shipping telemetry into Azure Monitor, ShellCheck and bats testing, and CI/CD.
+
+> **Scope:** Bash 4.4+ (5.x preferred) for automation, CI/CD glue, and operational tooling. macOS ships Bash 3.2 - install 5.x with Homebrew (`brew install bash`). If a script must run under POSIX `sh`, that is a different language with its own constraints; these standards assume a real `bash` interpreter. For anything with non-trivial data structures, real error types, or heavy logic, reach for Python or PowerShell instead - Bash is for orchestrating processes, not for building applications.
+>
+> **Grounding:** [Google Shell Style Guide](https://google.github.io/styleguide/shellguide.html) · [ShellCheck](https://www.shellcheck.net/) · [Bash manual](https://www.gnu.org/software/bash/manual/bash.html).
+
+---
+
+## Why standards?
+
+Bash is the most dangerous language most engineers use daily, precisely because it looks easy. Unquoted variables word-split, a failed command in the middle of a script is ignored by default, and a typo'd variable expands to the empty string. Standards turn Bash from a footgun into reliable automation:
+
+- Scripts fail loudly at the first error instead of silently continuing with corrupt state
+- Quoting and word-splitting bugs - the cause of most shell incidents - are designed out
+- ShellCheck catches whole classes of mistakes before review
+- Every script has the same shape, so any engineer can read and modify it
+- When to stop using Bash and switch to a real language is an explicit decision, not an accident
+
+> **Rule:** Know the ceiling. If a script grows past ~200 lines, needs associative data, parses JSON/YAML/XML, or does arithmetic-heavy logic, it has outgrown Bash. Rewrite it in Python or PowerShell. Bash excels at gluing commands together; it is a poor place for business logic.
+
+---
+
+## Tooling & Versions
+
+| Tool | Purpose | Notes |
+|:--|:--|:--|
+| `bash` | Interpreter | 4.4+ minimum, 5.x preferred |
+| `shellcheck` | Static analysis | The single most valuable Bash tool - run on every script |
+| `shfmt` | Formatter | Deterministic formatting; `shfmt -i 2` for 2-space indent |
+| `bats-core` | Testing | Unit tests with `bats-assert`, `bats-support`, `bats-file` |
+
+> **Rule:** ShellCheck is mandatory, not optional. Every script passes `shellcheck` with zero warnings in CI. Where a warning is a genuine false positive, suppress it inline with a justified `# shellcheck disable=SCxxxx` comment naming the reason - never disable globally.
+
+### Repository layout
+
+```
+my-tooling/
+├── bin/
+│   └── deploy                  # Executable entry points (chmod +x, no .sh extension)
+├── lib/
+│   ├── log.sh                  # Sourced helper libraries
+│   └── azure.sh
+├── tests/
+│   ├── deploy.bats
+│   └── test_helper/            # bats-support, bats-assert, bats-file (git submodules)
+├── .shellcheckrc               # ShellCheck config
+└── .editorconfig               # 2-space indent for *.sh / *.bash
+```
+
+> **Rule:** Executables in `bin/` have no file extension and are invoked by name (`deploy`, not `deploy.sh`); sourced libraries in `lib/` keep the `.sh` extension to signal "source me, do not execute me". A library must never run code at the top level beyond defining functions and readonly constants.
+
+---
+
+## Script Structure
+
+### Shebang and strict mode
+
+Every script starts identically. This preamble is non-negotiable.
+
+```bash
+#!/usr/bin/env bash
+#
+# deploy - deploy the application to an environment.
+# Usage: deploy --env <dev|prd> [--dry-run]
+
+set -Eeuo pipefail
+```
+
+`set -Eeuo pipefail` is four protections in one:
+
+| Flag | Effect |
+|:--|:--|
+| `-e` (`errexit`) | Exit immediately if any command exits non-zero (with important exceptions - see Error Handling) |
+| `-u` (`nounset`) | Treat expansion of an unset variable as an error, not the empty string |
+| `-o pipefail` | A pipeline fails if **any** stage fails, not just the last |
+| `-E` (`errtrace`) | `ERR` traps are inherited by functions, subshells, and command substitutions |
+
+> **Rule:** `#!/usr/bin/env bash`, never `#!/bin/bash`. `/bin/bash` does not exist on all systems (NixOS, some minimal containers, BSDs) and may be an old version. `env` resolves `bash` from `PATH`.
+
+### The `main` pattern
+
+Wrap the script body in functions and a `main`, called last with `"$@"`. This makes the script sourceable for testing (a test can source it without executing `main`) and keeps top-level scope clean.
+
+```bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# Declare then assign, then mark readonly - combining them would mask the
+# subshell's exit code (see Variables & Quoting).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
+source "${SCRIPT_DIR}/../lib/log.sh"
+
+usage() {
+  cat <<'EOF'
+Usage: deploy --env <dev|prd> [--dry-run]
+  --env       Target environment (required)
+  --dry-run   Print actions without executing
+  -h, --help  Show this help
+EOF
+}
+
+main() {
+  local env="" dry_run=false
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --env)     env="$2"; shift 2 ;;
+      --dry-run) dry_run=true; shift ;;
+      -h|--help) usage; exit 0 ;;
+      *) log_error "Unknown argument: $1"; usage >&2; exit 2 ;;
+    esac
+  done
+
+  [[ -n "${env}" ]] || { log_error "--env is required"; exit 2; }
+
+  log_info "Deploying to ${env} (dry_run=${dry_run})"
+  # ... real work ...
+}
+
+# Only run main when executed, not when sourced (e.g. by a bats test).
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
+fi
+```
+
+---
+
+## Coding Style & Naming
+
+Follow the [Google Shell Style Guide](https://google.github.io/styleguide/shellguide.html), enforced by `shfmt` and `shellcheck` so style is never a review topic.
+
+### Naming
+
+| Element | Convention | Example |
+|:--|:--|:--|
+| Functions | `lower_snake_case` | `deploy_stack`, `wait_for_port` |
+| Local variables | `lower_snake_case` | `local retry_count` |
+| Constants | `UPPER_SNAKE_CASE` + `readonly` | `readonly MAX_RETRIES=3` |
+| Exported / environment variables | `UPPER_SNAKE_CASE` | `export LOG_LEVEL` |
+| Global mutable state | `lower_snake_case`, minimised | (avoid where possible) |
+
+### Style rules
+
+- **2-space indentation, no tabs** (Google). Enforce with `shfmt -i 2 -w`.
+- **Functions use `name() { ... }`** - omit the `function` keyword (Google). Be consistent.
+- **`[[ ... ]]` for tests, never `[ ... ]`.** `[[` is a Bash keyword that does not word-split or glob its operands and supports `&&`, `||`, `=~`. `[` is an external-command relic with sharp edges.
+- **`$(( ... ))` for arithmetic**, not `expr` or `let`.
+- **`$(command)` for substitution, never backticks** - `$()` nests cleanly and is readable.
+- **`${var}` braces around every expansion** for clarity and to prevent ambiguity (`${name}_suffix`).
+- **Build command arguments as arrays**, never as a single string - this is how you pass arguments safely without `eval`.
+- **Lowercase `local`/`readonly` keywords; declare one variable per line** when it aids readability.
+
+```bash
+# ✅ Arrays carry arguments safely - quoting is preserved, no eval
+local -a tf_args=(plan -out tfplan -var-file "env/${env}.tfvars")
+terraform "${tf_args[@]}"
+
+# ❌ A string of arguments forces eval and breaks on spaces/globs
+local tf_args="plan -out tfplan -var-file env/${env}.tfvars"
+terraform $tf_args      # unquoted, word-split, glob-expanded - a bug waiting to happen
+```
+
+---
+
+## Variables & Quoting
+
+Quoting discipline is the single most important Bash skill. Most shell bugs are unquoted expansions.
+
+```bash
+# ✅ Always quote expansions
+rm -rf "${build_dir}"
+cp "${src}" "${dst}"
+for file in "${files[@]}"; do process "${file}"; done
+
+# ❌ Unquoted - if build_dir is empty, this becomes `rm -rf` then the rest of the cwd;
+#    if it contains spaces or globs, it splits and expands unpredictably
+rm -rf ${build_dir}
+```
+
+### Declaring locals - separate declaration from command substitution
+
+`local x="$(cmd)"` silently discards the exit code of `cmd` because `local` itself succeeds. Declare first, assign second, so `set -e` and `$?` see the real result.
+
+```bash
+# ✅ The exit code of the command is observable
+local result
+result="$(get_value)" || { log_error "get_value failed"; return 1; }
+
+# ❌ `local` masks the failure - $? is always 0 here, set -e never fires
+local result="$(get_value)"
+```
+
+### Rules
+
+- **Always quote `"$@"`** when forwarding arguments. `$@` unquoted word-splits; `"$@"` preserves each argument intact.
+- **Use arrays for lists**, never space-separated strings. Expand with `"${arr[@]}"`.
+- **`readonly` (or `declare -r`) for constants.** A constant that is reassigned is a bug ShellCheck and the runtime will catch.
+- **`local` for every function variable**, so it does not leak into global scope or clobber a caller's variable.
+- **Prefer parameter expansion over external tools** for simple string work: `"${var%.tar.gz}"`, `"${var##*/}"`, `"${var//old/new}"` instead of `sed`/`basename` forks.
+- **Use `mktemp` for temporary files and directories**, and clean them up in an `EXIT` trap (see below). Never hardcode `/tmp/myfile`.
+
+---
+
+## Functions
+
+```bash
+# A function: documented, locals declared, returns a status, emits data on stdout.
+#
+# Globals:  none
+# Arguments: $1 = host, $2 = port, $3 = timeout seconds (default 30)
+# Outputs:  nothing on stdout; diagnostics on stderr
+# Returns:  0 if the port opens within the timeout, 1 otherwise
+wait_for_port() {
+  local host="$1" port="$2" timeout="${3:-30}"
+  local elapsed=0
+
+  log_info "Waiting for ${host}:${port} (timeout ${timeout}s)"
+  while (( elapsed < timeout )); do
+    if timeout 1 bash -c ">/dev/tcp/${host}/${port}" 2>/dev/null; then
+      log_info "${host}:${port} is open"
+      return 0
+    fi
+    sleep 2
+    (( elapsed += 2 ))
+  done
+
+  log_error "Timed out waiting for ${host}:${port}"
+  return 1
+}
+```
+
+> **Rule:** Functions return a status code (0 success, non-zero failure) and emit data only on stdout; everything diagnostic goes to stderr (see Logging). A function that mixes log lines into stdout poisons `result="$(my_func)"` for every caller. Document `Globals`, `Arguments`, `Outputs`, and `Returns` in a comment above each non-trivial function (Google convention).
+
+---
+
+## Error Handling
+
+### `set -e` is necessary but not sufficient
+
+`set -e` (`errexit`) is essential, but it has well-known blind spots. Relying on it alone is a mistake. It does **not** exit when a failing command is:
+
+- Part of a condition (`if cmd; then`, `cmd && ...`, `cmd || ...`)
+- Negated (`! cmd`)
+- Anywhere but the last command of a pipeline (mitigated by `pipefail`)
+- A function called in any of the above contexts (the whole function loses `errexit`)
+
+```bash
+# ❌ This does NOT exit on failure - the command is in a condition, so errexit is suppressed,
+#    and the local masks the exit code anyway.
+if some_check; then :; fi
+
+# ✅ Be explicit about failures you care about
+if ! some_check; then
+  log_error "check failed"
+  exit 1
+fi
+
+# ✅ Or guard a single command
+deploy_step || { log_error "deploy_step failed"; exit 1; }
+```
+
+> **Rule:** Treat `set -e` as a safety net, not a strategy. Explicitly check the exit status of any command whose failure matters, especially inside conditionals and functions. Use `pipefail` so a failure anywhere in a pipeline is caught, and `-E` so the `ERR` trap fires inside functions.
+
+### The `ERR` trap - context on unexpected failure
+
+Capture the failing command and line number so a crash is diagnosable without guesswork. `set -E` (in the preamble) makes the trap fire inside functions and subshells.
+
+```bash
+on_err() {
+  local exit_code=$?
+  local line=$1
+  log_error "Command '${BASH_COMMAND}' failed at line ${line} (exit ${exit_code})"
+  exit "${exit_code}"
+}
+trap 'on_err ${LINENO}' ERR
+```
+
+### Cleanup with an `EXIT` trap
+
+Register cleanup that runs on every exit path - success, error, or interrupt. Combine with `mktemp` so temporary state never leaks.
+
+```bash
+readonly TMP_DIR="$(mktemp -d)"
+
+cleanup() {
+  local exit_code=$?
+  rm -rf "${TMP_DIR}"
+  # Add other teardown here (kill background jobs, remove locks, etc.)
+  exit "${exit_code}"
+}
+trap cleanup EXIT INT TERM
+```
+
+> **Rule:** Every script that creates temporary files, background processes, or locks registers a `trap cleanup EXIT INT TERM`. The `EXIT` trap runs on normal exit and after the `ERR` trap; `INT`/`TERM` cover Ctrl-C and termination signals. Capture `$?` first inside the handler so the original exit code is preserved.
+
+### Native exit codes and convention
+
+- `0` = success; any non-zero = failure.
+- Reserve `2` for usage errors (bad arguments), mirroring standard CLI convention.
+- Do not `exit 0` at the end "to be safe" - it masks a failing final command. Let the real status propagate.
+
+---
+
+## Logging
+
+The model is identical to other languages: **stdout is for data the caller consumes; stderr is for everything diagnostic.** This keeps `result="$(script.sh)"` clean even when the script logs heavily, and CI still surfaces both streams.
+
+### Leveled log helpers
+
+```bash
+# lib/log.sh - source this once.
+# LOG_LEVEL: DEBUG < INFO < WARN < ERROR (default INFO)
+: "${LOG_LEVEL:=INFO}"
+
+declare -rA _LOG_WEIGHTS=([DEBUG]=10 [INFO]=20 [WARN]=30 [ERROR]=40)
+
+_log() {
+  local level="$1"; shift
+  (( ${_LOG_WEIGHTS[$level]:-20} < ${_LOG_WEIGHTS[$LOG_LEVEL]:-20} )) && return 0
+  # ISO-8601 UTC timestamp; everything goes to stderr (>&2).
+  printf '%s  %-5s  %s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "${level}" "$*" >&2
+}
+
+log_debug() { _log DEBUG "$@"; }
+log_info()  { _log INFO  "$@"; }
+log_warn()  { _log WARN  "$@"; }
+log_error() { _log ERROR "$@"; }
+```
+
+### Structured JSON logging
+
+For scripts in containers or CI where a shipper (the OpenTelemetry Collector, Fluent Bit, the Azure Monitor agent) parses output, emit one JSON object per line. Build it with `jq` so values are escaped correctly - never concatenate strings into JSON.
+
+```bash
+log_json() {
+  local level="$1"; shift
+  jq -cn \
+    --arg ts    "$(date -u +'%Y-%m-%dT%H:%M:%S.%3NZ')" \
+    --arg level "${level}" \
+    --arg msg   "$*" \
+    --arg host  "$(hostname)" \
+    --arg trace "${TRACEPARENT:-}" \
+    '{timestamp: $ts, level: $level, message: $msg, host: $host, traceparent: $trace}' >&2
+}
+
+log_json INFO  "deploy started"
+log_json ERROR "apply failed: exit ${rc}"
+```
+
+> **Rule:** Diagnostics go to stderr (`>&2`); stdout is reserved for data. Build JSON with `jq` (or another real JSON tool), never with `printf`/string interpolation - hand-built JSON breaks on quotes, newlines, and special characters in values. Never log secrets; mask tokens and connection strings at the call site.
+
+---
+
+## Observability & Azure Telemetry Sync
+
+Bash has no native OpenTelemetry SDK. The honest, production-grade approaches are: (1) emit structured logs (above) that a collector scrapes and correlates; (2) propagate trace context via the `TRACEPARENT` environment variable so child processes join the parent's trace; (3) emit real spans with [`otel-cli`](https://github.com/equinix-labs/otel-cli), a single static binary that speaks OTLP.
+
+### Emit spans with `otel-cli`
+
+```bash
+# Run a command (or your whole script) inside a span. otel-cli times it, sets the span
+# status from the exit code, exports OTLP, and sets TRACEPARENT in the child environment
+# so nested otel-cli calls and your structured logs join the same trace.
+otel-cli exec --service deploy --name "terraform apply" -- \
+  terraform apply -auto-approve tfplan
+
+# Bracket a longer region with a background span. otel-cli holds the span open on a
+# unix socket in --sockdir; `span end` closes it. Add checkpoints with `span event`.
+sockdir="$(mktemp -d)"
+otel-cli span background --service deploy --name "deploy ${env}" --sockdir "${sockdir}" &
+run_deploy_steps                       # children join the trace via TRACEPARENT
+otel-cli span end --sockdir "${sockdir}"
+```
+
+```bash
+# Standard OpenTelemetry environment - the same script exports to any collector
+export OTEL_SERVICE_NAME="deploy"
+export OTEL_EXPORTER_OTLP_ENDPOINT="http://otel-collector:4317"
+export OTEL_RESOURCE_ATTRIBUTES="deployment.environment=prd,service.namespace=platform"
+```
+
+> **Rule:** Put the `TRACEPARENT` value into every structured log line (as above) so logs correlate with the span. Configure the exporter with standard `OTEL_*` variables rather than hardcoding endpoints, so the same script works against any backend.
+
+### Ship logs to Azure Monitor via the Logs Ingestion API
+
+To land structured records in a Log Analytics custom table, POST to the Logs Ingestion API through a Data Collection Endpoint (DCE) and Data Collection Rule (DCR). Authenticate with a managed identity or workload identity - never a workspace shared key. This supersedes the deprecated HTTP Data Collector API.
+
+```bash
+# Acquire a bearer token for the Monitor ingestion audience.
+# Managed identity on an Azure VM / container - query IMDS directly (no az CLI needed):
+get_monitor_token() {
+  if command -v az >/dev/null 2>&1; then
+    az account get-access-token --resource 'https://monitor.azure.com' --query accessToken -o tsv
+  else
+    curl -fsSL -H 'Metadata: true' \
+      'http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://monitor.azure.com' \
+      | jq -r '.access_token'
+  fi
+}
+
+send_log_analytics() {
+  local dce="$1" dcr_id="$2" stream="$3"
+  local records="$4"          # a JSON array string
+  local token
+  token="$(get_monitor_token)" || { log_error "token acquisition failed"; return 1; }
+
+  curl -fsSL -X POST \
+    "${dce}/dataCollectionRules/${dcr_id}/streams/${stream}?api-version=2023-01-01" \
+    -H "Authorization: Bearer ${token}" \
+    -H 'Content-Type: application/json' \
+    --data "${records}"
+}
+
+# Build the payload with jq (always a JSON array), then send.
+records="$(jq -cn \
+  --arg ts "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+  '[{TimeGenerated: $ts, Level: "Information", Message: "Deploy completed", Environment: "prd"}]')"
+
+send_log_analytics "${DCE_ENDPOINT}" "${DCR_IMMUTABLE_ID}" 'Custom-DeployLog_CL' "${records}"
+```
+
+> **Rule:** The identity needs the **Monitoring Metrics Publisher** role on the DCR, the payload is always a JSON array, and the destination table requires a `TimeGenerated` column. Prefer IMDS/managed identity on Azure-hosted runners and `az` (workload identity) on external runners; never embed a shared key.
+
+---
+
+## Testing
+
+### ShellCheck and shfmt are the first line
+
+```bash
+shellcheck bin/* lib/*.sh        # static analysis - zero warnings required
+shfmt -i 2 -d bin/ lib/          # show formatting diffs; -w to apply
+```
+
+### Unit tests with bats-core
+
+[`bats-core`](https://bats-core.readthedocs.io/) runs `.bats` files of `@test` blocks. Companion libraries (`bats-assert`, `bats-support`, `bats-file`) give readable assertions. Source the script under test rather than re-implementing it.
+
+```bash
+#!/usr/bin/env bats
+# tests/deploy.bats
+
+setup() {
+  load 'test_helper/bats-support/load'
+  load 'test_helper/bats-assert/load'
+  # Source the script - main() does not run because of the BASH_SOURCE guard.
+  source "${BATS_TEST_DIRNAME}/../bin/deploy"
+}
+
+@test "wait_for_port: returns 0 when the port is open" {
+  run wait_for_port localhost 22 1
+  assert_success
+}
+
+@test "main: rejects an unknown argument with exit 2" {
+  run main --bogus
+  assert_failure 2
+  assert_output --partial 'Unknown argument'
+}
+```
+
+### Mocking external commands via PATH override
+
+Bash has no mocking framework. The standard technique is to prepend a temp directory of fake executables to `PATH`.
+
+```bash
+@test "deploy calls terraform apply with the plan file" {
+  local mock_dir; mock_dir="$(mktemp -d)"
+  cat > "${mock_dir}/terraform" <<'EOF'
+#!/usr/bin/env bash
+echo "$@" >> "${MOCK_CALLS}"
+EOF
+  chmod +x "${mock_dir}/terraform"
+
+  export MOCK_CALLS="${BATS_TEST_TMPDIR}/calls.log"; : > "${MOCK_CALLS}"
+  PATH="${mock_dir}:${PATH}" run deploy_apply tfplan
+
+  assert_success
+  assert_file_contains "${MOCK_CALLS}" 'apply -auto-approve tfplan'
+}
+```
+
+### Testing strategy
+
+| Test type | Tool | Scope | When |
+|:--|:--|:--|:--|
+| Static analysis | ShellCheck | Every script | Every commit |
+| Format check | `shfmt -d` | Every script | Every commit |
+| Unit | bats-core + PATH mocks | One function, no real side effects | Every commit |
+| Integration | bats-core (no mocks) | Real commands in a sandbox | PR merge, nightly |
+
+> **Rule:** Unit tests never invoke real `terraform`, `az`, `kubectl`, or `rm` against anything that matters - mock them via PATH override. Tests run in `$BATS_TEST_TMPDIR` (auto-cleaned); never write to the working tree.
+
+---
+
+## CI/CD
+
+### Standard stage order
+
+```
+shellcheck → shfmt --diff → bats (unit) → [approval] → run
+```
+
+### GitHub Actions reference
+
+```yaml
+name: Bash
+
+on:
+  push: { branches: [main] }
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive          # pull in bats helper libraries
+
+      - name: ShellCheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: ./bin
+
+      - name: shfmt (format check)
+        run: |
+          curl -fsSL -o /usr/local/bin/shfmt https://github.com/mvdan/sh/releases/latest/download/shfmt_linux_amd64
+          chmod +x /usr/local/bin/shfmt
+          shfmt -i 2 -d bin/ lib/
+
+      - name: bats
+        run: |
+          git clone --depth 1 https://github.com/bats-core/bats-core.git /tmp/bats
+          /tmp/bats/bin/bats tests/
+```
+
+> **Rule:** ShellCheck and the `shfmt` diff check must fail the build on any finding. Run `shfmt -d` (diff) in CI, never `shfmt -w` (write) - formatting is fixed locally and committed, never mutated silently in the pipeline.
+
+---
+
+## Anti-patterns
+
+- 🚨 **No `set -Eeuo pipefail`** - without it a failed command mid-script is ignored, unset variables expand to empty (turning `rm -rf "${dir}/"` into `rm -rf /`), and pipeline failures vanish. Start every script with it.
+- 🚨 **Unquoted variable expansions** - `rm -rf $dir` word-splits and glob-expands; if `$dir` is empty or contains spaces it deletes the wrong thing. Always quote: `rm -rf "${dir}"`. Always forward arguments as `"$@"`, never `$@`.
+- 🚨 **`eval` on any dynamic string** - a code-injection vector and impossible to reason about. Build command arguments as an array and expand `"${cmd[@]}"`.
+- 🚨 **Parsing JSON, YAML, or XML with `grep`/`sed`/`awk`** - these are line-oriented and break on nesting, escaping, and whitespace. Use `jq` for JSON, `yq` for YAML, `xmllint` for XML.
+- 🚨 **`#!/bin/bash` shebang** - not portable; `/bin/bash` is absent or outdated on some systems. Use `#!/usr/bin/env bash`.
+- ⚠️ **`local x="$(cmd)"`** - `local` always succeeds, so the command's exit code is discarded and `set -e` never fires. Declare then assign: `local x; x="$(cmd)" || handle`.
+- ⚠️ **Relying on `set -e` inside conditionals and functions** - `errexit` is suppressed in `if`/`&&`/`||`/`!` contexts and lost across function calls in those contexts. Explicitly check exit status where failure matters.
+- ⚠️ **Logging to stdout from functions whose output is captured** - `result="$(my_func)"` swallows log lines into the data. Send all diagnostics to stderr (`>&2`); reserve stdout for return data.
+- ⚠️ **`cat file | grep ...` and `ls` parsing** - a useless fork (`grep ... file`) and a word-splitting hazard. Pass the file to the tool directly; iterate with globs (`for f in *.tf`) or `find ... -print0 | xargs -0`.
+- ⚠️ **Hardcoded temp paths** - `/tmp/work` races and collides. Use `mktemp -d` and remove it in an `EXIT` trap.
+- 🔬 **Building JSON by string concatenation** - breaks on quotes, newlines, and special characters in values. Build it with `jq -n`.
+- 🔬 **Logging secrets** - tokens, keys, and connection strings must be masked at the call site. The log/telemetry backend is not a vault.
+- 🔬 **Using Bash past its ceiling** - associative data, JSON manipulation, arithmetic-heavy logic, or scripts past a few hundred lines belong in Python or PowerShell. Forcing them into Bash produces unmaintainable, error-prone code.
+
+---
+
+## See Also
+
+- [Google Shell Style Guide](https://google.github.io/styleguide/shellguide.html)
+- [ShellCheck](https://www.shellcheck.net/) - static analysis for shell scripts
+- [shfmt](https://github.com/mvdan/sh) - shell formatter
+- [bats-core documentation](https://bats-core.readthedocs.io/) - Bash testing
+- [Bash manual](https://www.gnu.org/software/bash/manual/bash.html)
+- [otel-cli](https://github.com/equinix-labs/otel-cli) - emit OpenTelemetry spans from the shell
+- [Azure Monitor Logs Ingestion API](https://learn.microsoft.com/en-us/azure/azure-monitor/logs/logs-ingestion-api-overview)
+- [Bash Cheatsheet](/docs/cheatsheets/bash-cheatsheet) - quick-reference patterns
+- [Azure Naming Convention](/docs/documents/azure-naming-convention) - resource naming used in automation

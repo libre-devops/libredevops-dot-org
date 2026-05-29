@@ -604,7 +604,10 @@ resource "azuredevops_variable_group" "shared" {
   project_id   = azuredevops_project.this.id
   name         = "shared-nonprod"
   allow_access = true
-  variable { name = "region" value = "uksouth" }
+  variable {
+    name  = "region"
+    value = "uksouth"
+  }
   variable {
     name         = "apiKey"
     secret_value = var.api_key

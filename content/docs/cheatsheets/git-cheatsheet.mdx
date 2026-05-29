@@ -405,6 +405,7 @@ git log --all --full-history -- "**/my-file.ts"
 git cherry-pick abc1234             # apply a single commit to the current branch
 git cherry-pick abc1234^..def5678   # apply a range inclusive of abc1234 through def5678
 git cherry-pick --no-commit abc1234 # apply changes without committing
+```
 
 ---
 
@@ -417,4 +418,3 @@ git cherry-pick --no-commit abc1234 # apply changes without committing
 - 🔬 **`git stash` as long-term storage** - stashes are local and unnamed by default; easy to lose track of or apply to the wrong branch. Use a WIP branch instead for anything lasting more than a few minutes.
 - 🚨 **`git clean -fd` without `-n` (dry-run) first** - irreversibly deletes untracked files and directories including build artefacts you might want. Always run `-n` to preview first.
 - 🚨 **`git reset --hard` with uncommitted work** - permanently discards all changes with no recovery path. Stash or commit first.
-```

@@ -151,13 +151,13 @@ Reference: [Security Copilot Agent Development Overview](https://learn.microsoft
 - Cost: Comparable to VS Code with cloud integrations
 - Reference: [Kiro](https://kiro.dev/)
 
-**Microsoft MDASH** (Multi-model Distributed Agentic Security Harmonization) - Agentic security operations
-- Primary use: Multi-agent security orchestration combining multiple specialized models for threat detection, investigation, and response
-- Architecture: Master coordinator agent + specialized sub-agents (threat hunting, forensics, remediation)
-- Key feature: Distributes tasks across multiple models based on specialization (Copilot, Sentinel-tuned models, third-party)
-- Integration: Works with Sentinel, Defender, Security Copilot, custom Log Analytics queries
-- Best for: Large-scale security investigations, coordinated incident response, real-time threat correlation
-- Performance: Tops industry benchmarks for detection accuracy and response time
+**Microsoft MDASH** (Multi-Model Agentic Scanning Harness) - Autonomous vulnerability discovery
+- Primary use: Autonomous code security research - discovering, debating, and proving exploitable bugs end-to-end (not SOC/incident response)
+- Architecture: Orchestrates 100+ specialized agents across an ensemble of frontier and distilled models, in a multi-stage pipeline (scan → debate → validate → deduplicate → exploit)
+- Built by: Microsoft's Autonomous Code Security team
+- Key feature: Reasons across multiple files to find lifecycle/concurrency bugs and validates whether a vulnerability is practically exploitable, not just theoretical
+- Real-world results: Helped researchers find 16 new Windows networking/auth vulnerabilities (4 Critical RCE); found all 21 planted bugs in a private test driver with zero false positives
+- Performance: Scored 88.45% on the public CyberGym benchmark (1,507 real-world vulns), ahead of Mythos Preview (83.1%) and GPT-5.5 (81.8%)
 - Reference: [Microsoft Defense at AI Speed - MDASH](https://www.microsoft.com/en-us/security/blog/2026/05/12/defense-at-ai-speed-microsofts-new-multi-model-agentic-security-system-tops-leading-industry-benchmark/)
 
 **Microsoft Copilot Studio** - Low-code agent and copilot builder
@@ -186,7 +186,7 @@ Reference: [Security Copilot Agent Development Overview](https://learn.microsoft
 
 **PyTorch** - Deep learning framework (open-source)
 - Primary use: Custom model training, fine-tuning, research
-- Access: Python library, supports GPU/TPU via CUDA
+- Access: Python library; GPU acceleration via CUDA (NVIDIA) or ROCm (AMD); TPU support via PyTorch/XLA
 - Strengths: Flexible, Pythonic API, strong ecosystem (HuggingFace, Lightning), gradual backprop
 - Weaknesses: Larger memory footprint than TensorFlow; requires more boilerplate for production
 - Integration: Azure ML supports PyTorch via environments and training jobs
@@ -199,6 +199,44 @@ Reference: [Security Copilot Agent Development Overview](https://learn.microsoft
 - Weaknesses: Steeper learning curve; less flexible than PyTorch for research
 - Integration: Azure ML supports TensorFlow; can export to ONNX for cross-platform compatibility
 - Cost: Free; compute costs only
+
+**TensorFlow.js** - Run and train models in JavaScript (browser and Node.js)
+- Primary use: ML directly in the browser or in a Node.js service, with no Python runtime in the loop
+- Access: `@tensorflow/tfjs` (browser, WebGL/WebGPU backend), `@tensorflow/tfjs-node` (Node.js, native C++/CUDA bindings), `tfjs-react-native` (mobile)
+- When to use it:
+  - **Client-side inference** - run a model in the user's browser so data never leaves the device (privacy, GDPR), with zero inference cost and no server round-trip latency
+  - **Interactive/real-time UX** - webcam pose/gesture/face detection, in-page image classification, on-the-fly text moderation
+  - **Offline / edge** - PWAs and apps that must work without a backend
+  - **JS-native stacks** - teams already on Node/React who want inference without standing up a Python service
+- Why use it (vs. a Python API): no server-side GPU bill for inference, no network hop, data stays local, and it ships as part of the existing JS bundle
+- TensorFlow.js vs TensorFlow (Python):
+
+| | TensorFlow (Python) | TensorFlow.js |
+|:--|:--|:--|
+| Runtime | Python + CPU/GPU/TPU | Browser (WebGL/WebGPU) or Node.js |
+| Best at | Training, large models, data pipelines | Inference at the edge; light in-browser training/fine-tuning |
+| Performance | Full GPU/TPU, large batches | Browser limited by WebGL/WebGPU + client hardware; `tfjs-node` gets native speed |
+| Typical role | Train and serve the model | Consume the model client-side |
+| Model format | SavedModel / Keras `.keras` | `model.json` + binary weight shards |
+
+- Typical workflow: **train in Python, convert, serve in JS.** Convert a SavedModel/Keras model with the `tensorflowjs_converter` CLI (`pip install tensorflowjs`), then `tf.loadGraphModel()` / `tf.loadLayersModel()` in JS:
+
+```javascript
+import * as tf from '@tensorflow/tfjs'
+
+// Load a model converted from Python (served as static assets)
+const model = await tf.loadGraphModel('/models/classifier/model.json')
+
+// Inference entirely in the browser - input never leaves the device
+const input = tf.browser.fromPixels(imageElement).resizeBilinear([224, 224]).expandDims(0).div(255)
+const scores = model.predict(input)
+const top = (await scores.data())          // Float32Array of class probabilities
+tf.dispose([input, scores])                // free GPU/WebGL memory explicitly
+```
+
+- Gotchas: WebGL/WebGPU memory is not garbage-collected - wrap work in `tf.tidy()` or call `tf.dispose()`; large models bloat the JS bundle and cold-start; not a substitute for Python for serious training
+- Cost: Free; client-side inference shifts compute to the user's device (no server GPU cost)
+- Reference: [TensorFlow.js](https://www.tensorflow.org/js), [model converter](https://www.tensorflow.org/js/guide/conversion)
 
 **CUDA & cuDNN** - GPU acceleration for deep learning (NVIDIA)
 - Primary use: Hardware acceleration for PyTorch, TensorFlow, and other frameworks on NVIDIA GPUs
@@ -260,23 +298,25 @@ trainer.train()
 **Azure ML** - Managed ML platform (build, train, deploy)
 - Primary use: End-to-end ML lifecycle: data prep, training, hyperparameter tuning, deployment
 - Components: Designer (no-code), Notebooks (code), AutoML, Pipelines (workflows)
-- Integration: PyTorch, TensorFlow, scikit-learn, XGBoost; manages compute (CPU/GPU/TPU)
+- Integration: PyTorch, TensorFlow, scikit-learn, XGBoost; manages compute (CPU/GPU clusters)
 - Strengths: Managed compute, experiment tracking, model registry, CI/CD pipelines, RBAC
 - Cost: Pay for compute (training, inference) + storage; free tier available for learning
 - MLOps: Model versioning, A/B testing, monitoring in production, retraining triggers
 
-**Azure ML + Custom Models** - Fine-tune foundation models
+**Azure ML + Custom Models** - Fine-tune open foundation models
 ```python
 from azure.ai.ml import MLClient
 from azure.ai.ml.entities import CommandJob
 from azure.identity import DefaultAzureCredential
 
-# Fine-tune Claude or other foundation model
+# Fine-tune an OPEN foundation model (Llama, Phi, Mistral, etc.).
+# Note: closed models like Claude and GPT cannot be fine-tuned on Azure ML -
+# use the provider's own fine-tuning API (or Azure OpenAI fine-tuning for GPT).
 ml_client = MLClient.from_config(credential=DefaultAzureCredential())
 
 job = CommandJob(
     code="./scripts",
-    command="python finetune.py --model claude --epochs 3",
+    command="python finetune.py --model meta-llama/Llama-3.1-8B --epochs 3",
     environment="azureml:my-pytorch-env@latest",
     compute="gpu-cluster"
 )
@@ -373,7 +413,7 @@ ml_client.online_deployments.begin_create_or_update(deployment).result()
 | **GPT-5** | Latest general tasks, agentic | 128k | Very fast | $$$$ | Excellent |
 | **GPT-5-thinking** | Extended reasoning, complex problems | 128k | Medium | $$$$ | Expert-level |
 | **Security Copilot** | Security triage, investigations | Tenant data | Fast | Variable | Task-specific |
-| **MDASH** | Multi-agent security orchestration | Sentinel/Defender data | Fast | Variable | Expert-level |
+| **MDASH** | Autonomous vuln discovery/research | Source code | Slow | Variable | Expert-level |
 | **Copilot Studio** | Custom copilot + automation builder | N/A | Variable | $$ | Task-specific |
 | **Azure OpenAI** | Enterprise, compliance, VNet | Varies | Medium | $$$ | Excellent |
 | **Azure ML + PyTorch** | Custom model training, fine-tuning | N/A | Variable | $$$ | Task-specific |
@@ -1286,15 +1326,20 @@ Enterprise AI deployments require guardrails to prevent misuse, ensure safety, a
 
 ```hcl
 resource "azurerm_cognitive_account" "openai" {
-  name = "openai-ldo-uks-prd"
-  
-  # Enable content filtering
-  dynamic_throttling_enabled = true
-  
-  # In Azure portal: Guardrails → Create guardrail
-  # User prompt: Block on High severity (violence, hate, sexual, self-harm)
-  # Completions: Annotate on Medium, Block on High
+  name     = "openai-ldo-uks-prd"
+  kind     = "OpenAI"
+  sku_name = "S0"
+  # ... location, resource_group_name, etc.
 }
+
+# NOTE: Content filtering (RAI) policies are NOT configured on the cognitive
+# account itself. They are managed as a separate Responsible AI policy and
+# attached to each model DEPLOYMENT. azurerm has no first-class resource for
+# this yet - use azapi against the RaiPolicies / deployments REST API, or set
+# it in the portal:
+#   AI Foundry project -> Guardrails + controls -> Create guardrail
+#   User prompt: Block on High severity (violence, hate, sexual, self-harm)
+#   Completions: Annotate on Medium, Block on High
 ```
 
 ### Prompt Shields (Jailbreak Detection)
@@ -1321,13 +1366,15 @@ from azure.ai.services.content_safety import ContentSafetyClient
 client = ContentSafetyClient(endpoint, credential)
 
 # Check user input for jailbreak attempts
-detection_result = client.analyze_text(
-    text=user_prompt,
-    categories=["Jailbreak"],  # Direct attacks
-    output_type="FourLevel"    # 0-7 severity scale
+# Prompt Shields is a dedicated API (text:shieldPrompt), separate from
+# analyze_text harm-category scoring. It returns a boolean "attack detected"
+# for the user prompt and for any RAG documents you pass in.
+shield_result = client.shield_prompt(
+    user_prompt=user_prompt,
+    documents=[],  # pass RAG/context docs here to catch indirect attacks
 )
 
-if detection_result.jailbreak_result.severity >= 4:  # Medium or higher
+if shield_result.user_prompt_analysis.attack_detected:
     raise ValueError("Jailbreak attempt detected")
 ```
 

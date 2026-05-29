@@ -1,5 +1,8 @@
 export default {
-    'azure-naming-convention':   'Azure Naming Convention',
-    'terraform-standards':       'Terraform Standards',
     'azure-logic-app-standards': 'Azure Logic App Standards',
+    'azure-naming-convention':   'Azure Naming Convention',
+    'bash-standards':            'Bash Standards',
+    'powershell-standards':      'PowerShell Standards',
+    'python-standards':          'Python Standards',
+    'terraform-standards':       'Terraform Standards',
 }

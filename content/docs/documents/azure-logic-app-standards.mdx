@@ -842,7 +842,7 @@ Before choosing whether to use a module or write raw resources, decide whether t
 
 **A cookie-cutter Logic App has all of the following:**
 
-- Standard hosting: Linux OS, WS1–WS3 SKU, App Service Plan
+- Standard hosting: Linux OS, WS1-WS3 SKU, App Service Plan
 - Standard identity: System-assigned (or a single shared User-assigned) managed identity
 - Standard networking: optional VNet integration subnet, optional private endpoint - no ASE, no special network policies
 - Standard site config: `always_on`, TLS 1.2, FTPS disabled, HTTP2
@@ -1310,7 +1310,9 @@ resource "azurerm_logic_app_action_http" "kql_query" {
   name         = "HTTP_execute_kql_query"
   logic_app_id = azurerm_logic_app_standard.this.id
   method       = "POST"
-  uri          = "https://${var.log_analytics_workspace_name}.api.loganalytics.io/v1/workspaces/${azurerm_log_analytics_workspace.this.id}/query"
+  # Host is the shared api.loganalytics.io endpoint; the path takes the workspace
+  # GUID (customer ID) from .workspace_id, NOT the full ARM resource .id.
+  uri          = "https://api.loganalytics.io/v1/workspaces/${azurerm_log_analytics_workspace.this.workspace_id}/query"
   
   depends_on = [azurerm_logic_app_trigger_recurrence.daily_scan]
 }
@@ -1327,6 +1329,8 @@ resource "azurerm_logic_app_action_custom" "parse_results" {
 ### Workflow action standards (azurerm provider)
 
 Workflow actions are defined as separate Terraform resources using `azurerm_logic_app_action_*`. This approach provides explicit dependency management, clear action ordering, and testability. Actions execute sequentially based on `depends_on` (or conditionally via `runAfter` in the action body).
+
+> **Provider reality check:** The azurerm provider exposes exactly **two** Logic App *action* resources - [`azurerm_logic_app_action_http`](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/logic_app_action_http) and [`azurerm_logic_app_action_custom`](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/logic_app_action_custom) - plus three *trigger* resources (`_trigger_http_request`, `_trigger_recurrence`, `_trigger_custom`). There is **no** `_action_scope`, `_action_condition`, `_action_for_each`, `_action_initialize_variable`, or `_action_parse_json` resource. Every action other than a plain HTTP call is authored as an `azurerm_logic_app_action_custom` whose `body` is the action's JSON definition, with its `type` set accordingly (`Scope`, `If`, `Foreach`, `InitializeVariable`, `ParseJson`, `ApiConnection`, etc.). The examples below follow this rule.
 
 **Action selection and dependencies**
 
@@ -1387,11 +1391,13 @@ Workflow actions are defined as separate Terraform resources using `azurerm_logi
 **Avoid:** Declaring variables late (actions before initialization can't reference them); storing sensitive data (use Key Vault references instead)
 
 ```hcl
-resource "azurerm_logic_app_action_http" "initialize_variables" {
+resource "azurerm_logic_app_action_custom" "initialize_variables" {
   name                    = "Initialize_variables"
   logic_app_id            = azurerm_logic_app_standard.this.id
   
+  # type = "InitializeVariable" makes this a variable-init action, not an HTTP call.
   body = jsonencode({
+    type = "InitializeVariable"
     inputs = {
       variables = [
         {
@@ -1412,6 +1418,7 @@ resource "azurerm_logic_app_action_http" "initialize_variables" {
         }
       ]
     }
+    runAfter = {}
   })
 }
 ```
@@ -1453,7 +1460,7 @@ resource "azurerm_logic_app_action_http" "webhook_call" {
     threat_intel_source = var.threat_intel_watchlist_name
   })
   
-  depends_on = [azurerm_logic_app_action_http.initialize_variables]
+  depends_on = [azurerm_logic_app_action_custom.initialize_variables]
 }
 ```
 
@@ -1541,92 +1548,105 @@ resource "azurerm_logic_app_action_custom" "create_jira_ticket" {
 
 ```hcl
 # Try block - enrichment operations
-resource "azurerm_logic_app_action_scope" "scope_enrichment" {
+resource "azurerm_logic_app_action_custom" "scope_enrichment" {
   name         = "Scope_enrichment"
   logic_app_id = azurerm_logic_app_standard.this.id
-  
-  actions = jsonencode({
-    "Parse_enrichment_response" = {
-      type = "ParseJson"
-      inputs = {
-        content = "@body('HTTP_webhook_enrichment')"
-        schema = {
-          type       = "object"
-          properties = {
-            risk_score = { type = "number" }
-            assets     = { type = "array" }
+
+  # A Scope is a single custom action whose body nests its child actions
+  # under "actions". type = "Scope" is what makes it a scope, not an HTTP call.
+  body = jsonencode({
+    type = "Scope"
+    actions = {
+      "Parse_enrichment_response" = {
+        type = "ParseJson"
+        inputs = {
+          content = "@body('HTTP_webhook_enrichment')"
+          schema = {
+            type = "object"
+            properties = {
+              risk_score = { type = "number" }
+              assets     = { type = "array" }
+            }
           }
         }
+        runAfter = {}
       }
-      runAfter = {}
-    },
-    "Update_incident_tags" = {
-      type = "ApiConnection"
-      inputs = {
-        host = {
-          connection = { name = azurerm_api_connection.sentinel.id }
+      "Update_incident_tags" = {
+        type = "ApiConnection"
+        inputs = {
+          host = {
+            connection = { name = azurerm_api_connection.sentinel.id }
+          }
+          method = "patch"
+          path   = "/incidents/@{variables('incident_id')}"
+          body = {
+            # Pass enriched assets from webhook response
+            tags = "@{body('Parse_enrichment_response')?['assets']}"
+          }
         }
-        method = "patch"
-        path   = "/incidents/@{variables('incident_id')}"
-        body = {
-          # Pass enriched assets from webhook response
-          tags = "@{body('Parse_enrichment_response')?['assets']}"
+        runAfter = {
+          "Parse_enrichment_response" = ["Succeeded"]
         }
-      }
-      runAfter = {
-        "Parse_enrichment_response" = ["Succeeded"]
       }
     }
+    runAfter = {}
   })
-  
+
   depends_on = [azurerm_logic_app_action_http.webhook_call]
 }
 
 # Catch block - runs only if scope_enrichment fails
-resource "azurerm_logic_app_action_scope" "scope_error_handler" {
+resource "azurerm_logic_app_action_custom" "scope_error_handler" {
   name         = "Scope_error_handler"
   logic_app_id = azurerm_logic_app_standard.this.id
-  
-  actions = jsonencode({
-    "Log_error_to_law" = {
-      type = "ApiConnection"
-      inputs = {
-        host = {
-          connection = { name = azurerm_api_connection.log_analytics.id }
+
+  body = jsonencode({
+    type = "Scope"
+    actions = {
+      "Log_error_to_law" = {
+        type = "ApiConnection"
+        inputs = {
+          host = {
+            connection = { name = azurerm_api_connection.log_analytics.id }
+          }
+          method = "post"
+          # Reference DCE immutable ID from Terraform - not hardcoded
+          path = "/api/logs?api-version=2016-04-01&dce=${azurerm_monitor_data_collection_endpoint.this.immutable_id}"
+          body = {
+            TimeGenerated = "@utcNow()"
+            SourceSystem  = "LogicApp"
+            Message       = "@{string(outputs('Scope_enrichment'))}"
+            IncidentId    = "@{variables('incident_id')}"
+            Severity      = "@{variables('severity')}"
+          }
         }
-        method = "post"
-        # Reference DCE immutable ID from Terraform - not hardcoded
-        path = "/api/logs?api-version=2016-04-01&dce=${azurerm_monitor_data_collection_endpoint.this.immutable_id}"
-        body = {
-          TimeGenerated = "@utcNow()"
-          SourceSystem  = "LogicApp"
-          Message       = "@{string(outputs('Scope_enrichment'))}"
-          IncidentId    = "@{variables('incident_id')}"
-          Severity      = "@{variables('severity')}"
-        }
+        runAfter = {}
       }
-      runAfter = {}
-    },
-    "Alert_team_enrichment_failure" = {
-      type = "ApiConnection"
-      inputs = {
-        host = {
-          connection = { name = azurerm_api_connection.teams.id }
+      "Alert_team_enrichment_failure" = {
+        type = "ApiConnection"
+        inputs = {
+          host = {
+            connection = { name = azurerm_api_connection.teams.id }
+          }
+          method = "post"
+          path   = "/webhooks"
+          body = {
+            text = "Enrichment failed for incident @{variables('incident_id')} (@{variables('severity')}). Check logs."
+          }
         }
-        method = "post"
-        path   = "/webhooks"
-        body = {
-          text = "⚠️ Enrichment failed for incident @{variables('incident_id')} (@{variables('severity')}). Check logs."
+        runAfter = {
+          "Log_error_to_law" = ["Succeeded"]
         }
-      }
-      runAfter = {
-        "Log_error_to_law" = ["Succeeded"]
       }
     }
+    # This scope runs only when the enrichment scope fails or times out.
+    runAfter = {
+      "Scope_enrichment" = ["Failed", "TimedOut"]
+    }
   })
-  
+
   # Error handler runs when scope_enrichment fails (or times out)
-  depends_on = [azurerm_logic_app_action_scope.scope_enrichment]
+  depends_on = [azurerm_logic_app_action_custom.scope_enrichment]
 }
 ```
 
@@ -1642,12 +1662,12 @@ resource "azurerm_logic_app_action_scope" "scope_error_handler" {
 #   └─ Condition_severity_check
 #       └─ For_each_recipients
 
-resource "azurerm_logic_app_action_http" "initialize_variables" {
+resource "azurerm_logic_app_action_custom" "initialize_variables" {
   # ... (see above, no depends_on)
 }
 
 resource "azurerm_logic_app_action_http" "webhook_call" {
-  depends_on = [azurerm_logic_app_action_http.initialize_variables]
+  depends_on = [azurerm_logic_app_action_custom.initialize_variables]
   # ...
 }
 
@@ -1656,23 +1676,23 @@ resource "azurerm_logic_app_action_custom" "create_jira_ticket" {
   # ...
 }
 
-resource "azurerm_logic_app_action_scope" "scope_enrichment" {
+resource "azurerm_logic_app_action_custom" "scope_enrichment" {
   depends_on = [azurerm_logic_app_action_http.webhook_call]
   # ...
 }
 
-resource "azurerm_logic_app_action_scope" "scope_error_handler" {
-  depends_on = [azurerm_logic_app_action_scope.scope_enrichment]
+resource "azurerm_logic_app_action_custom" "scope_error_handler" {
+  depends_on = [azurerm_logic_app_action_custom.scope_enrichment]
   # Only runs on failure (express in body's runAfter)
 }
 
-resource "azurerm_logic_app_action_condition" "severity_check" {
-  depends_on = [azurerm_logic_app_action_http.initialize_variables]
+resource "azurerm_logic_app_action_custom" "severity_check" {
+  depends_on = [azurerm_logic_app_action_custom.initialize_variables]
   # ...
 }
 
-resource "azurerm_logic_app_action_for_each" "notify_recipients" {
-  depends_on = [azurerm_logic_app_action_condition.severity_check]
+resource "azurerm_logic_app_action_custom" "notify_recipients" {
+  depends_on = [azurerm_logic_app_action_custom.severity_check]
   # ...
 }
 ```
@@ -2050,9 +2070,11 @@ AzureDiagnostics
 
 ```hcl
 resource "azurerm_monitor_metric_alert" "logic_app_failures" {
+  for_each = module.logic_apps.logic_app_ids
+
   name                = "alert-${each.key}-failures"
   resource_group_name = var.rg_name
-  scopes              = [module.logic_apps.logic_app_ids[each.key]]
+  scopes              = [each.value]
   severity            = 1   # Critical
   frequency           = "PT5M"
   window_size         = "PT15M"

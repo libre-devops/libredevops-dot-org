@@ -133,11 +133,11 @@ terraform {
   required_providers {
     azurerm = {
       source  = "hashicorp/azurerm"
-      version = "~> 3.0"
+      version = "~> 4.0"
     }
     azapi = {
       source  = "azure/azapi"
-      version = "~> 1.0"
+      version = "~> 2.0"
     }
   }
 }
@@ -150,7 +150,7 @@ resource "azurerm_resource_group" "this" {
 
 # New resource only available in azapi - document why
 resource "azapi_resource" "new_service" {
-  # This service is not yet available in azurerm provider v3.x
+  # This service is not yet available in the azurerm provider (v4.x)
   type = "Microsoft.NewService/services@2024-01-01"
   name = "new-service-instance"
   # ...
@@ -249,8 +249,8 @@ The federated credential on the App Registration in Entra ID must match the exac
 |:--|:--|:--|:--|:--|
 | OIDC / federated | Per-job (~10 min) | Automatic | Minimal - token is already expired | **Use this** |
 | Managed Identity | N/A | Automatic | None - no credential issued | Use for Azure-hosted runners |
-| Client secret | 0–24 months | Manual | Full subscription access until rotated | Never |
-| Certificate | 0–24 months | Manual | Full subscription access until rotated | Never |
+| Client secret | 0-24 months | Manual | Full subscription access until rotated | Never |
+| Certificate | 0-24 months | Manual | Full subscription access until rotated | Never |
 
 > **Rule:** If the pipeline runner is itself an Azure resource (self-hosted agent on an AKS node, Azure VM, Container App), use **Managed Identity** instead of OIDC - no credential of any kind is needed. OIDC is for external runners (GitHub-hosted, Azure DevOps Microsoft-hosted) that cannot carry a managed identity.
 
@@ -491,6 +491,15 @@ variable "logic_apps" {
       })), [])
     }), {})
   }))
+
+  # Validate nested attributes of every element. This is what the
+  # `expect_failures = [var.logic_apps]` test below asserts against.
+  validation {
+    condition = alltrue([
+      for app in var.logic_apps : can(regex("^(WS[123]|EP[123]|Y1)$", app.sku_name))
+    ])
+    error_message = "Each logic_apps[*].sku_name must be a valid Logic App SKU: WS1, WS2, WS3, EP1, EP2, EP3, or Y1."
+  }
 }
 ```
 
@@ -2291,8 +2300,6 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
-    import textwrap  # noqa: PLC0415 - import here so the module works without it at top
-
     args = build_parser().parse_args()
     errors: list[str] = []
     root = Path.cwd()

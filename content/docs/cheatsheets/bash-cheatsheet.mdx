@@ -27,7 +27,7 @@ set -euo pipefail
 
 ```bash
 #!/usr/bin/env bash
-[ "$(whoami)" = root ] || { sudo "$0" "$@"; exit $?; }
+[[ "$(whoami)" == root ]] || { sudo "$0" "$@"; exit $?; }
 ```
 
 ---
@@ -38,18 +38,18 @@ Drop these into your script or `.bashrc` for consistent coloured output.
 
 ```bash
 print_success() {
-    local lightcyan='\033[1;36m' nocolor='\033[0m'
-    echo -e "${lightcyan}$1${nocolor}"
+  local lightcyan='\033[1;36m' nocolor='\033[0m'
+  echo -e "${lightcyan}$1${nocolor}"
 }
 
 print_error() {
-    local lightred='\033[1;31m' nocolor='\033[0m'
-    echo -e "${lightred}$1${nocolor}"
+  local lightred='\033[1;31m' nocolor='\033[0m'
+  echo -e "${lightred}$1${nocolor}"
 }
 
 print_alert() {
-    local yellow='\033[1;33m' nocolor='\033[0m'
-    echo -e "${yellow}$1${nocolor}"
+  local yellow='\033[1;33m' nocolor='\033[0m'
+  echo -e "${yellow}$1${nocolor}"
 }
 ```
 
@@ -72,15 +72,15 @@ LOG_LEVEL="${LOG_LEVEL:-INFO}"
 declare -A _LOG_WEIGHTS=( [DEBUG]=10 [INFO]=20 [WARN]=30 [ERROR]=40 )
 
 _log() {
-    local level="$1"; shift
-    local msg="$*"
-    local want="${_LOG_WEIGHTS[$LOG_LEVEL]:-20}"
-    local have="${_LOG_WEIGHTS[$level]:-20}"
-    (( have < want )) && return 0
+  local level="$1"; shift
+  local msg="$*"
+  local want="${_LOG_WEIGHTS[$LOG_LEVEL]:-20}"
+  local have="${_LOG_WEIGHTS[$level]:-20}"
+  (( have < want )) && return 0
 
-    # ISO-8601 UTC timestamp, level-padded, write to stderr so stdout stays for data.
-    printf '%s  %-5s  %s\n' \
-        "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$level" "$msg" >&2
+  # ISO-8601 UTC timestamp, level-padded, write to stderr so stdout stays for data.
+  printf '%s  %-5s  %s\n' \
+    "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$level" "$msg" >&2
 }
 
 log_debug() { _log DEBUG "$@"; }
@@ -102,8 +102,8 @@ Anything diagnostic goes to **stderr** (`>&2`); stdout is reserved for **data th
 ```bash
 # Right - log to stderr, return JSON on stdout
 get_vault_secret() {
-    log_info "Fetching secret $1"
-    az keyvault secret show --vault-name "$kv" --name "$1" --query value -o tsv
+  log_info "Fetching secret $1"
+  az keyvault secret show --vault-name "$kv" --name "$1" --query value -o tsv
 }
 
 secret=$(get_vault_secret "db-password")   # secret captured, logs printed live
@@ -115,16 +115,16 @@ If a log shipper (Fluent Bit, Vector, Loki agent) is parsing your output, emit J
 
 ```bash
 log_json() {
-    local level="$1"; shift
-    local msg="$*"
-    # Use jq to escape values correctly - never string-concat into JSON.
-    jq -cn \
-        --arg ts    "$(date -u +'%Y-%m-%dT%H:%M:%S.%3NZ')" \
-        --arg level "$level" \
-        --arg msg   "$msg" \
-        --arg host  "$(hostname)" \
-        --arg pid   "$$" \
-        '{ts: $ts, level: $level, host: $host, pid: ($pid|tonumber), msg: $msg}' >&2
+  local level="$1"; shift
+  local msg="$*"
+  # Use jq to escape values correctly - never string-concat into JSON.
+  jq -cn \
+    --arg ts    "$(date -u +'%Y-%m-%dT%H:%M:%S.%3NZ')" \
+    --arg level "$level" \
+    --arg msg   "$msg" \
+    --arg host  "$(hostname)" \
+    --arg pid   "$$" \
+    '{ts: $ts, level: $level, host: $host, pid: ($pid|tonumber), msg: $msg}' >&2
 }
 
 log_json INFO  "deploy started"
@@ -142,9 +142,9 @@ Capture line number and command on unhandled errors so you don't have to guess w
 set -Eeuo pipefail
 
 on_err() {
-    local exit_code=$?
-    log_error "command '$BASH_COMMAND' failed at line $1 (exit=$exit_code)"
-    exit "$exit_code"
+  local exit_code=$?
+  log_error "command '$BASH_COMMAND' failed at line $1 (exit=$exit_code)"
+  exit "$exit_code"
 }
 trap 'on_err $LINENO' ERR
 ```
@@ -166,15 +166,15 @@ trap 'on_err $LINENO' ERR
 
 ```bash
 title_case_convert() {
-    sed 's/.*/\L&/; s/[a-z]*/\u&/g' <<<"$1"
+  sed 's/.*/\L&/; s/[a-z]*/\u&/g' <<<"$1"
 }
 
 upper_case_convert() {
-    sed -e 's/\(.*\)/\U\1/' <<< "$1"
+  sed -e 's/\(.*\)/\U\1/' <<< "$1"
 }
 
 lower_case_convert() {
-    sed -e 's/\(.*\)/\L\1/' <<< "$1"
+  sed -e 's/\(.*\)/\L\1/' <<< "$1"
 }
 ```
 
@@ -239,9 +239,9 @@ set -euo pipefail
 START=$(pwd)
 
 while IFS= read -r dir; do
-    cd "$dir"
-    ./my-script.sh || echo "Script not in $dir, skipping"
-    cd "$START"
+  cd "$dir"
+  ./my-script.sh || echo "Script not in $dir, skipping"
+  cd "$START"
 done < <(find . -maxdepth 1 -mindepth 1 -type d)
 ```
 
@@ -261,15 +261,15 @@ sort_script="${TERRAFORM_SORT_SCRIPT:-./terraform-sort.sh}"
 workspace=$(find "${location}" -maxdepth 1 -name "terraform-${provider}-*" -type d | sort)
 
 for dir in ${workspace}; do
-    cd "${dir}"
-    echo "Processing: ${dir}"
-    if [[ -x "$sort_script" ]]; then
-        "$sort_script" --sort-variables --sort-outputs --format-terraform --generate-readme
-    else
-        # Fallback: fmt only when sort script not present
-        terraform fmt -recursive
-    fi
-    cd "${back}"
+  cd "${dir}"
+  echo "Processing: ${dir}"
+  if [[ -x "$sort_script" ]]; then
+    "$sort_script" --sort-variables --sort-outputs --format-terraform --generate-readme
+  else
+    # Fallback: fmt only when sort script not present
+    terraform fmt -recursive
+  fi
+  cd "${back}"
 done
 ```
 
@@ -282,93 +282,93 @@ Appends a reusable `tfsort` function to `.bashrc` that sorts variable and output
 ```bash
 #!/usr/bin/env bash
 
-function tfsort() {
-    # Requires: terraform, terraform-docs, gawk
-    # Usage: tfsort [--readme-header-file HEADER.md]
-    local readme_header_file=""
+tfsort() {
+  # Requires: terraform, terraform-docs, gawk
+  # Usage: tfsort [--readme-header-file HEADER.md]
+  local readme_header_file=""
 
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --readme-header-file) readme_header_file="$2"; shift 2 ;;
-            *) echo "Unknown option: $1" >&2; return 1 ;;
-        esac
-    done
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --readme-header-file) readme_header_file="$2"; shift 2 ;;
+      *) echo "Unknown option: $1" >&2; return 1 ;;
+    esac
+  done
 
-    # Verify required tools
-    for tool in terraform terraform-docs gawk; do
-        command -v "$tool" &>/dev/null || { echo "ERROR: $tool not found in PATH" >&2; return 1; }
-    done
+  # Verify required tools
+  for tool in terraform terraform-docs gawk; do
+    command -v "$tool" &>/dev/null || { echo "ERROR: $tool not found in PATH" >&2; return 1; }
+  done
 
-    [[ -f main.tf || -f build.tf ]] \
-        || { echo "ERROR: no main.tf or build.tf found - not a module root" >&2; return 1; }
+  [[ -f main.tf || -f build.tf ]] \
+    || { echo "ERROR: no main.tf or build.tf found - not a module root" >&2; return 1; }
 
-    echo ">> terraform fmt"
-    terraform fmt -recursive
+  echo ">> terraform fmt"
+  terraform fmt -recursive
 
-    # Sort variable blocks
-    if [[ -f variables.tf ]]; then
-        echo ">> sorting variables.tf"
-        _tf_sort_blocks variables.tf variable
-    fi
+  # Sort variable blocks
+  if [[ -f variables.tf ]]; then
+    echo ">> sorting variables.tf"
+    _tf_sort_blocks variables.tf variable
+  fi
 
-    # Sort output blocks
-    if [[ -f outputs.tf ]]; then
-        echo ">> sorting outputs.tf"
-        _tf_sort_blocks outputs.tf output
-    fi
+  # Sort output blocks
+  if [[ -f outputs.tf ]]; then
+    echo ">> sorting outputs.tf"
+    _tf_sort_blocks outputs.tf output
+  fi
 
-    # Write README header if provided, then inject terraform-docs
-    if [[ -n "$readme_header_file" ]]; then
-        [[ -f "$readme_header_file" ]] \
-            || { echo "ERROR: header file not found: $readme_header_file" >&2; return 1; }
-        cat "$readme_header_file" > README.md
-        printf '\n\n<!-- BEGIN_TF_DOCS -->\n<!-- END_TF_DOCS -->\n' >> README.md
-    fi
+  # Write README header if provided, then inject terraform-docs
+  if [[ -n "$readme_header_file" ]]; then
+    [[ -f "$readme_header_file" ]] \
+      || { echo "ERROR: header file not found: $readme_header_file" >&2; return 1; }
+    cat "$readme_header_file" > README.md
+    printf '\n\n<!-- BEGIN_TF_DOCS -->\n<!-- END_TF_DOCS -->\n' >> README.md
+  fi
 
-    if [[ -f .terraform-docs.yml ]]; then
-        echo ">> terraform-docs . (using .terraform-docs.yml)"
-        terraform-docs .
-    else
-        [[ -f README.md ]] \
-            || printf '<!-- BEGIN_TF_DOCS -->\n<!-- END_TF_DOCS -->\n' > README.md
-        echo ">> terraform-docs markdown table --output-mode inject"
-        terraform-docs markdown table --output-file README.md --output-mode inject .
-    fi
+  if [[ -f .terraform-docs.yml ]]; then
+    echo ">> terraform-docs . (using .terraform-docs.yml)"
+    terraform-docs .
+  else
+    [[ -f README.md ]] \
+      || printf '<!-- BEGIN_TF_DOCS -->\n<!-- END_TF_DOCS -->\n' > README.md
+    echo ">> terraform-docs markdown table --output-mode inject"
+    terraform-docs markdown table --output-file README.md --output-mode inject .
+  fi
 
-    echo "Done."
+  echo "Done."
 }
 
 # Helper: sort variable or output blocks in a file using gawk brace-depth counting
-function _tf_sort_blocks() {
-    local file="$1" keyword="$2" tmp_dir count=0
+_tf_sort_blocks() {
+  local file="$1" keyword="$2" tmp_dir count=0
 
-    tmp_dir="$(mktemp -d)"
+  tmp_dir="$(mktemp -d)"
 
-    gawk -v kw="$keyword" -v tmpdir="$tmp_dir" '
-    BEGIN { in_block=0; depth=0; block=""; name="" }
-    !in_block && match($0, "^" kw " \"([^\"]+)\" \\{", arr) {
-        name=arr[1]; in_block=1; depth=0; block=$0"\n"
-        for(i=1;i<=length($0);i++){c=substr($0,i,1);if(c=="{")depth++;else if(c=="}")depth--}
-        if(depth==0){sub(/\n$/,"",block);print block>(tmpdir"/"name".tf");close(tmpdir"/"name".tf");in_block=0;block="";name=""}
-        next
-    }
-    in_block {
-        block=block $0"\n"
-        for(i=1;i<=length($0);i++){c=substr($0,i,1);if(c=="{")depth++;else if(c=="}")depth--}
-        if(depth==0){sub(/\n$/,"",block);print block>(tmpdir"/"name".tf");close(tmpdir"/"name".tf");in_block=0;block="";name=""}
-    }
-    ' "$file"
+  gawk -v kw="$keyword" -v tmpdir="$tmp_dir" '
+  BEGIN { in_block=0; depth=0; block=""; name="" }
+  !in_block && match($0, "^" kw " \"([^\"]+)\" \\{", arr) {
+    name=arr[1]; in_block=1; depth=0; block=$0"\n"
+    for(i=1;i<=length($0);i++){c=substr($0,i,1);if(c=="{")depth++;else if(c=="}")depth--}
+    if(depth==0){sub(/\n$/,"",block);print block>(tmpdir"/"name".tf");close(tmpdir"/"name".tf");in_block=0;block="";name=""}
+    next
+  }
+  in_block {
+    block=block $0"\n"
+    for(i=1;i<=length($0);i++){c=substr($0,i,1);if(c=="{")depth++;else if(c=="}")depth--}
+    if(depth==0){sub(/\n$/,"",block);print block>(tmpdir"/"name".tf");close(tmpdir"/"name".tf");in_block=0;block="";name=""}
+  }
+  ' "$file"
 
-    local output="" first=true
-    while IFS= read -r -d $'\0' bf; do
-        $first && output="$(cat "$bf")" && first=false \
-               || output="$output"$'\n\n'"$(cat "$bf")"
-        count=$((count + 1))
-    done < <(find "$tmp_dir" -name '*.tf' -print0 | sort -z)
+  local output="" first=true
+  while IFS= read -r -d $'\0' bf; do
+    $first && output="$(cat "$bf")" && first=false \
+      || output="$output"$'\n\n'"$(cat "$bf")"
+    count=$((count + 1))
+  done < <(find "$tmp_dir" -name '*.tf' -print0 | sort -z)
 
-    rm -rf "$tmp_dir"
-    [[ $count -gt 0 ]] && printf '%s\n' "$output" > "$file" \
-                       || echo "WARNING: no $keyword blocks found in $file"
+  rm -rf "$tmp_dir"
+  [[ $count -gt 0 ]] && printf '%s\n' "$output" > "$file" \
+    || echo "WARNING: no $keyword blocks found in $file"
 }
 
 # Append both functions to .bashrc
@@ -415,34 +415,34 @@ git submodule add https://github.com/bats-core/bats-file.git           test/test
 # test/string_utils.bats
 
 setup() {
-    load 'test_helper/bats-support/load'
-    load 'test_helper/bats-assert/load'
-    load 'test_helper/bats-file/load'
+  load 'test_helper/bats-support/load'
+  load 'test_helper/bats-assert/load'
+  load 'test_helper/bats-file/load'
 
-    # Source the script under test
-    PROJECT_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
-    source "$PROJECT_ROOT/lib/string_utils.sh"
+  # Source the script under test
+  PROJECT_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)"
+  source "$PROJECT_ROOT/lib/string_utils.sh"
 }
 
 @test "upper_case_convert: lowercase input -> uppercase" {
-    run upper_case_convert "hello"
-    assert_success
-    assert_output "HELLO"
+  run upper_case_convert "hello"
+  assert_success
+  assert_output "HELLO"
 }
 
 @test "upper_case_convert: already uppercase is unchanged" {
-    run upper_case_convert "FOO"
-    assert_output "FOO"
+  run upper_case_convert "FOO"
+  assert_output "FOO"
 }
 
 @test "title_case_convert: handles multiple words" {
-    run title_case_convert "hello world"
-    assert_output "Hello World"
+  run title_case_convert "hello world"
+  assert_output "Hello World"
 }
 
 @test "non-existent function fails cleanly" {
-    run not_a_real_function
-    assert_failure
+  run not_a_real_function
+  assert_failure
 }
 ```
 
@@ -450,23 +450,23 @@ setup() {
 
 ```bash
 @test "assertion examples" {
-    run echo "hello world"
+  run echo "hello world"
 
-    assert_success                       # exit code 0
-    assert_failure                       # non-zero exit
-    assert_failure 2                     # specific exit code
+  assert_success                       # exit code 0
+  assert_failure                       # non-zero exit
+  assert_failure 2                     # specific exit code
 
-    assert_output "hello world"          # exact match
-    assert_output --partial "hello"      # substring
-    assert_output --regexp '^hello.*$'   # regex
+  assert_output "hello world"          # exact match
+  assert_output --partial "hello"      # substring
+  assert_output --regexp '^hello.*$'   # regex
 
-    refute_output "goodbye"              # negative match
-    assert_line --index 0 "hello world"  # specific line in multi-line output
+  refute_output "goodbye"              # negative match
+  assert_line --index 0 "hello world"  # specific line in multi-line output
 
-    # File assertions (from bats-file)
-    assert_file_exist  /etc/hostname
-    assert_file_executable ./deploy.sh
-    assert_file_contains /etc/hostname "expected"
+  # File assertions (from bats-file)
+  assert_file_exist  /etc/hostname
+  assert_file_executable ./deploy.sh
+  assert_file_contains /etc/hostname "expected"
 }
 ```
 
@@ -474,23 +474,23 @@ setup() {
 
 ```bash
 setup_file() {
-    # Once per file - heavy setup goes here
-    export FIXTURE_DIR="$(mktemp -d)"
-    cp -r tests/fixtures/* "$FIXTURE_DIR"
+  # Once per file - heavy setup goes here
+  export FIXTURE_DIR="$(mktemp -d)"
+  cp -r tests/fixtures/* "$FIXTURE_DIR"
 }
 
 teardown_file() {
-    rm -rf "$FIXTURE_DIR"
+  rm -rf "$FIXTURE_DIR"
 }
 
 setup() {
-    # Per test - light/cheap setup
-    cd "$BATS_TEST_TMPDIR"   # fresh temp dir per test, auto-cleaned
+  # Per test - light/cheap setup
+  cd "$BATS_TEST_TMPDIR"   # fresh temp dir per test, auto-cleaned
 }
 
 teardown() {
-    # Per test - rarely needed; $BATS_TEST_TMPDIR is auto-removed
-    :
+  # Per test - rarely needed; $BATS_TEST_TMPDIR is auto-removed
+  :
 }
 ```
 
@@ -500,21 +500,21 @@ Bash has no built-in mocking. The standard trick: prepend a temp directory to `P
 
 ```bash
 @test "deploy.sh calls terraform apply with -auto-approve" {
-    local mock_dir; mock_dir=$(mktemp -d)
+  local mock_dir; mock_dir=$(mktemp -d)
 
-    # Fake `terraform` that records its args and exits 0
-    cat > "$mock_dir/terraform" <<'EOF'
+  # Fake `terraform` that records its args and exits 0
+  cat > "$mock_dir/terraform" <<'EOF'
 #!/usr/bin/env bash
 echo "$@" >> "$MOCK_CALLS"
 EOF
-    chmod +x "$mock_dir/terraform"
+  chmod +x "$mock_dir/terraform"
 
-    export MOCK_CALLS="$BATS_TEST_TMPDIR/calls.log"
-    : > "$MOCK_CALLS"
-    PATH="$mock_dir:$PATH" run ./deploy.sh prod
+  export MOCK_CALLS="$BATS_TEST_TMPDIR/calls.log"
+  : > "$MOCK_CALLS"
+  PATH="$mock_dir:$PATH" run ./deploy.sh prod
 
-    assert_success
-    assert_file_contains "$MOCK_CALLS" "apply -auto-approve"
+  assert_success
+  assert_file_contains "$MOCK_CALLS" "apply -auto-approve"
 }
 ```
 
@@ -524,15 +524,15 @@ If the script under test calls a helper function (not an external binary), redef
 
 ```bash
 @test "deploy aborts if precheck fails" {
-    source ./deploy.sh
+  source ./deploy.sh
 
-    # Override the precheck function
-    run_precheck() { return 1; }
-    export -f run_precheck
+  # Override the precheck function
+  run_precheck() { return 1; }
+  export -f run_precheck
 
-    run deploy_main
-    assert_failure
-    assert_output --partial "precheck failed"
+  run deploy_main
+  assert_failure
+  assert_output --partial "precheck failed"
 }
 ```
 
@@ -606,28 +606,28 @@ SERVICE_CMD="python3 /opt/service/main.py"
 LOG_FILE="/var/log/my-service.log"
 
 check_and_restart() {
-    if [[ -f "$SERVICE_PID_FILE" ]]; then
-        local pid=$(cat "$SERVICE_PID_FILE")
-        if ! kill -0 "$pid" 2>/dev/null; then
-            echo "Process $pid is dead, restarting..." | tee -a "$LOG_FILE"
-            rm -f "$SERVICE_PID_FILE"
-            start_service
-        fi
-    else
-        start_service
+  if [[ -f "$SERVICE_PID_FILE" ]]; then
+    local pid=$(cat "$SERVICE_PID_FILE")
+    if ! kill -0 "$pid" 2>/dev/null; then
+      echo "Process $pid is dead, restarting..." | tee -a "$LOG_FILE"
+      rm -f "$SERVICE_PID_FILE"
+      start_service
     fi
+  else
+    start_service
+  fi
 }
 
 start_service() {
-    echo "Starting service..." | tee -a "$LOG_FILE"
-    $SERVICE_CMD >> "$LOG_FILE" 2>&1 &
-    echo $! > "$SERVICE_PID_FILE"
+  echo "Starting service..." | tee -a "$LOG_FILE"
+  $SERVICE_CMD >> "$LOG_FILE" 2>&1 &
+  echo $! > "$SERVICE_PID_FILE"
 }
 
 # Run every 30 seconds
 while true; do
-    check_and_restart
-    sleep 30
+  check_and_restart
+  sleep 30
 done
 ```
 
@@ -638,25 +638,25 @@ done
 # Check if a service is healthy; retry with exponential backoff
 
 health_check() {
-    local endpoint="$1"
-    local max_retries=5
-    local retry=0
-    local backoff=1
+  local endpoint="$1"
+  local max_retries=5
+  local retry=0
+  local backoff=1
 
-    while (( retry < max_retries )); do
-        if curl -sf --max-time 5 "$endpoint" > /dev/null; then
-            echo "✓ Health check passed"
-            return 0
-        fi
+  while (( retry < max_retries )); do
+    if curl -sf --max-time 5 "$endpoint" > /dev/null; then
+      echo "✓ Health check passed"
+      return 0
+    fi
         
-        echo "⚠ Health check failed (attempt $((retry + 1))/$max_retries), retrying in ${backoff}s..."
-        sleep "$backoff"
-        backoff=$((backoff * 2))  # exponential backoff
-        ((retry++))
-    done
+    echo "⚠ Health check failed (attempt $((retry + 1))/$max_retries), retrying in ${backoff}s..."
+    sleep "$backoff"
+    backoff=$((backoff * 2))  # exponential backoff
+    ((retry++))
+  done
     
-    echo "✗ Health check failed after $max_retries attempts"
-    return 1
+  echo "✗ Health check failed after $max_retries attempts"
+  return 1
 }
 
 # Usage
@@ -674,26 +674,26 @@ health_check "http://localhost:8080/health" || exit 1
 # Block until a service is listening on a port
 
 wait_for_port() {
-    local host="$1"
-    local port="$2"
-    local timeout="${3:-30}"
-    local elapsed=0
+  local host="$1"
+  local port="$2"
+  local timeout="${3:-30}"
+  local elapsed=0
     
-    echo "Waiting for $host:$port..."
+  echo "Waiting for $host:$port..."
     
-    while (( elapsed < timeout )); do
-        if nc -z "$host" "$port" 2>/dev/null; then
-            echo "✓ $host:$port is ready"
-            return 0
-        fi
+  while (( elapsed < timeout )); do
+    if nc -z "$host" "$port" 2>/dev/null; then
+      echo "✓ $host:$port is ready"
+      return 0
+    fi
         
-        echo "  Not ready yet, retrying... (${elapsed}s/$timeout)"
-        sleep 2
-        elapsed=$((elapsed + 2))
-    done
+    echo "  Not ready yet, retrying... (${elapsed}s/$timeout)"
+    sleep 2
+    elapsed=$((elapsed + 2))
+  done
     
-    echo "✗ Timeout waiting for $host:$port"
-    return 1
+  echo "✗ Timeout waiting for $host:$port"
+  return 1
 }
 
 # Usage
@@ -708,25 +708,25 @@ wait_for_port redis-server 6379  # Redis
 # Service discovery - resolve a hostname to IPs
 
 get_service_ips() {
-    local service_name="$1"
+  local service_name="$1"
     
-    # Use getent to query DNS (more portable than nslookup)
-    getent hosts "$service_name" | awk '{print $1}' | sort -u
+  # Use getent to query DNS (more portable than nslookup)
+  getent hosts "$service_name" | awk '{print $1}' | sort -u
 }
 
 # Load balance across resolved IPs
 load_balance_to_service() {
-    local service="$1"
-    local ips=($(get_service_ips "$service"))
+  local service="$1"
+  local ips=($(get_service_ips "$service"))
     
-    if (( ${#ips[@]} == 0 )); then
-        echo "Error: No IPs found for $service"
-        return 1
-    fi
+  if (( ${#ips[@]} == 0 )); then
+    echo "Error: No IPs found for $service"
+    return 1
+  fi
     
-    # Simple round-robin
-    local idx=$((RANDOM % ${#ips[@]}))
-    echo "${ips[$idx]}"
+  # Simple round-robin
+  local idx=$((RANDOM % ${#ips[@]}))
+  echo "${ips[$idx]}"
 }
 
 # Usage
@@ -754,29 +754,29 @@ az keyvault secret show --vault-name "my-vault" --name "database-password" --que
 
 # Retry pattern for transient failures
 retry_az() {
-    local cmd=("$@")
-    local max_retries=3
-    local retry=0
+  local cmd=("$@")
+  local max_retries=3
+  local retry=0
     
-    while (( retry < max_retries )); do
-        if "${cmd[@]}"; then
-            return 0
-        fi
+  while (( retry < max_retries )); do
+    if "${cmd[@]}"; then
+      return 0
+    fi
         
-        echo "Command failed, retrying... ($((retry + 1))/$max_retries)"
-        sleep $((2 ** retry))  # exponential backoff
-        ((retry++))
-    done
+    echo "Command failed, retrying... ($((retry + 1))/$max_retries)"
+    sleep $((2 ** retry))  # exponential backoff
+    ((retry++))
+  done
     
-    echo "Command failed after $max_retries attempts"
-    return 1
+  echo "Command failed after $max_retries attempts"
+  return 1
 }
 
 # Usage
 retry_az az deployment group create \
-    --resource-group "my-rg" \
-    --template-file "template.json" \
-    --parameters "environment=prod"
+  --resource-group "my-rg" \
+  --template-file "template.json" \
+  --parameters "environment=prod"
 ```
 
 ### Batch operations with Azure CLI
@@ -786,23 +786,28 @@ retry_az az deployment group create \
 # Apply operations to multiple resources
 
 apply_to_resources() {
-    local resource_group="$1"
-    local resource_type="$2"
-    local operation="$3"
-    
-    # List all resources of type
-    local resources=$(az resource list \
-        --resource-group "$resource_group" \
-        --resource-type "$resource_type" \
-        --query "[].name" -o tsv)
-    
-    for resource in $resources; do
-        echo "Applying $operation to $resource..."
-        eval "az $resource_type $operation --name $resource --resource-group $resource_group"
-    done
+  local resource_group="$1"
+  local resource_type="$2"
+  shift 2
+  local update_args=("$@")   # e.g. --set tags.env=prod
+
+  # List all resources of the given type, NUL-safe.
+  while IFS= read -r resource; do
+    [[ -z "$resource" ]] && continue
+    echo "Updating $resource..."
+    # Use the generic `az resource update`, which works for any resource type.
+    az resource update \
+      --resource-group "$resource_group" \
+      --resource-type "$resource_type" \
+      --name "$resource" \
+      "${update_args[@]}"
+  done < <(az resource list \
+    --resource-group "$resource_group" \
+    --resource-type "$resource_type" \
+    --query "[].name" -o tsv)
 }
 
-# Usage: apply_to_resources "my-rg" "Microsoft.Storage/storageAccounts" "update --set kind=StorageV2"
+# Usage: apply_to_resources "my-rg" "Microsoft.Storage/storageAccounts" --set tags.env=prod
 ```
 
 ---
@@ -816,25 +821,25 @@ apply_to_resources() {
 # Forward a pod's port; clean up on exit
 
 port_forward_pod() {
-    local pod="$1"
-    local local_port="$2"
-    local remote_port="${3:-$local_port}"
-    local namespace="${4:-default}"
+  local pod="$1"
+  local local_port="$2"
+  local remote_port="${3:-$local_port}"
+  local namespace="${4:-default}"
     
-    local pf_pid
+  local pf_pid
     
-    # Trap to clean up on exit
-    cleanup() {
-        echo "Killing port-forward (PID: $pf_pid)"
-        kill "$pf_pid" 2>/dev/null || true
-    }
-    trap cleanup EXIT INT TERM
+  # Trap to clean up on exit
+  cleanup() {
+    echo "Killing port-forward (PID: $pf_pid)"
+    kill "$pf_pid" 2>/dev/null || true
+  }
+  trap cleanup EXIT INT TERM
     
-    echo "Port-forwarding: localhost:$local_port -> $pod:$remote_port"
-    kubectl port-forward -n "$namespace" "pod/$pod" "$local_port:$remote_port" &
-    pf_pid=$!
+  echo "Port-forwarding: localhost:$local_port -> $pod:$remote_port"
+  kubectl port-forward -n "$namespace" "pod/$pod" "$local_port:$remote_port" &
+  pf_pid=$!
     
-    wait "$pf_pid"
+  wait "$pf_pid"
 }
 
 # Usage
@@ -848,30 +853,30 @@ port_forward_pod "api-server-abc123" 8080 8080 "production"
 # Block until a deployment has all replicas ready
 
 wait_for_deployment() {
-    local deployment="$1"
-    local namespace="${2:-default}"
-    local timeout="${3:-300}"
-    local elapsed=0
+  local deployment="$1"
+  local namespace="${2:-default}"
+  local timeout="${3:-300}"
+  local elapsed=0
     
-    echo "Waiting for deployment/$deployment to be ready..."
+  echo "Waiting for deployment/$deployment to be ready..."
     
-    while (( elapsed < timeout )); do
-        local ready=$(kubectl get deployment "$deployment" -n "$namespace" \
-            -o jsonpath='{.status.conditions[?(@.type=="Available")].status}')
+  while (( elapsed < timeout )); do
+    local ready=$(kubectl get deployment "$deployment" -n "$namespace" \
+      -o jsonpath='{.status.conditions[?(@.type=="Available")].status}')
         
-        if [[ "$ready" == "True" ]]; then
-            echo "✓ Deployment ready"
-            return 0
-        fi
+    if [[ "$ready" == "True" ]]; then
+      echo "✓ Deployment ready"
+      return 0
+    fi
         
-        echo "  Waiting... (${elapsed}s/$timeout)"
-        sleep 5
-        elapsed=$((elapsed + 5))
-    done
+    echo "  Waiting... (${elapsed}s/$timeout)"
+    sleep 5
+    elapsed=$((elapsed + 5))
+  done
     
-    echo "✗ Deployment did not become ready within $timeout seconds"
-    kubectl describe deployment "$deployment" -n "$namespace"
-    return 1
+  echo "✗ Deployment did not become ready within $timeout seconds"
+  kubectl describe deployment "$deployment" -n "$namespace"
+  return 1
 }
 
 # Usage
@@ -889,43 +894,43 @@ wait_for_deployment "api-service" "production" 300
 # Deploy to inactive slot, verify health, then swap
 
 blue_green_deploy() {
-    local app_name="$1"
-    local new_version="$2"
-    local health_endpoint="$3"
-    
-    # Determine current slot
-    local current_slot=$(az appservice web config show --name "$app_name" \
-        --query "swapSlotsConfiguration.slotSwapConfiguration" -o tsv)
-    local target_slot=$([[ "$current_slot" == "staging" ]] && echo "production" || echo "staging")
-    
-    echo "Deploying $new_version to $target_slot..."
-    
-    # Deploy to inactive slot
-    az webapp deployment slot create --name "$app_name" --slot "$target_slot" \
-        --configuration-source "$current_slot" || true
-    
-    # Push code
-    git push "https://$app_name.scm.azurewebsites.net:443/$app_name.git" HEAD:"refs/heads/main"
-    
-    # Wait for deployment
-    sleep 30
-    
-    # Health check before swap
-    local target_url="https://$app_name-$target_slot.azurewebsites.net$health_endpoint"
-    if ! curl -sf "$target_url" > /dev/null; then
-        echo "✗ Health check failed on $target_slot, aborting swap"
-        return 1
-    fi
-    
-    echo "✓ Health check passed, swapping slots..."
-    az appservice web deployment slot swap --name "$app_name" \
-        --slot "$target_slot"
-    
-    echo "✓ Deployment complete"
+  local app_name="$1"
+  local resource_group="$2"
+  local new_version="$3"
+  local health_endpoint="$4"
+
+  # Pattern: always deploy to the "staging" slot, verify it, then swap into production.
+  local staging_slot="staging"
+
+  echo "Deploying $new_version to the $staging_slot slot of $app_name..."
+
+  # Create the staging slot if it does not already exist (idempotent).
+  az webapp deployment slot create \
+    --name "$app_name" --resource-group "$resource_group" \
+    --slot "$staging_slot" --configuration-source "$app_name" 2>/dev/null || true
+
+  # Point the staging slot at the new container image (adjust for your deploy method).
+  az webapp config container set \
+    --name "$app_name" --resource-group "$resource_group" --slot "$staging_slot" \
+    --container-image-name "myregistry.azurecr.io/api:$new_version"
+
+  # Health check the staging slot before swapping.
+  local staging_url="https://${app_name}-${staging_slot}.azurewebsites.net${health_endpoint}"
+  if ! curl -sf --max-time 10 "$staging_url" > /dev/null; then
+    echo "✗ Health check failed on $staging_slot, aborting swap"
+    return 1
+  fi
+
+  echo "✓ Health check passed, swapping $staging_slot into production..."
+  az webapp deployment slot swap \
+    --name "$app_name" --resource-group "$resource_group" \
+    --slot "$staging_slot" --target-slot production
+
+  echo "✓ Deployment complete"
 }
 
 # Usage
-blue_green_deploy "my-api-app" "v2.1.0" "/health"
+blue_green_deploy "my-api-app" "my-rg" "v2.1.0" "/health"
 ```
 
 ### Rollback with version pinning
@@ -935,32 +940,32 @@ blue_green_deploy "my-api-app" "v2.1.0" "/health"
 # Rollback to previous version if current deployment fails
 
 rollback_deployment() {
-    local deployment="$1"
-    local namespace="${2:-default}"
-    local health_check_cmd="$3"
+  local deployment="$1"
+  local namespace="${2:-default}"
+  local health_check_cmd="$3"
     
-    echo "Checking current deployment health..."
+  echo "Checking current deployment health..."
     
-    if ! eval "$health_check_cmd"; then
-        echo "✗ Health check failed, rolling back..."
+  if ! eval "$health_check_cmd"; then
+    echo "✗ Health check failed, rolling back..."
         
-        # Rollback: set replicas to 0 for current version, restore previous
-        kubectl rollout undo "deployment/$deployment" -n "$namespace"
+    # Rollback: set replicas to 0 for current version, restore previous
+    kubectl rollout undo "deployment/$deployment" -n "$namespace"
         
-        echo "Waiting for rollback to complete..."
-        kubectl rollout status "deployment/$deployment" -n "$namespace"
+    echo "Waiting for rollback to complete..."
+    kubectl rollout status "deployment/$deployment" -n "$namespace"
         
-        echo "✓ Rolled back to previous version"
-        return 0
-    fi
-    
-    echo "✓ Deployment healthy, no rollback needed"
+    echo "✓ Rolled back to previous version"
     return 0
+  fi
+    
+  echo "✓ Deployment healthy, no rollback needed"
+  return 0
 }
 
 # Usage
 rollback_deployment "api-service" "prod" \
-    "curl -sf http://api-service:8080/health > /dev/null"
+  "curl -sf http://api-service:8080/health > /dev/null"
 ```
 
 ---

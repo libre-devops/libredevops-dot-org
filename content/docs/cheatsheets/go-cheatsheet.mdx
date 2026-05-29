@@ -1463,6 +1463,7 @@ ctx := context.Background()
 for v := range square(ctx, generate(ctx, 1, 2, 3, 4, 5)) {
     fmt.Println(v)  // 1 4 9 16 25
 }
+```
 
 ---
 
@@ -1475,4 +1476,3 @@ for v := range square(ctx, generate(ctx, 1, 2, 3, 4, 5)) {
 - ⚠️ **Goroutine leak** - launching `go func()` without a termination signal (context cancellation, channel close, or WaitGroup) leaks goroutines indefinitely. Always provide a way to stop.
 - 🔬 **Copying a `sync.Mutex`** - a `sync.Mutex` embedded in a struct must never be copied after first use; copying breaks the lock invariant. Pass structs containing mutexes by pointer.
 - 🔬 **`interface{}` instead of `any`** - `interface{}` is the pre-Go 1.18 spelling; `any` is the canonical alias. Use `any` in all new code.
-```

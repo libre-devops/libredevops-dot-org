@@ -1,0 +1,844 @@
+---
+title: PowerShell Standards
+description: Production standards for authoring, structuring, testing, and operating PowerShell - coding style and naming, strict mode and error handling, structured logging, logging libraries, OpenTelemetry tracing, Azure telemetry sync, Pester testing, modules, and CI/CD. Targets PowerShell 7.4+.
+---
+
+# PowerShell Standards
+
+An opinionated, production-grade set of standards for writing PowerShell that is consistent, safe, observable, and testable. It covers coding style, naming, strict mode, structured error handling, logging (native streams and logging libraries), OpenTelemetry tracing, shipping telemetry into Azure Monitor, Pester testing, module publishing, and CI/CD.
+
+> **Scope:** PowerShell 7.4+ (cross-platform `pwsh`), authored as advanced functions and modules. Windows PowerShell 5.1 is legacy - new code targets 7.x. Examples assume `Az` 12+, `Pester` 5.6+, and `PSScriptAnalyzer` 1.22+.
+>
+> **Grounding:** [PowerShell strongly encouraged development guidelines](https://learn.microsoft.com/en-us/powershell/scripting/developer/cmdlet/strongly-encouraged-development-guidelines) · [Approved verbs](https://learn.microsoft.com/en-us/powershell/scripting/developer/cmdlet/approved-verbs-for-windows-powershell-commands) · [PSScriptAnalyzer rules](https://learn.microsoft.com/en-us/powershell/utility-modules/psscriptanalyzer/rules/readme).
+
+---
+
+## Why standards?
+
+PowerShell is forgiving by default - it tolerates unset variables, swallows non-terminating errors, and lets `Write-Host` masquerade as output. Production automation cannot rely on those defaults. Standards turn PowerShell from a scripting convenience into reviewable, testable software:
+
+- Engineers can read and modify scripts they did not write
+- Failures surface loudly and early instead of corrupting state silently
+- Functions compose predictably because their inputs, outputs, and error behaviour are explicit
+- CI can lint, test, and gate code mechanically
+- Telemetry from automation lands in the same observability platform as everything else
+
+---
+
+## Tooling & Versions
+
+| Tool | Purpose | Minimum |
+|:--|:--|:--|
+| `pwsh` (PowerShell 7) | Cross-platform runtime | 7.4 LTS |
+| `PSScriptAnalyzer` | Static analysis and formatting | 1.22 |
+| `Pester` | Unit and integration testing | 5.6 |
+| `platyPS` | Generate external help from comment-based help | 2.x |
+| `PSResourceGet` | Modern package manager (replaces `PowerShellGet` v2) | 1.x |
+| `Az` | Azure SDK | 12+ |
+
+> **Rule:** Pin tool versions in CI and on developer machines. Install with `Install-PSResource` (PSResourceGet), not the legacy `Install-Module`. Use `-Version` (a specific version or NuGet range), never the non-existent `-RequiredVersion` on `Install-PSResource`.
+
+```powershell
+# Bootstrap a developer machine or CI agent
+Install-PSResource -Name PSScriptAnalyzer -Version '1.22.0' -Scope CurrentUser -TrustRepository -Repository PSGallery
+Install-PSResource -Name Pester          -Version '5.6.1'  -Scope CurrentUser -TrustRepository -Repository PSGallery
+```
+
+### Repository layout
+
+```
+my-module/
+├── src/
+│   └── MyModule/
+│       ├── MyModule.psd1        # Manifest: version, exports, dependencies
+│       ├── MyModule.psm1        # Root module: dot-sources Public/Private
+│       ├── Public/              # Exported functions - one file per function
+│       │   └── Get-Thing.ps1
+│       └── Private/             # Internal helpers - never exported
+│           └── ConvertTo-Internal.ps1
+├── tests/
+│   ├── Get-Thing.Tests.ps1      # One test file per public function
+│   └── PSScriptAnalyzer.Tests.ps1
+├── PSScriptAnalyzerSettings.psd1
+├── build.ps1                    # Invoke-Build / psake entry point
+└── README.md
+```
+
+> **Rule:** One public function per file, named after the function. The file split is the contract - a reader finds `Get-Thing` in `Public/Get-Thing.ps1` without grepping.
+
+---
+
+## Coding Style & Naming
+
+### Function naming - `Verb-Noun`, approved verbs only
+
+Every function uses a single approved verb and a singular `PascalCase` noun. Run `Get-Verb` to see the approved list; `PSUseApprovedVerbs` enforces it.
+
+```powershell
+# ✅ Approved verb, singular PascalCase noun
+function Get-StorageAccount { }
+function New-ResourceGroup  { }
+function Remove-StaleSecret { }
+
+# ❌ Unapproved verb, plural noun, ambiguous intent
+function Fetch-StorageAccounts { }   # "Fetch" is not approved - use Get
+function Create-RG             { }   # "Create" is not approved - use New
+```
+
+Prefix nouns in a shared module to avoid collisions: `Get-LdoStorageAccount`, not `Get-StorageAccount`. The `Az` module does the same (`Get-AzStorageAccount`).
+
+### Casing conventions
+
+| Element | Convention | Example |
+|:--|:--|:--|
+| Function names | `Verb-PascalNoun` | `Get-DeployStatus` |
+| Parameters | `PascalCase` | `-ResourceGroupName` |
+| Public/exported variables | `PascalCase` | `$script:DefaultRegion` |
+| Local variables | `camelCase` | `$storageAccount`, `$retryCount` |
+| Constants | `PascalCase` (PowerShell has no true const; use `Set-Variable -Option Constant`) | `$MaxRetries` |
+| Private functions | `Verb-Noun` (still approved verbs) | `ConvertTo-NormalisedName` |
+
+### Style rules
+
+- **Full cmdlet and parameter names, never aliases.** Write `Where-Object`, not `?` or `where`; `ForEach-Object`, not `%`. Aliases are for the interactive prompt, not scripts. (`PSAvoidUsingCmdletAliases`)
+- **Splat long calls.** More than three parameters becomes a splat hashtable for readability and clean diffs.
+- **One True Brace Style (OTBS):** opening brace on the same line, `else`/`catch` on a new line.
+- **Four-space indentation, no tabs.** Enforced by PSScriptAnalyzer formatting.
+- **Comment-based help on every public function** - `.SYNOPSIS`, `.DESCRIPTION`, `.PARAMETER`, `.EXAMPLE`, `.OUTPUTS`.
+
+```powershell
+# ✅ Splatting - readable and diff-friendly
+$params = @{
+    ResourceGroupName = $ResourceGroupName
+    Name              = $StorageAccountName
+    SkuName           = 'Standard_ZRS'
+    Location          = $Location
+}
+New-AzStorageAccount @params
+
+# ❌ Backtick line continuation - fragile, trailing-whitespace bugs
+New-AzStorageAccount -ResourceGroupName $rg `
+    -Name $name `
+    -SkuName Standard_ZRS
+```
+
+### PSScriptAnalyzer settings
+
+Commit a `PSScriptAnalyzerSettings.psd1` and reference it everywhere - editor, pre-commit, and CI use the same rules.
+
+```powershell
+# PSScriptAnalyzerSettings.psd1
+@{
+    IncludeDefaultRules = $true
+    Severity            = @('Error', 'Warning')
+
+    Rules = @{
+        PSUseConsistentIndentation = @{
+            Enable          = $true
+            IndentationSize = 4
+            Kind            = 'space'
+        }
+        PSUseConsistentWhitespace = @{
+            Enable = $true
+        }
+        PSPlaceOpenBrace = @{
+            Enable     = $true
+            OnSameLine = $true
+        }
+        PSAvoidUsingCmdletAliases = @{ Enable = $true }
+        PSUseApprovedVerbs        = @{ Enable = $true }
+    }
+}
+```
+
+```powershell
+# Lint locally with the committed settings
+Invoke-ScriptAnalyzer -Path ./src -Recurse -Settings ./PSScriptAnalyzerSettings.psd1 |
+    Where-Object Severity -in 'Error', 'Warning' |
+    Format-Table ScriptName, Line, Severity, RuleName, Message
+```
+
+---
+
+## Script & Function Structure
+
+### Script preamble
+
+Every script and module starts with strict mode and explicit error preference. This is non-negotiable.
+
+```powershell
+#!/usr/bin/env pwsh
+#Requires -Version 7.4
+#Requires -Modules @{ ModuleName = 'Az.Accounts'; ModuleVersion = '3.0.0' }
+
+Set-StrictMode -Version Latest   # Treat unset variables, bad property access, and bad indexing as errors
+$ErrorActionPreference = 'Stop'  # Make non-terminating errors terminating by default
+$PSNativeCommandUseErrorActionPreference = $true   # PS 7.4+: native exe non-zero exit becomes a terminating error
+```
+
+> **Rule:** `Set-StrictMode -Version Latest` and `$ErrorActionPreference = 'Stop'` at the top of every script and in the `begin` block of every module-level function. Without strict mode, `$undefinedVar` silently evaluates to `$null` and corrupts logic.
+
+### Advanced functions
+
+Use `[CmdletBinding()]` on every non-trivial function. It provides `-Verbose`, `-Debug`, `-ErrorAction`, `-WhatIf`/`-Confirm` (with `SupportsShouldProcess`), and pipeline binding for free.
+
+```powershell
+function Get-DeployStatus {
+    <#
+    .SYNOPSIS
+        Returns the resource count and status of one or more resource groups.
+    .DESCRIPTION
+        Queries each resource group and emits a typed status object per group.
+        Accepts resource group names from the pipeline.
+    .PARAMETER ResourceGroupName
+        One or more resource group names to inspect.
+    .EXAMPLE
+        'rg-prod', 'rg-dev' | Get-DeployStatus
+    .OUTPUTS
+        PSCustomObject with ResourceGroup, ResourceCount, Status, CheckedAt.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName)]
+        [ValidateNotNullOrEmpty()]
+        [string[]]$ResourceGroupName
+    )
+
+    begin {
+        Set-StrictMode -Version Latest
+        Write-Verbose "Starting $($MyInvocation.MyCommand.Name)"
+    }
+
+    process {
+        foreach ($name in $ResourceGroupName) {
+            $resources = Get-AzResource -ResourceGroupName $name -ErrorAction Stop
+            [pscustomobject]@{
+                ResourceGroup = $name
+                ResourceCount = $resources.Count
+                Status        = if ($resources.Count -gt 0) { 'Active' } else { 'Empty' }
+                CheckedAt     = [datetime]::UtcNow
+            }
+        }
+    }
+}
+```
+
+> **Rule:** Functions emit objects to the pipeline - never format inside a function. Return rich `[pscustomobject]` (or class instances), and let the caller decide on `Format-Table`, `Export-Csv`, or `ConvertTo-Json`. A function that calls `Format-Table` internally has destroyed its own output for every downstream consumer.
+
+### Parameters - typed and validated
+
+Validate inputs at the boundary so bad data never reaches the body.
+
+```powershell
+param(
+    [Parameter(Mandatory)]
+    [ValidatePattern('^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$')]
+    [string]$SubscriptionId,
+
+    [Parameter(Mandatory)]
+    [ValidateNotNullOrEmpty()]
+    [string]$ResourceGroupName,
+
+    [ValidateSet('dev', 'tst', 'uat', 'ppd', 'prd')]
+    [string]$Environment = 'dev',
+
+    [ValidateRange(1, 100)]
+    [int]$Retries = 3,
+
+    [ValidateScript({ Test-Path $_ -PathType Leaf })]
+    [string]$ConfigFile,
+
+    [switch]$Force
+)
+```
+
+### `ShouldProcess` for destructive operations
+
+Any function that deletes, overwrites, or mutates external state declares `SupportsShouldProcess` and gates the mutation behind `$PSCmdlet.ShouldProcess()`. This gives callers `-WhatIf` and `-Confirm` automatically.
+
+```powershell
+function Remove-StaleResource {
+    [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
+    param(
+        [Parameter(Mandatory)][string]$ResourceId
+    )
+
+    if ($PSCmdlet.ShouldProcess($ResourceId, 'Remove resource')) {
+        Remove-AzResource -ResourceId $ResourceId -Force -ErrorAction Stop
+    }
+}
+
+Remove-StaleResource -ResourceId $id -WhatIf    # prints intent, makes no change
+Remove-StaleResource -ResourceId $id -Confirm   # prompts before acting
+```
+
+---
+
+## Error Handling
+
+### Terminating vs non-terminating errors
+
+This is the single most misunderstood part of PowerShell. By default most cmdlet errors are **non-terminating** - the pipeline keeps running. `try/catch` only catches **terminating** errors.
+
+| Error type | How it arises | Caught by `try/catch`? |
+|:--|:--|:--|
+| Terminating | `throw`, `$PSCmdlet.ThrowTerminatingError()`, a cmdlet called with `-ErrorAction Stop`, a .NET exception | Yes |
+| Non-terminating | A cmdlet's default error (e.g. `Get-Item missing.txt`) | No - unless converted with `-ErrorAction Stop` or `$ErrorActionPreference = 'Stop'` |
+
+> **Rule:** Set `$ErrorActionPreference = 'Stop'` at the top of every script, or pass `-ErrorAction Stop` on each cmdlet you want caught. A `try` block around a cmdlet that emits a non-terminating error catches nothing.
+
+### `try` / `catch` / `finally` with typed catches
+
+Order catch blocks from most-specific to least-specific. There can be only one catch-all, and it must be last.
+
+```powershell
+try {
+    $rg = Get-AzResourceGroup -Name $Name -ErrorAction Stop
+    Invoke-RestMethod -Uri $deployUri -Method Post -ErrorAction Stop
+}
+catch [Microsoft.Rest.Azure.CloudException] {
+    # Specific Azure SDK exception - handle the known case
+    Write-Warning "Azure API rejected the request: $($_.Exception.Message)"
+    throw
+}
+catch [System.Net.Http.HttpRequestException] {
+    Write-Error "Deploy endpoint unreachable: $($_.Exception.Message)" -ErrorAction Stop
+}
+catch {
+    # Catch-all - inspect the ErrorRecord, then re-throw
+    $err = $_
+    Write-Error "Unexpected [$($err.Exception.GetType().FullName)] at line $($err.InvocationInfo.ScriptLineNumber): $($err.Exception.Message)"
+    throw
+}
+finally {
+    # Runs whether the try succeeded, a catch ran, or a catch re-threw.
+    # Use for cleanup only. If finally itself throws, the original error is lost.
+    Disconnect-AzAccount -ErrorAction SilentlyContinue
+}
+```
+
+### Emitting errors from functions
+
+- **Terminate the caller's pipeline** with `$PSCmdlet.ThrowTerminatingError()` (preferred in advanced functions) or `throw`.
+- **Report a recoverable, per-item failure** that should not stop a pipeline with `$PSCmdlet.WriteError()` or `Write-Error` (non-terminating).
+
+```powershell
+function Get-Secret {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][string]$VaultName)
+
+    $secret = Get-AzKeyVaultSecret -VaultName $VaultName -Name $Name -ErrorAction SilentlyContinue
+    if (-not $secret) {
+        $exception = [System.InvalidOperationException]::new("Secret '$Name' not found in vault '$VaultName'.")
+        $errorRecord = [System.Management.Automation.ErrorRecord]::new(
+            $exception,
+            'SecretNotFound',                                       # stable error ID
+            [System.Management.Automation.ErrorCategory]::ObjectNotFound,
+            $Name                                                   # target object
+        )
+        $PSCmdlet.ThrowTerminatingError($errorRecord)
+    }
+    $secret.SecretValue | ConvertFrom-SecureString -AsPlainText
+}
+```
+
+### Native command exit codes
+
+`try/catch` does not catch a non-zero exit from a native executable (`terraform`, `az`, `git`) unless you opt in. On PowerShell 7.4+, set `$PSNativeCommandUseErrorActionPreference = $true`; otherwise check `$LASTEXITCODE` explicitly.
+
+```powershell
+function Invoke-Native {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][scriptblock]$Command)
+
+    & $Command
+    if ($LASTEXITCODE -ne 0) {
+        throw "Native command failed with exit code $LASTEXITCODE"
+    }
+}
+
+Invoke-Native { terraform init }
+Invoke-Native { terraform plan -out tfplan }
+```
+
+> **Rule:** `$?` reflects only whether the last command "succeeded" and is unreliable across cmdlet/native boundaries. Use `try/catch` (with `-ErrorAction Stop`) for cmdlets and `$LASTEXITCODE` for native executables. Never gate control flow on `$?`.
+
+### `trap` is a last resort
+
+`trap` is a scope-level handler from PowerShell v1. Prefer `try/catch` for all structured handling. Reserve `trap` for a script-level safety net that runs cleanup and exits non-zero on any unhandled terminating error.
+
+```powershell
+$script:Cleanup = [System.Collections.Generic.List[scriptblock]]::new()
+
+trap {
+    Write-Error "Fatal: $_"
+    foreach ($action in $script:Cleanup) { & $action }
+    exit 1
+}
+```
+
+---
+
+## Logging
+
+PowerShell's `Write-*` cmdlets already form a layered stream system. The discipline is using the right stream and never polluting stdout (stream 1) with diagnostics.
+
+### Use the right stream
+
+| Cmdlet | Stream | Use for | Honours preference |
+|:--|:--|:--|:--|
+| `Write-Output` | 1 (success) | The function's actual return data | n/a |
+| `Write-Error` | 2 | A failure the caller should see | `$ErrorActionPreference` |
+| `Write-Warning` | 3 | A recoverable issue worth surfacing | `$WarningPreference` |
+| `Write-Verbose` | 4 | Diagnostics, off by default | `$VerbosePreference` / `-Verbose` |
+| `Write-Debug` | 5 | Developer-only deep detail | `$DebugPreference` / `-Debug` |
+| `Write-Information` | 6 | Structured info events - the right "log line" stream | `$InformationPreference` |
+| `Write-Host` | 6 (info) | Interactive UI only: colour, banners, prompts | No |
+
+> **Rule:** Never use `Write-Host` for data or for log lines that automation may capture. It writes to the host, not the pipeline, and cannot be redirected or suppressed cleanly. Use `Write-Information` for log lines and `Write-Verbose` for diagnostics.
+
+### Structured JSON logging
+
+For any script running in a container, Azure Function, Automation runbook, or pipeline, emit one JSON object per line on stdout. A log shipper (the OpenTelemetry Collector, Fluent Bit, the Azure Monitor agent) parses it.
+
+```powershell
+function Write-LogJson {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][ValidateSet('Debug', 'Information', 'Warning', 'Error', 'Critical')]
+        [string]$Level,
+
+        [Parameter(Mandatory)][string]$Message,
+
+        [hashtable]$Context = @{}
+    )
+
+    # Correlate with a distributed trace if one is active (see OpenTelemetry below).
+    # Capture the activity once and null-check explicitly - do not rely on ?. to
+    # short-circuit a whole member chain, which it does not do reliably.
+    $activity = [System.Diagnostics.Activity]::Current
+
+    $record = [ordered]@{
+        timestamp = (Get-Date).ToUniversalTime().ToString('o')
+        level     = $Level
+        message   = $Message
+        host      = [Environment]::MachineName
+        pid       = $PID
+        trace_id  = if ($activity) { $activity.TraceId.ToString() } else { $null }
+        span_id   = if ($activity) { $activity.SpanId.ToString() } else { $null }
+    }
+    foreach ($key in $Context.Keys) { $record[$key] = $Context[$key] }
+
+    # -Compress keeps one event per line; -Depth allows nested context.
+    # Emit on stream 6 (Information) so stdout (stream 1) stays clean for real output.
+    Write-Information ($record | ConvertTo-Json -Compress -Depth 10) -InformationAction Continue
+}
+
+Write-LogJson -Level Information -Message 'Deploy started' -Context @{ env = 'prd'; rg = 'rg-app' }
+Write-LogJson -Level Error       -Message 'Apply failed'   -Context @{ exit_code = $LASTEXITCODE }
+```
+
+> **Rule:** Never log secrets. Mask tokens, passwords, and connection strings at the call site - the log backend is not a vault. Never build the JSON by string concatenation; always use `ConvertTo-Json` so values are escaped correctly.
+
+### Logging libraries - `PSFramework`
+
+For anything beyond a single script, adopt [`PSFramework`](https://psframework.org/). It provides log providers (file, JSON, Azure Log Analytics, Splunk), automatic rotation, message levels, structured tags and data, runspace-safe writes, and configuration. It is the de-facto enterprise logging library for PowerShell.
+
+```powershell
+Import-Module PSFramework
+
+# Configure a JSON file provider once, at the entry point
+Set-PSFLoggingProvider -Name 'logfile' -InstanceName 'deploy' -Enabled $true -FilePath './logs/deploy-%date%.json' -FileType Json
+
+# Log structured events anywhere downstream
+Write-PSFMessage -Level Important -Message 'Deploy started' -Tag 'deploy', 'azure' -Data @{ env = 'prd'; rg = 'rg-app' }
+Write-PSFMessage -Level Warning   -Message 'Falling back to secondary region' -Data @{ region = 'ukwest' }
+
+try { Invoke-Deploy }
+catch {
+    # PSFramework captures the ErrorRecord and stack with the message
+    Write-PSFMessage -Level Error -Message 'Deploy failed' -ErrorRecord $_ -Tag 'deploy'
+    throw
+}
+```
+
+`Write-PSFMessage` respects message-level configuration, writes to all enabled providers, and integrates with `Stop-PSFFunction` for clean function-level termination.
+
+### Sensible logging defaults
+
+- `[CmdletBinding()]` on every function so callers get `-Verbose`/`-InformationAction` for free.
+- `Write-Information` for business events; `Write-Verbose` for diagnostics; `Write-Warning` for recoverable issues; `Write-Error -ErrorAction Stop` (or `throw`) inside `catch`.
+- One JSON object per line in CI/containers so shippers can parse fields.
+- Include `trace_id`/`span_id` in every record so logs correlate with traces.
+- Configure logging once at the entry point, never inside library functions.
+
+---
+
+## OpenTelemetry & Distributed Tracing
+
+PowerShell runs on .NET, so the right tracing primitive is the built-in `System.Diagnostics.ActivitySource` / `Activity` API (the .NET implementation of the OpenTelemetry tracing API). Creating spans needs no extra dependency; **exporting** them needs the OpenTelemetry .NET SDK or a host that already listens for activities.
+
+> **Reality check:** There is no first-class, native PowerShell OpenTelemetry SDK. The production-grade options, in order of preference, are: (1) emit structured logs with `trace_id`/`span_id` and let a collector correlate them; (2) create `Activity` spans with `ActivitySource` and run under a host whose OpenTelemetry .NET SDK is configured to export them; (3) load the OpenTelemetry .NET SDK assemblies into the session and wire up an OTLP exporter directly. Do not hand-roll an OTLP serialiser in PowerShell.
+
+### Create spans with `ActivitySource` (no dependencies)
+
+```powershell
+# Module-scoped source - name it after your component
+$script:ActivitySource = [System.Diagnostics.ActivitySource]::new('Ldo.Deploy', '1.0.0')
+
+function Invoke-Deploy {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Environment)
+
+    # StartActivity returns $null unless a listener (the OTel SDK) is registered.
+    $activity = $script:ActivitySource.StartActivity('Invoke-Deploy')
+    try {
+        $activity?.SetTag('deploy.environment', $Environment)
+        $activity?.SetTag('deploy.region', 'uksouth')
+
+        # ... do the work; nested functions start child activities automatically ...
+
+        $activity?.SetStatus([System.Diagnostics.ActivityStatusCode]::Ok)
+    }
+    catch {
+        $activity?.SetStatus([System.Diagnostics.ActivityStatusCode]::Error, $_.Exception.Message)
+        $activity?.AddTag('exception.type', $_.Exception.GetType().FullName)
+        throw
+    }
+    finally {
+        $activity?.Dispose()   # ends the span and records duration
+    }
+}
+```
+
+Because `Activity.Current` flows automatically, the `Write-LogJson` helper above picks up `trace_id`/`span_id` with no extra plumbing - logs and spans correlate for free.
+
+### Export spans via the OpenTelemetry .NET SDK
+
+When you control the host, register a `TracerProvider` that listens to your `ActivitySource` and exports OTLP. Load the SDK assemblies (restored via `dotnet` or vendored alongside the module).
+
+```powershell
+# Assemblies restored from NuGet: OpenTelemetry, OpenTelemetry.Exporter.OpenTelemetryProtocol
+Add-Type -Path './lib/OpenTelemetry.dll'
+Add-Type -Path './lib/OpenTelemetry.Exporter.OpenTelemetryProtocol.dll'
+
+$resource = [OpenTelemetry.Resources.ResourceBuilder]::CreateDefault().
+    AddService('ldo-deploy', $null, '1.0.0')
+
+$tracerProvider = [OpenTelemetry.Sdk]::CreateTracerProviderBuilder().
+    SetResourceBuilder($resource).
+    AddSource('Ldo.Deploy').                      # must match the ActivitySource name
+    AddOtlpExporter().                            # reads OTEL_EXPORTER_OTLP_ENDPOINT
+    Build()
+
+try   { Invoke-Deploy -Environment prd }
+finally { $tracerProvider.Dispose() }             # flush spans on exit
+```
+
+Configure the exporter with standard OpenTelemetry environment variables so the same script works against any collector:
+
+```bash
+export OTEL_SERVICE_NAME="ldo-deploy"
+export OTEL_EXPORTER_OTLP_ENDPOINT="http://otel-collector:4317"
+export OTEL_RESOURCE_ATTRIBUTES="deployment.environment=prd,service.namespace=platform"
+```
+
+---
+
+## Azure Telemetry Sync
+
+Getting PowerShell telemetry into Azure Monitor has two production paths. Use the **Logs Ingestion API** for custom structured logs (the modern, supported route) and the **Azure Monitor OTLP exporter** when you already produce OpenTelemetry traces.
+
+### Custom logs via the Logs Ingestion API (recommended)
+
+The Logs Ingestion API sends records to a custom table in a Log Analytics workspace through a Data Collection Endpoint (DCE) and a Data Collection Rule (DCR). It supersedes the deprecated HTTP Data Collector API. Authenticate with a managed identity or workload identity - never a shared key.
+
+```powershell
+function Send-LogAnalyticsRecord {
+    <#
+    .SYNOPSIS
+        Sends structured records to a Log Analytics custom table via the Logs Ingestion API.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$DceEndpoint,        # e.g. https://dce-ldo-uks-prd.uksouth-1.ingest.monitor.azure.com
+        [Parameter(Mandatory)][string]$DcrImmutableId,     # dcr-xxxxxxxxxxxxxxxx
+        [Parameter(Mandatory)][string]$StreamName,         # Custom-DeployLog_CL
+        [Parameter(Mandatory)][object[]]$Records
+    )
+
+    # Token for the Monitor ingestion audience - works with managed identity, workload identity, or az login.
+    $token = (Get-AzAccessToken -ResourceUrl 'https://monitor.azure.com').Token
+
+    $uri = "$DceEndpoint/dataCollectionRules/$DcrImmutableId/streams/$StreamName" +
+           "?api-version=2023-01-01"
+
+    $body = $Records | ConvertTo-Json -Depth 10 -AsArray   # the API always expects a JSON array
+
+    Invoke-RestMethod -Method Post -Uri $uri -Body $body -ContentType 'application/json' -Headers @{
+        Authorization = "Bearer $token"
+    } -ErrorAction Stop
+}
+
+# Usage - one call ships a batch
+Send-LogAnalyticsRecord `
+    -DceEndpoint    $env:LDO_DCE_ENDPOINT `
+    -DcrImmutableId $env:LDO_DCR_IMMUTABLE_ID `
+    -StreamName     'Custom-DeployLog_CL' `
+    -Records @(
+        [ordered]@{ TimeGenerated = (Get-Date).ToUniversalTime().ToString('o'); Level = 'Information'; Message = 'Deploy completed'; Environment = 'prd' }
+    )
+```
+
+> **Rule:** Authenticate to the ingestion endpoint with a managed identity (Azure-hosted runners) or workload identity (external runners) granted the **Monitoring Metrics Publisher** role on the DCR. Never embed a workspace shared key. The `TimeGenerated` column is required by the destination table.
+
+### Application Insights for traces via the Azure Monitor exporter
+
+Application Insights does **not** accept raw OTLP over a public endpoint, so there is no `OTEL_EXPORTER_OTLP_ENDPOINT` you can point at it directly. There are two supported routes:
+
+1. **Azure Monitor exporter assembly (preferred from PowerShell).** You already load .NET assemblies for the OpenTelemetry SDK, so add the `Azure.Monitor.OpenTelemetry.Exporter` assembly and call `.AddAzureMonitorTraceExporter($connectionString)` on the builder instead of `AddOtlpExporter()`. It speaks the Application Insights ingestion protocol, supports the Azure Monitor data model, sampling, and live metrics, and authenticates with a connection string or `DefaultAzureCredential`.
+
+```powershell
+Add-Type -Path './lib/Azure.Monitor.OpenTelemetry.Exporter.dll'
+
+$tracerProvider = [OpenTelemetry.Sdk]::CreateTracerProviderBuilder().
+    SetResourceBuilder($resource).
+    AddSource('Ldo.Deploy').
+    AddAzureMonitorTraceExporter({ param($o) $o.ConnectionString = $env:APPLICATIONINSIGHTS_CONNECTION_STRING }).
+    Build()
+```
+
+2. **OpenTelemetry Collector bridge.** Keep `AddOtlpExporter()` in the script, export OTLP to a Collector, and configure the Collector's `azuremonitor` exporter to forward to Application Insights. Use this when many services already emit OTLP to a shared Collector.
+
+> **Rule:** Set `APPLICATIONINSIGHTS_CONNECTION_STRING` from configuration and prefer `DefaultAzureCredential` over the connection string's instrumentation key where the exporter supports it. Never paste an instrumentation key into source.
+
+> **Rule:** Long-running PowerShell automation (Automation runbooks, Container Apps jobs, AKS cron jobs) should ship telemetry continuously, not buffer it to the end. Use a `BatchActivityExportProcessor` (the SDK default with `AddOtlpExporter`) and always `Dispose()` the provider in a `finally` so the final batch flushes on exit.
+
+---
+
+## Testing with Pester
+
+Pester 5 has a strict two-phase model: a **Discovery** phase that builds the test tree, and a **Run** phase that executes it. Code that generates tests (loops, `It` inside conditionals) must live in `Discovery`; setup that produces values for tests goes in `BeforeAll`/`BeforeEach` (Run phase).
+
+### Test structure
+
+```powershell
+# tests/Get-DeployStatus.Tests.ps1
+BeforeAll {
+    # Run phase - import the module under test and set up mocks
+    $module = "$PSScriptRoot/../src/MyModule/MyModule.psd1"
+    Import-Module $module -Force
+
+    Mock -ModuleName MyModule Get-AzResource {
+        @([pscustomobject]@{ Name = 'res1' }, [pscustomobject]@{ Name = 'res2' })
+    }
+}
+
+Describe 'Get-DeployStatus' {
+    Context 'when the resource group has resources' {
+        It 'reports Active with the correct count' {
+            $result = Get-DeployStatus -ResourceGroupName 'rg-prod'
+            $result.Status        | Should -Be 'Active'
+            $result.ResourceCount | Should -Be 2
+        }
+
+        It 'calls Get-AzResource exactly once' {
+            Get-DeployStatus -ResourceGroupName 'rg-prod' | Out-Null
+            Should -Invoke -ModuleName MyModule Get-AzResource -Times 1 -Exactly
+        }
+    }
+
+    Context 'when the resource group is empty' {
+        BeforeAll {
+            Mock -ModuleName MyModule Get-AzResource { @() }
+        }
+
+        It 'reports Empty' {
+            (Get-DeployStatus -ResourceGroupName 'rg-empty').Status | Should -Be 'Empty'
+        }
+    }
+
+    Context 'parameter validation' {
+        It 'throws on an empty name' {
+            { Get-DeployStatus -ResourceGroupName '' } | Should -Throw
+        }
+    }
+}
+```
+
+### Data-driven tests with `-ForEach`
+
+```powershell
+Describe 'Region lookup' {
+    It "maps <Code> to <Expected>" -ForEach @(
+        @{ Code = 'uks'; Expected = 'uksouth' }
+        @{ Code = 'ukw'; Expected = 'ukwest'  }
+        @{ Code = 'euw'; Expected = 'westeurope' }
+    ) {
+        ConvertTo-AzureRegion -Code $Code | Should -Be $Expected
+    }
+}
+```
+
+### Configuration and coverage
+
+```powershell
+$config = New-PesterConfiguration
+$config.Run.Path                  = './tests'
+$config.CodeCoverage.Enabled      = $true
+$config.CodeCoverage.Path         = './src/MyModule/Public', './src/MyModule/Private'
+$config.CodeCoverage.OutputFormat = 'JaCoCo'
+$config.TestResult.Enabled        = $true
+$config.TestResult.OutputFormat   = 'NUnitXml'
+$config.Output.Verbosity          = 'Detailed'
+
+Invoke-Pester -Configuration $config
+```
+
+### Testing strategy
+
+| Test type | Tool | Scope | When |
+|:--|:--|:--|:--|
+| Lint / style | PSScriptAnalyzer | Every `.ps1` | Every commit |
+| Unit | Pester + `Mock` | One function, no real Azure calls | Every commit |
+| Integration | Pester (no mocks) | Real deploy + teardown | PR merge, nightly |
+| Help completeness | Pester over `Get-Help` | Every public function has examples | Every commit |
+
+> **Rule:** Unit tests never touch a real Azure subscription. Mock `Az` cmdlets with `Mock -ModuleName <Module>`. Reserve real-resource tests for explicitly-tagged integration runs that create and destroy their own resources.
+
+---
+
+## Modules & Publishing
+
+### Manifest and exports
+
+```powershell
+# MyModule.psd1 - generate with New-ModuleManifest, then maintain by hand
+@{
+    RootModule        = 'MyModule.psm1'
+    ModuleVersion     = '1.4.0'                       # SemVer - bump per change type
+    GUID              = '00000000-0000-0000-0000-000000000000'
+    Author            = 'Platform Team'
+    PowerShellVersion = '7.4'
+    FunctionsToExport = @('Get-DeployStatus', 'Invoke-Deploy')   # explicit - never '*'
+    CmdletsToExport   = @()
+    VariablesToExport = @()
+    AliasesToExport   = @()
+    RequiredModules   = @(@{ ModuleName = 'Az.Accounts'; ModuleVersion = '3.0.0' })
+    PrivateData       = @{ PSData = @{ Tags = @('Azure', 'DevOps'); ProjectUri = 'https://github.com/libre-devops/my-module' } }
+}
+```
+
+```powershell
+# MyModule.psm1 - dot-source and export explicitly
+$public  = @(Get-ChildItem -Path "$PSScriptRoot/Public/*.ps1"  -ErrorAction SilentlyContinue)
+$private = @(Get-ChildItem -Path "$PSScriptRoot/Private/*.ps1" -ErrorAction SilentlyContinue)
+
+foreach ($file in ($public + $private)) {
+    try { . $file.FullName }
+    catch { throw "Failed to import $($file.FullName): $_" }
+}
+
+Export-ModuleMember -Function $public.BaseName
+```
+
+> **Rule:** Set `FunctionsToExport` to an explicit list, never `'*'`. A wildcard export forces PowerShell to load the whole module to discover commands (slow), leaks private helpers, and breaks `Get-Command -Module` discovery.
+
+### Semantic versioning
+
+| Change | Bump | Example |
+|:--|:--|:--|
+| New optional parameter, new exported function, bug fix | Patch / Minor | `1.4.0 → 1.4.1` / `1.5.0` |
+| Removed/renamed parameter, removed function, changed output type, new mandatory parameter | Major | `1.4.0 → 2.0.0` |
+
+```powershell
+# Publish from CI after tests pass
+Publish-PSResource -Path ./src/MyModule -Repository PSGallery -ApiKey $env:PSGALLERY_API_KEY
+```
+
+---
+
+## CI/CD
+
+### Standard stage order
+
+```
+lint (PSScriptAnalyzer) → test (Pester + coverage) → build (manifest validation) → [approval] → publish
+```
+
+### GitHub Actions reference
+
+```yaml
+name: PowerShell
+
+on:
+  push: { branches: [main] }
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tooling
+        shell: pwsh
+        run: |
+          Set-PSResourceRepository PSGallery -Trusted
+          Install-PSResource -Name PSScriptAnalyzer -Version 1.22.0 -Scope CurrentUser
+          Install-PSResource -Name Pester          -Version 5.6.1  -Scope CurrentUser
+
+      - name: Lint
+        shell: pwsh
+        run: |
+          $issues = Invoke-ScriptAnalyzer -Path ./src -Recurse -Settings ./PSScriptAnalyzerSettings.psd1 |
+              Where-Object Severity -in 'Error', 'Warning'
+          $issues | Format-Table -AutoSize
+          if ($issues) { throw "$($issues.Count) analyzer issue(s)" }
+
+      - name: Test
+        shell: pwsh
+        run: |
+          $config = New-PesterConfiguration
+          $config.Run.Path             = './tests'
+          $config.Run.Throw            = $true     # fail the job on any failed test
+          $config.CodeCoverage.Enabled = $true
+          $config.TestResult.Enabled   = $true
+          Invoke-Pester -Configuration $config
+```
+
+> **Rule:** Set `Run.Throw = $true` (or check `$result.FailedCount`) so a failed test fails the pipeline. `Invoke-Pester` does not throw on test failure by default - a green job with red tests is a silent regression.
+
+---
+
+## Anti-patterns
+
+- 🚨 **No `Set-StrictMode` / `$ErrorActionPreference = 'Stop'`** - unset variables evaluate to `$null` and non-terminating errors slip past `try/catch`, so scripts continue with corrupt state. Set both at the top of every script and module function.
+- 🚨 **`Write-Host` for data or log lines** - it writes to the host, cannot be captured, redirected, or suppressed, and breaks `$x = Invoke-Thing`. Use `Write-Output` for data, `Write-Information` for logs, `Write-Verbose` for diagnostics. Reserve `Write-Host` for interactive colour/banners.
+- 🚨 **Bare `catch {}` that swallows the error** - hides failures that must propagate. Always re-throw, or log with the full `ErrorRecord` and then decide. If ignoring is genuinely correct, be explicit: `catch { Write-Verbose "Ignored: $_" }`.
+- 🚨 **`Invoke-Expression` on dynamic strings** - a code-injection vector. Build a command array and use the call operator `& $cmd @args`, or call the cmdlet directly with splatting.
+- ⚠️ **Aliases in scripts (`?`, `%`, `gci`, `select`)** - terse but unreadable and not guaranteed to exist. Always use full cmdlet and parameter names in committed code.
+- ⚠️ **Formatting inside functions (`Format-Table`/`Format-List`)** - once formatted, objects become format records and are useless to any downstream caller. Emit objects; format only at the top-level call site.
+- ⚠️ **`-ErrorAction SilentlyContinue` applied broadly** - it suppresses all errors, not just the expected one, masking real failures. Use it surgically on a single call where a missing object is a known-valid state, and check the result.
+- ⚠️ **Gating control flow on `$?`** - `$?` is unreliable across cmdlet/native boundaries. Use `try/catch` with `-ErrorAction Stop` for cmdlets and `$LASTEXITCODE` for native executables.
+- ⚠️ **`FunctionsToExport = '*'`** - forces full module load for command discovery, leaks private helpers, and slows import. List exports explicitly.
+- 🔬 **Logging secrets** - tokens, connection strings, and `SecureString` plaintext must be masked at the call site. The log/telemetry backend is not a secret store.
+- 🔬 **Shipping telemetry only at the end of a long run** - a crash loses everything buffered. Use batch exporters that flush periodically and always `Dispose()` providers in `finally`.
+- 🔬 **Generating Pester tests in the Run phase** - `It` blocks created inside a runtime loop without using the Discovery phase silently do not run. Generate tests with `-ForEach` or in `Discovery`, and set `Run.Throw = $true` in CI.
+
+---
+
+## See Also
+
+- [PowerShell strongly encouraged development guidelines](https://learn.microsoft.com/en-us/powershell/scripting/developer/cmdlet/strongly-encouraged-development-guidelines)
+- [Approved verbs for PowerShell commands](https://learn.microsoft.com/en-us/powershell/scripting/developer/cmdlet/approved-verbs-for-windows-powershell-commands)
+- [PSScriptAnalyzer rules and configuration](https://learn.microsoft.com/en-us/powershell/utility-modules/psscriptanalyzer/rules/readme)
+- [Pester documentation](https://pester.dev/docs/quick-start)
+- [PSFramework - logging and configuration](https://psframework.org/)
+- [.NET `ActivitySource` and OpenTelemetry tracing](https://learn.microsoft.com/en-us/dotnet/core/diagnostics/distributed-tracing-instrumentation-walkthroughs)
+- [OpenTelemetry .NET](https://opentelemetry.io/docs/languages/net/)
+- [Azure Monitor Logs Ingestion API](https://learn.microsoft.com/en-us/azure/azure-monitor/logs/logs-ingestion-api-overview)
+- [Azure Monitor OpenTelemetry exporter](https://learn.microsoft.com/en-us/azure/azure-monitor/app/opentelemetry-enable)
+- [PowerShell Cheatsheet](/docs/cheatsheets/powershell-cheatsheet) - quick-reference patterns
+- [Azure Naming Convention](/docs/documents/azure-naming-convention) - resource naming used in Azure automation

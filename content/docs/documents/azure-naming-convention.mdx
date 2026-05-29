@@ -52,10 +52,10 @@ Names follow a structured pattern. Prefer alphanumeric characters and hyphens on
 | `Prefix` | Leftmost element. The resource type abbreviation from the [CAF abbreviations list](https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/ready/azure-best-practices/resource-abbreviations). Lower case. For resources named by role (VMs), the prefix describes purpose rather than type. | `rg-`, `sa`, `kv-` |
 | `Infix` | Immediately right of the prefix. A 2-4 letter code identifying the product, team, or service the resource belongs to. Lower case. | `ldo` (Libre DevOps), `hw` (hello-world) |
 | `Outfix` | Right of the infix. A 2-3 letter Azure region code. Lower case. Global resources use the owning resource group's region. | `uks` (UK South), `euw` (West Europe) |
-| `Optional outfix` | Right of the outfix, left of the suffix. A short functional qualifier, used only where it adds meaningful context. Lower case. | `mgt`, `sec`, `net` |
-| `Suffix` | Rightmost fixed element. A 2-3 letter environment stage code. Lower case. | `poc`, `dev`, `tst`, `uat`, `ppd`, `prd` |
-| `Numbering` | Zero-padded ordinal appended after the suffix when multiple instances of the same resource exist. | `01`, `02`, `10` |
-| `Full construct` | Dashed: `${prefix}-${infix}-${outfix}-${suffix}[-${numbering}]`. No-dash (storage accounts, VMs, etc.): `${prefix}${infix}${outfix}${suffix}[${numbering}]`. | `rg-ldo-uks-prd`, `kv-ldo-uks-dev-01`, `saldouksprd01` |
+| `Suffix` | A 2-3 letter environment stage code. Lower case. | `poc`, `dev`, `tst`, `uat`, `ppd`, `prd` |
+| `Optional outfix` | Right of the suffix. A short functional qualifier, used only where it adds meaningful context. Lower case. | `mgt`, `sec`, `net` |
+| `Numbering` | Zero-padded ordinal appended at the end when multiple instances of the same resource exist. | `01`, `02`, `10` |
+| `Full construct` | Dashed: `${prefix}-${infix}-${outfix}-${suffix}[-${optional}][-${numbering}]`. No-dash (storage accounts, VMs, etc.): `${prefix}${infix}${outfix}${suffix}[${optional}][${numbering}]`. | `rg-ldo-uks-prd`, `rg-crg-ukw-ppd-mgt`, `saldouksprd01` |
 
 ---
 

@@ -148,9 +148,9 @@ function Write-Log {
     }
 }
 
-Write-Log Info  'deploy started'   -Context @{ env = 'prod'; rg = 'rg-app' }
-Write-Log Warn  'using fallback region'
-Write-Log Error 'apply failed'     -Context @{ exit_code = $LASTEXITCODE }
+Write-Log Info    'deploy started'   -Context @{ env = 'prod'; rg = 'rg-app' }
+Write-Log Warning 'using fallback region'
+Write-Log Error   'apply failed'     -Context @{ exit_code = $LASTEXITCODE }
 ```
 
 ### Structured (JSON) logging for log shippers
@@ -491,13 +491,14 @@ try {
     $result = Get-AzResourceGroup -Name 'non-existent' -ErrorAction Stop
 }
 catch {
+    # A try can have only ONE catch-all, and it must be the last catch block.
+    # Branch on the error inside it (or use typed catch blocks - see "full reference" below).
     if ($_.Exception.Message -match 'ResourceGroupNotFound|was not found') {
         Write-Warning "Resource group not found: $($_.Exception.Message)"
-    } else { throw }
-}
-catch {
-    Write-Error "Unexpected error [$($_.Exception.GetType().Name)]: $_"
-    throw
+    } else {
+        Write-Error "Unexpected error [$($_.Exception.GetType().Name)]: $_"
+        throw
+    }
 }
 finally {
     Write-Verbose 'Cleanup complete'
@@ -1657,10 +1658,11 @@ Import-Csv 'new-indicators.csv' | ForEach-Object {
 
 ```powershell
 # Install multiple modules
+# Install-PSResource uses -Version (a specific version or NuGet range), not -RequiredVersion.
 $modules = @(
-    @{ Name = 'Az';                     RequiredVersion = '12.0.0' }
+    @{ Name = 'Az';                     Version = '12.0.0' }
     @{ Name = 'Microsoft.Graph';        Version = '[2,3)' }
-    @{ Name = 'Pester';                 RequiredVersion = '5.6.0' }
+    @{ Name = 'Pester';                 Version = '5.6.0' }
     @{ Name = 'PSScriptAnalyzer' }
 )
 foreach ($mod in $modules) {

@@ -187,13 +187,7 @@ public sealed class UserService(
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Name);
 
-        var user = new User
-        {
-            Id        = Guid.NewGuid().ToString(),
-            Name      = request.Name,
-            Email     = request.Email,
-            CreatedAt = time.GetUtcNow().UtcDateTime,
-        };
+        // The repository maps the request to an entity and returns the persisted User.
         return await repo.CreateAsync(request, ct);
     }
 }
@@ -265,11 +259,14 @@ public abstract class MessageHandler<TMessage>
 // 3. STATIC FUNCTION - pure transform, no state, no I/O
 public static class Slug
 {
+    // NOTE: .ToString() on IEnumerable<char> returns the iterator's type name, not
+    // the characters - rebuild the string with new string(chars.ToArray()).
     public static string From(string input) =>
-        string.Join('-', input.ToLowerInvariant()
-                              .Where(c => char.IsLetterOrDigit(c) || c == ' ')
-                              .ToString()!
-                              .Split(' ', StringSplitOptions.RemoveEmptyEntries));
+        string.Join('-',
+            new string(input.ToLowerInvariant()
+                            .Where(c => char.IsLetterOrDigit(c) || c == ' ')
+                            .ToArray())
+                .Split(' ', StringSplitOptions.RemoveEmptyEntries));
 }
 // Used as: Slug.From("Hello World!") => "hello-world"
 ```

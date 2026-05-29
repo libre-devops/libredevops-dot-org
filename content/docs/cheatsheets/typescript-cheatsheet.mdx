@@ -1125,19 +1125,17 @@ class AppStack extends cdk.Stack {
       containerInsights: true,
     })
 
-    // Task Definition
-    const taskDef = new ecs.Ec2TaskDefinition(this, 'TaskDef', {
-      memoryMiB: 512,
-      cpu: '256',
-    })
+    // Task Definition (EC2 launch type sets cpu/memory at the container level)
+    const taskDef = new ecs.Ec2TaskDefinition(this, 'TaskDef')
 
     taskDef.addContainer('app', {
       image: ecs.ContainerImage.fromAsset('./app'),
       memoryLimitMiB: 512,
+      cpu: 256,
       logging: ecs.LogDriver.awsLogs({
         streamPrefix: 'ecs',
       }),
-      containerPort: 8080,
+      portMappings: [{ containerPort: 8080 }],
     })
 
     // ECS Service
@@ -1206,9 +1204,9 @@ async function performHealthChecks(): Promise<HealthCheckResult> {
     checks.database = { status: 'failed', message: String(error) }
   }
 
-  // Check external API
+  // Check external API. Note: native fetch has no `timeout` option - use AbortSignal.timeout().
   try {
-    const response = await fetch('https://api.example.com/health', { timeout: 5000 })
+    const response = await fetch('https://api.example.com/health', { signal: AbortSignal.timeout(5000) })
     checks.externalApi = { status: response.ok ? 'ok' : 'failed' }
   } catch (error) {
     checks.externalApi = { status: 'failed', message: String(error) }
@@ -1375,7 +1373,7 @@ async function runHealthChecks(appName: string, slot: string): Promise<boolean> 
 
   for (let i = 0; i < maxRetries; i++) {
     try {
-      const response = await fetch(url, { timeout: 10000 })
+      const response = await fetch(url, { signal: AbortSignal.timeout(10000) })
       if (response.ok) {
         const health = await response.json()
         logger.info({ health }, 'Health check passed')
@@ -1393,19 +1391,23 @@ async function runHealthChecks(appName: string, slot: string): Promise<boolean> 
 }
 
 async function getCurrentSlot(appName: string): Promise<string> {
+  // List deployment slots; presence of an active "green" slot decides the target.
   const { stdout } = await execFileAsync('az', [
-    'appservice',
-    'web',
-    'config',
-    'show',
+    'webapp',
+    'deployment',
+    'slot',
+    'list',
     '--name',
     appName,
+    '--resource-group',
+    'my-rg',
     '--query',
-    'swapSlotsConfiguration.slotSwapConfiguration',
+    "[?state=='Running'].name",
     '-o',
     'json',
   ])
-  return stdout.trim() || 'blue'
+  const slots: string[] = JSON.parse(stdout || '[]')
+  return slots.includes('green') ? 'green' : 'blue'
 }
 
 async function deployToSlot(appName: string, slot: string, version: string): Promise<void> {
@@ -1415,7 +1417,7 @@ async function deployToSlot(appName: string, slot: string, version: string): Pro
 
 async function switchSlots(appName: string, slot: string): Promise<void> {
   logger.info({ slot }, 'Switching traffic to slot')
-  await execFileAsync('az', ['appservice', 'web', 'deployment', 'slot', 'swap', '--name', appName, '--slot', slot])
+  await execFileAsync('az', ['webapp', 'deployment', 'slot', 'swap', '--name', appName, '--resource-group', 'my-rg', '--slot', slot, '--target-slot', 'production'])
 }
 
 // Usage
