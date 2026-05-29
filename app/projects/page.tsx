@@ -42,6 +42,30 @@ const projects: Project[] = [
         docs: '/docs/documents/azure-logic-app-standards',
     },
     {
+        title: 'PowerShell Standards',
+        description:
+            'Production-grade standards for authoring, structuring, testing, and operating PowerShell. Covers coding style and naming, strict mode and structured error handling, logging, OpenTelemetry tracing, Azure Monitor telemetry sync, Pester testing, module publishing, and CI/CD. Targets PowerShell 7.4+.',
+        tags: ['PowerShell', 'Standards', 'Best Practices', 'Observability'],
+        repo: 'https://github.com/libre-devops',
+        docs: '/docs/documents/powershell-standards',
+    },
+    {
+        title: 'Bash Standards',
+        description:
+            'Production-grade standards for writing, structuring, testing, and operating Bash. Covers strict mode and safety, coding style and naming, quoting, functions, error handling and traps, structured logging, observability and Azure telemetry sync, ShellCheck and bats testing, and CI/CD. Targets Bash 4.4+.',
+        tags: ['Bash', 'Standards', 'Best Practices', 'Shell'],
+        repo: 'https://github.com/libre-devops',
+        docs: '/docs/documents/bash-standards',
+    },
+    {
+        title: 'Python Standards',
+        description:
+            'Production-grade standards for writing, structuring, testing, and operating Python. Covers PEP 8 style and naming, type hints and static analysis, error handling, structured logging, OpenTelemetry, Azure Monitor telemetry sync, pytest testing, packaging, and CI/CD. Targets Python 3.12+.',
+        tags: ['Python', 'Standards', 'Best Practices', 'Observability'],
+        repo: 'https://github.com/libre-devops',
+        docs: '/docs/documents/python-standards',
+    },
+    {
         title: 'Terraform Modules',
         description:
             'A collection of opinionated Terraform modules for Azure infrastructure - covering compute, networking, identity, storage, and more. All modules follow the Libre DevOps naming convention and are published to the Terraform Registry.',
