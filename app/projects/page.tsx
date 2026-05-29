@@ -18,22 +18,6 @@ interface Project {
 
 const projects: Project[] = [
     {
-        title: 'Azure Naming Convention',
-        description:
-            'A terraform-compliance policy set implementing the recommended Microsoft Azure resource abbreviations. Enforces consistent prefix/infix/outfix/suffix naming patterns across all Azure resource types in your Terraform CI/CD pipeline. Supports BDD-style policy tests and is designed to be forked and tailored to your organisation.',
-        tags: ['Terraform', 'terraform-compliance', 'Azure', 'Policy'],
-        repo: 'https://github.com/libre-devops/azure-naming-convention',
-        docs: '/docs/documents/azure-naming-convention',
-    },
-    {
-        title: 'Terraform Standards',
-        description:
-            'Production-ready standards for Terraform module development, file structure, provider pinning, state management, CI/CD pipelines, and registry publishing. Includes maintainer scripts for sorting variables, outputs, and generating documentation.',
-        tags: ['Terraform', 'Standards', 'Best Practices', 'IaC'],
-        repo: 'https://github.com/libre-devops',
-        docs: '/docs/documents/terraform-standards',
-    },
-    {
         title: 'Azure Logic App Standards',
         description:
             'Comprehensive standards for deploying production-grade Azure Logic Apps. Covers hosting model selection, naming conventions, trigger patterns, networking, error handling, Terraform patterns, and dependency management with decision trees and real-world examples.',
@@ -42,12 +26,12 @@ const projects: Project[] = [
         docs: '/docs/documents/azure-logic-app-standards',
     },
     {
-        title: 'PowerShell Standards',
+        title: 'Azure Naming Convention',
         description:
-            'Production-grade standards for authoring, structuring, testing, and operating PowerShell. Covers coding style and naming, strict mode and structured error handling, logging, OpenTelemetry tracing, Azure Monitor telemetry sync, Pester testing, module publishing, and CI/CD. Targets PowerShell 7.4+.',
-        tags: ['PowerShell', 'Standards', 'Best Practices', 'Observability'],
-        repo: 'https://github.com/libre-devops',
-        docs: '/docs/documents/powershell-standards',
+            'A terraform-compliance policy set implementing the recommended Microsoft Azure resource abbreviations. Enforces consistent prefix/infix/outfix/suffix naming patterns across all Azure resource types in your Terraform CI/CD pipeline. Supports BDD-style policy tests and is designed to be forked and tailored to your organisation.',
+        tags: ['Terraform', 'terraform-compliance', 'Azure', 'Policy'],
+        repo: 'https://github.com/libre-devops/azure-naming-convention',
+        docs: '/docs/documents/azure-naming-convention',
     },
     {
         title: 'Bash Standards',
@@ -56,6 +40,14 @@ const projects: Project[] = [
         tags: ['Bash', 'Standards', 'Best Practices', 'Shell'],
         repo: 'https://github.com/libre-devops',
         docs: '/docs/documents/bash-standards',
+    },
+    {
+        title: 'PowerShell Standards',
+        description:
+            'Production-grade standards for authoring, structuring, testing, and operating PowerShell. Covers coding style and naming, strict mode and structured error handling, logging, OpenTelemetry tracing, Azure Monitor telemetry sync, Pester testing, module publishing, and CI/CD. Targets PowerShell 7.4+.',
+        tags: ['PowerShell', 'Standards', 'Best Practices', 'Observability'],
+        repo: 'https://github.com/libre-devops',
+        docs: '/docs/documents/powershell-standards',
     },
     {
         title: 'Python Standards',
@@ -72,6 +64,14 @@ const projects: Project[] = [
         tags: ['Terraform', 'Azure', 'IaC', 'Modules'],
         repo: 'https://github.com/libre-devops',
         docs: 'https://registry.terraform.io/namespaces/libre-devops',
+    },
+    {
+        title: 'Terraform Standards',
+        description:
+            'Production-ready standards for Terraform module development, file structure, provider pinning, state management, CI/CD pipelines, and registry publishing. Includes maintainer scripts for sorting variables, outputs, and generating documentation.',
+        tags: ['Terraform', 'Standards', 'Best Practices', 'IaC'],
+        repo: 'https://github.com/libre-devops',
+        docs: '/docs/documents/terraform-standards',
     },
 ];
 
