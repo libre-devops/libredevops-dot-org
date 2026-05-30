@@ -17,7 +17,7 @@ export default function HomePage() {
                         covering DevOps, platform engineering, and security.
                     </p>
                     <div className="hero-actions">
-                        <a href="/docs" className="btn-primary">Browse Docs</a>
+                        <a href="/docs/cheatsheets" className="btn-primary">Browse Cheatsheets</a>
                         <a
                             href="https://security.libredevops.org"
                             className="btn-secondary"
