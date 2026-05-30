@@ -16,7 +16,7 @@ from pathlib import Path
 from diagrams import Cluster, Diagram, Edge
 from diagrams.azure.general import ResourceGroups, Subscriptions
 from diagrams.azure.integration import LogicApps
-from diagrams.azure.network import PrivateEndpoint, Subnets, VirtualNetworks
+from diagrams.azure.network import PrivateEndpoint, Subnets
 
 # Repo-root/public/assets/diagrams, resolved relative to this file so the script
 # works regardless of the current working directory.

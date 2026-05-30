@@ -4,7 +4,7 @@ import { ExternalLink } from 'lucide-react';
 import { ScrollNav } from '@/components/scroll-nav';
 
 export const metadata: Metadata = {
-    title: 'Projects – Libre DevOps',
+    title: 'Projects - Libre DevOps',
     description: 'Open-source projects from Libre DevOps covering platform engineering, Azure, and DevOps tooling.',
 };
 
@@ -28,8 +28,8 @@ const projects: Project[] = [
     {
         title: 'Azure Naming Convention',
         description:
-            'A terraform-compliance policy set implementing the recommended Microsoft Azure resource abbreviations. Enforces consistent prefix/infix/outfix/suffix naming patterns across all Azure resource types in your Terraform CI/CD pipeline. Supports BDD-style policy tests and is designed to be forked and tailored to your organisation.',
-        tags: ['Terraform', 'terraform-compliance', 'Azure', 'Policy'],
+            'A policy set implementing the recommended Microsoft Azure resource abbreviations. Enforces consistent prefix/infix/outfix/suffix naming patterns across all Azure resource types in your Terraform CI/CD pipeline, and is designed to be forked and tailored to your organisation.',
+        tags: ['Terraform', 'Azure', 'Naming', 'Policy'],
         repo: 'https://github.com/libre-devops/azure-naming-convention',
         docs: '/docs/documents/azure-naming-convention',
     },

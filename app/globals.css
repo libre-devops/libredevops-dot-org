@@ -1033,6 +1033,30 @@ a {
   transform: translateX(3px);
 }
 
+.standards-band-seealso {
+  margin: 0.85rem 0 0;
+  text-align: center;
+  font-size: 0.88rem;
+  color: var(--text-tertiary);
+}
+
+.standards-band-seealso-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-left: 0.15rem;
+  color: var(--brand-accent);
+  font-weight: 600;
+}
+
+.standards-band-seealso-link svg {
+  transition: transform 0.2s ease;
+}
+
+.standards-band-seealso-link:hover svg {
+  transform: translateX(3px);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .standards-band {
     background:
@@ -1041,6 +1065,7 @@ a {
   .standards-band::before { animation: none; }   /* hold the comet static */
   .standards-band-pill:hover { transform: none; }
   .standards-band-cta:hover svg { transform: none; }
+  .standards-band-seealso-link:hover svg { transform: none; }
 }
 
 /* ── Doc diagrams ──────────────────────────────────────────────── */
@@ -1260,7 +1285,7 @@ body:not(.banner-hidden) .nextra-mobile-nav {
     padding-top: calc(var(--site-header-height) + var(--nextra-navbar-height, 64px)) !important;
 }
 
-/* Hide the Nextra mobile nav's built-in search – we always show     */
+/* Hide the Nextra mobile nav's built-in search - we always show     */
 /* search in the fixed navbar (our x:flex-1 patch), making the       */
 /* internal copy a duplicate that appears behind / below the bars.   */
 .nextra-mobile-nav > .x\:px-4 {

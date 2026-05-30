@@ -56,6 +56,7 @@ export function StandardsBand() {
     const standards = getStandards();
 
     return (
+        <>
         <div className="standards-band">
             <div className="standards-band-inner">
                 <div className="standards-band-copy">
@@ -79,5 +80,16 @@ export function StandardsBand() {
                 </a>
             </div>
         </div>
+        <p className="standards-band-seealso">
+            See also the{' '}
+            <a
+                href="/docs/documents/azure-naming-convention"
+                className="standards-band-seealso-link"
+            >
+                Azure Naming Convention
+                <ArrowRight size={14} />
+            </a>
+        </p>
+        </>
     );
 }
