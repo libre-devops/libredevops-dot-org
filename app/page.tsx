@@ -1,5 +1,7 @@
 import { HeroLogo } from '@/components/hero-logo';
 import { Terminal } from '@/components/terminal';
+import { StandardsBand } from '@/components/standards-band';
+import { RotatingTitle } from '@/components/rotating-title';
 
 export default function HomePage() {
     return (
@@ -9,9 +11,7 @@ export default function HomePage() {
                     <div className="hero-logo">
                         <HeroLogo />
                     </div>
-                    <h1 className="hero-title">
-                        Platform engineering,<br />done in the open.
-                    </h1>
+                    <RotatingTitle />
                     <p className="hero-subtitle">
                         Libre DevOps publishes open-source tooling, cheatsheets, and guides
                         covering DevOps, platform engineering, and security.
@@ -27,6 +27,7 @@ export default function HomePage() {
                             Security News
                         </a>
                     </div>
+                    <StandardsBand />
                     <Terminal />
                 </div>
             </section>

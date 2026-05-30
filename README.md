@@ -43,15 +43,20 @@ components/                 # Shared React components
   navbar-toggle.tsx         # Toggle to hide/show site header in docs reading mode
   navbar.tsx                # Site header with nav links and social icons
   print-button.tsx          # Print/export-to-PDF button for cheatsheets
+  scroll-nav.tsx            # Floating scroll-to-top/section helper on long pages
   social-links.tsx          # Social icon strip (config-driven)
+  standards-band.tsx        # Homepage band; auto-discovers *-standards docs
   terminal.tsx              # Animated terminal component used on the homepage
   theme-toggle.tsx          # Dark/light toggle button
 
 content/docs/               # MDX content rendered by Nextra
-  cheatsheets/              # 16 cheatsheets: Terraform, Git, AWS, Azure, Go, KQL,
-                            # Bash, Containers, Linux, Nginx, PowerShell, Python,
-                            # Security, Windows, TypeScript, .NET
-  documents/                # Reference documents (Azure naming convention)
+  cheatsheets/              # 20 cheatsheets: AI, Ansible, AWS, Azure, Azure DevOps,
+                            # Bash, Containers, .NET, Git, GitHub Actions, Go, KQL,
+                            # Linux, Nginx, PowerShell, Python, Security, Terraform,
+                            # TypeScript, Windows
+  documents/                # Reference docs: Azure naming convention, plus the
+                            # Libre DevOps standards (Terraform, PowerShell, Bash,
+                            # Python, Azure Logic Apps)
 
 lib/
   site.ts                   # Site config and social links definition
@@ -87,6 +92,8 @@ npx tsc --noEmit       # type check
 **New cheatsheet** - add an `.mdx` file under `content/docs/cheatsheets/`, update `content/docs/cheatsheets/_meta.ts` for sidebar ordering, and add an entry to the `CHEATSHEETS` array in `components/cheatsheet-grid.tsx` so it appears on the index page.
 
 **New doc page** - add an `.mdx` file under `content/docs/`. Update the relevant `_meta.ts` to control sidebar ordering and labels.
+
+**New standard** - add an `.mdx` file named `<topic>-standards.mdx` under `content/docs/documents/` with a `title` frontmatter (e.g. `title: Ansible Standards`). The homepage Standards band (`components/standards-band.tsx`) discovers `*-standards.mdx` files at build time, derives the pill label from the title, and renders them in alphabetical order - no code change needed. Add a matching card to the `projects` array in `app/projects/page.tsx` so it also appears on the Projects page.
 
 **New social link** - add an entry to the `socialLinks` array in `lib/site.ts` and map its icon key in `components/social-links.tsx`.
 

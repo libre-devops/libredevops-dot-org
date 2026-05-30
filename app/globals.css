@@ -254,6 +254,25 @@ a {
   background-clip: text;
 }
 
+/* Cycling first word ("Platform" -> "Security" -> ...) sits on its own line,
+   so word length never affects the rest of the title. Solid accent makes it
+   pop out of the gradient. */
+.hero-title-rotator {
+  -webkit-text-fill-color: var(--brand-accent);
+  color: var(--brand-accent);
+}
+
+.hero-title-caret {
+  display: inline-block;
+  width: 0.06em;
+  height: 0.78em;
+  margin-left: 0.06em;
+  border-radius: 0.03em;
+  background: var(--brand-accent);
+  box-shadow: 0 0 0.45em rgba(139, 92, 246, 0.55);
+  transition: opacity 0.1s linear;
+}
+
 .hero-subtitle {
   font-size: clamp(1rem, 2vw, 1.25rem);
   color: var(--text-secondary);
@@ -874,6 +893,156 @@ a {
   line-height: 1.6;
 }
 
+/* ── Standards band ────────────────────────────────────────────── */
+.standards-band {
+  position: relative;
+  margin-top: 2.25rem;
+  padding: 1px;                       /* becomes the gradient border thickness */
+  border-radius: var(--radius-md);
+  background: var(--border-color);    /* faint static border under the comet */
+  overflow: hidden;                   /* clip the rotating layer to the corners */
+  box-shadow: var(--shadow-md);
+}
+
+/* Comet of accent light sweeping the border. A *static* conic gradient that we
+   spin with transform: rotate() - compositor-only, so no per-frame repaint. */
+.standards-band::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 150%;                        /* square large enough to cover at any angle */
+  aspect-ratio: 1 / 1;
+  background: conic-gradient(
+    transparent 0deg,
+    transparent 70deg,
+    var(--brand-accent) 150deg,
+    #c4b5fd 180deg,
+    var(--brand-accent) 210deg,
+    transparent 290deg,
+    transparent 360deg
+  );
+  animation: sb-rotate 6s linear infinite;
+  z-index: 0;
+}
+
+@keyframes sb-rotate {
+  from { transform: translate(-50%, -50%) rotate(0turn); }
+  to   { transform: translate(-50%, -50%) rotate(1turn); }
+}
+
+.standards-band-inner {
+  position: relative;
+  z-index: 1;                         /* above the rotating comet pseudo-element */
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem 1.75rem;
+  padding: 1.4rem 1.6rem;
+  border-radius: calc(var(--radius-md) - 1px);
+  background: var(--bg-secondary);
+  overflow: hidden;
+}
+
+/* Soft internal glow echoing the hero backdrop. */
+.standards-band-inner::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at 0% 0%, rgba(139, 92, 246, 0.14), transparent 55%);
+  pointer-events: none;
+}
+
+.standards-band-copy {
+  position: relative;
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+.standards-band-eyebrow {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--brand-accent);
+  margin-bottom: 0.35rem;
+}
+
+.standards-band-tagline {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.standards-band-pills {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  flex: 2 1 auto;
+}
+
+.standards-band-pill {
+  padding: 0.4rem 0.85rem;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: rgba(139, 92, 246, 0.08);
+  border: 1px solid rgba(139, 92, 246, 0.22);
+  transition: transform 0.18s ease, background 0.18s ease,
+              border-color 0.18s ease, color 0.18s ease;
+  white-space: nowrap;
+}
+
+.standards-band-pill:hover {
+  color: var(--text-primary);
+  background: rgba(139, 92, 246, 0.18);
+  border-color: var(--brand-accent);
+  transform: translateY(-2px);
+}
+
+.standards-band-cta {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+  padding: 0.6rem 1.25rem;
+  border-radius: 999px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #ffffff;
+  background: var(--brand-accent);
+  border: 1px solid var(--brand-accent);
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.standards-band-cta:hover {
+  background: #7c3aed;
+  box-shadow: 0 0 20px rgba(139, 92, 246, 0.4);
+}
+
+.standards-band-cta svg {
+  transition: transform 0.2s ease;
+}
+
+.standards-band-cta:hover svg {
+  transform: translateX(3px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .standards-band {
+    background:
+      linear-gradient(135deg, var(--brand-accent), rgba(139, 92, 246, 0.25));
+  }
+  .standards-band::before { animation: none; }   /* hold the comet static */
+  .standards-band-pill:hover { transform: none; }
+  .standards-band-cta:hover svg { transform: none; }
+}
+
 /* ── Responsive ────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   /* Navbar: logo pinned left, nav links right-aligned.
@@ -944,6 +1113,17 @@ a {
   .project-card-header {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  /* Standards band: stack and let the CTA span the full width */
+  .standards-band-inner {
+    padding: 1.2rem 1.1rem;
+    gap: 0.9rem;
+  }
+
+  .standards-band-cta {
+    flex: 1 1 100%;
+    justify-content: center;
   }
 }
 
