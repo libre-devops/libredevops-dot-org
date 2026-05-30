@@ -652,6 +652,14 @@ Consumption Logic Apps run on shared Azure infrastructure with shared, rotating 
 
 Standard Logic Apps run on an App Service Plan, which gives you a predictable, dedicated set of outbound IPs.
 
+The topology below shows a Standard Logic App with outbound VNet integration into a delegated subnet and inbound access restricted to a Private Endpoint:
+
+<figure className="doc-diagram">
+
+![Standard Logic App reached over a Private Endpoint. A subscription (sub-ldo-prd) contains a resource group (rg-ldo-uks-prd-01) with a virtual network. The Logic App integrates outbound into a delegated /26 subnet (snet-integration, delegated to Microsoft.Web/serverFarms) and is reached inbound through a Private Endpoint in a /27 subnet (snet-private-endpoints) targeting the "sites" subresource.](/assets/diagrams/logic-app-private-endpoint.svg)
+
+</figure>
+
 **VNet integration (outbound traffic):**
 
 ```hcl

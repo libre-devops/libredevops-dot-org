@@ -1043,6 +1043,25 @@ a {
   .standards-band-cta:hover svg { transform: none; }
 }
 
+/* ── Doc diagrams ──────────────────────────────────────────────── */
+/* Architecture SVGs render on a light card so the dark labels stay legible
+   in both light and dark site themes. */
+.doc-diagram {
+  max-width: 760px;
+  margin: 1.75rem auto;
+  padding: 0.75rem 1rem;
+  background: #ffffff;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+}
+
+.doc-diagram img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
 /* ── Responsive ────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   /* Navbar: logo pinned left, nav links right-aligned.

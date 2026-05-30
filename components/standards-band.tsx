@@ -10,26 +10,45 @@ interface Standard {
 
 const DOCS_DIR = path.join(process.cwd(), 'content', 'docs', 'documents');
 
+// Allowlists. Filenames and frontmatter are repo-controlled, but validating
+// them anyway keeps only known-safe characters flowing into the href/label
+// (and stops untrusted values reaching the DOM - see js/stored-xss).
+const SLUG_PATTERN = /^[a-z0-9-]+$/;
+const TITLE_PATTERN = /^[A-Za-z0-9 .,&/()+-]+$/;
+
+/** Derive a display label from a validated slug, e.g. "azure-logic-app". */
+function slugToLabel(slug: string): string {
+    return slug
+        .replace(/-standards$/, '')
+        .split('-')
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ');
+}
+
 /**
  * Discover every `*-standards.mdx` doc at build time so new standards appear
  * automatically. The pill label is the frontmatter title with the trailing
- * "Standards" removed (e.g. "Terraform Standards" -> "Terraform").
+ * "Standards" removed (e.g. "Terraform Standards" -> "Terraform"); titles that
+ * contain anything outside the allowlist fall back to the slug-derived label.
  */
 function getStandards(): Standard[] {
-    const files = fs
+    return fs
         .readdirSync(DOCS_DIR)
-        .filter((file) => file.endsWith('-standards.mdx'));
-
-    return files
-        .map((file) => {
-            const source = fs.readFileSync(path.join(DOCS_DIR, file), 'utf8');
-            const titleMatch = source.match(/^title:\s*(.+)$/m);
+        .filter((file) => file.endsWith('-standards.mdx'))
+        .map((file): Standard | null => {
             const slug = file.replace(/\.mdx$/, '');
-            const title = titleMatch ? titleMatch[1].trim() : slug;
-            const label = title.replace(/\s*Standards$/i, '').trim();
+            // Reject any slug that isn't a plain lowercase/digit/hyphen name.
+            if (!SLUG_PATTERN.test(slug)) return null;
+
+            const source = fs.readFileSync(path.join(DOCS_DIR, file), 'utf8');
+            const rawTitle = source.match(/^title:\s*(.+)$/m)?.[1].trim() ?? '';
+            const label = TITLE_PATTERN.test(rawTitle)
+                ? rawTitle.replace(/\s*Standards$/i, '').trim()
+                : slugToLabel(slug);
 
             return { label, href: `/docs/documents/${slug}` };
         })
+        .filter((s): s is Standard => s !== null)
         .sort((a, b) => a.label.localeCompare(b.label));
 }
 

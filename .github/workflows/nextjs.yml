@@ -57,6 +57,25 @@ jobs:
       - name: Type check
         run: npx tsc --noEmit
 
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Setup just
+        uses: extractions/setup-just@v3
+
+      - name: Set up Homebrew
+        uses: Homebrew/actions/setup-homebrew@master
+
+      - name: Install Graphviz
+        run: brew install graphviz
+
+      - name: Generate architecture diagrams
+        # Regenerates SVGs into public/assets/diagrams/ from the diagram-as-code
+        # sources so the deployed site always matches architecture/*.py.
+        run: just diagrams
+
       - name: Build site
         run: npm run build
         env:

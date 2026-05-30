@@ -61,37 +61,62 @@ content/docs/               # MDX content rendered by Nextra
 lib/
   site.ts                   # Site config and social links definition
 
+architecture/               # Diagram-as-code (Python, uv-managed)
+  pyproject.toml            # uv project; depends on `diagrams` (Graphviz icons)
+  *.py                      # one script per diagram; renders SVG to public/assets/diagrams/
+
 patches/                    # patch-package patches applied after npm install
   nextra-theme-docs+4.6.1.patch
                             # 1. Makes Layout children prop optional (Zod schema fix)
                             # 2. Shows search bar on mobile (removes x:max-md:hidden)
 
-public/assets/              # Logos and favicon
+public/assets/              # Logos, favicon
+  diagrams/                 # Generated architecture SVGs (committed; rebuilt in CI)
+
+Justfile                    # Task runner (`just` to list recipes)
 ```
 
 ## Local development
 
+With [`just`](https://github.com/casey/just) (recommended - auto-installs deps on first run):
+
 ```bash
-npm install
-npm run dev
+just dev       # dev server at http://localhost:3000
+just preview   # production build + serve out/ locally
+just diagrams  # regenerate architecture SVGs (needs Graphviz - see below)
+just           # list all recipes
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Or with npm directly:
 
 ```bash
-npm run build          # static export to out/
-npm run build:search   # build + index with Pagefind (required for search to work)
+npm install
+npm run dev            # dev server at http://localhost:3000
+npm run build          # static export to out/ + Pagefind search index
+npm run serve          # serve the built out/ locally
 npm run lint           # ESLint
 npx tsc --noEmit       # type check
 ```
 
-> Search only works after `build:search`. Running `npm run dev` alone will not have a working search index.
+> The Pagefind search index is built as part of `npm run build`. Running `npm run dev` alone will not have a working search index.
+
+### Architecture diagrams
+
+Diagrams are authored as code under `architecture/` (Python + the [`diagrams`](https://diagrams.mingrammer.com) library, managed with [`uv`](https://docs.astral.sh/uv/)) and rendered to SVG in `public/assets/diagrams/`. Rendering needs the **Graphviz** `dot` binary on `PATH` (`brew install graphviz` / `apt-get install graphviz`).
+
+```bash
+just diagrams   # uv sync + render every architecture/*.py to public/assets/diagrams/
+```
+
+The generated SVGs are committed (so docs render anywhere) and also regenerated in CI before the site build, so the deployed site always matches the source.
 
 ## Adding content
 
 **New cheatsheet** - add an `.mdx` file under `content/docs/cheatsheets/`, update `content/docs/cheatsheets/_meta.ts` for sidebar ordering, and add an entry to the `CHEATSHEETS` array in `components/cheatsheet-grid.tsx` so it appears on the index page.
 
 **New doc page** - add an `.mdx` file under `content/docs/`. Update the relevant `_meta.ts` to control sidebar ordering and labels.
+
+**New diagram** - add a script under `architecture/` (one `Diagram(...)` per file, writing SVG to `public/assets/diagrams/`), run `just diagrams`, and embed it in any `.mdx` with `![alt](/assets/diagrams/<name>.svg)`. CI regenerates all diagrams on build.
 
 **New standard** - add an `.mdx` file named `<topic>-standards.mdx` under `content/docs/documents/` with a `title` frontmatter (e.g. `title: Ansible Standards`). The homepage Standards band (`components/standards-band.tsx`) discovers `*-standards.mdx` files at build time, derives the pill label from the title, and renders them in alphabetical order - no code change needed. Add a matching card to the `projects` array in `app/projects/page.tsx` so it also appears on the Projects page.
 
