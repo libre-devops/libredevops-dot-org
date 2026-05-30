@@ -31,7 +31,7 @@ async function getContributors(): Promise<Contributor[]> {
             'https://api.github.com/repos/libre-devops/libredevops-dot-org/contributors',
             {
                 headers: { Accept: 'application/vnd.github+json' },
-                next: { revalidate: false },
+                next: { revalidate: 86400 },
                 signal: controller.signal,
             }
         );

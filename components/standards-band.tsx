@@ -74,8 +74,8 @@ export function StandardsBand() {
                     ))}
                 </div>
 
-                <a href="/projects" className="standards-band-cta">
-                    Explore standards
+                <a href="/docs/documents" className="standards-band-cta">
+                    Explore documents
                     <ArrowRight size={16} />
                 </a>
             </div>
