@@ -1,11 +1,11 @@
 ---
 title: Python Standards
-description: Production standards for writing, structuring, testing, and operating Python - PEP 8 style and naming, type hints and static analysis, error handling, structured logging, logging libraries, OpenTelemetry, Azure Monitor telemetry sync, pytest testing, packaging, and CI/CD. Targets Python 3.12+.
+description: Production standards for writing, structuring, testing, and operating Python - PEP 8 style and naming, type hints and static analysis, error handling, structured logging, logging libraries, OpenTelemetry, Azure Monitor telemetry sync, secrets handling and supply-chain security, pytest testing, packaging, and CI/CD. Targets Python 3.12+.
 ---
 
 # Python Standards
 
-An opinionated, production-grade set of standards for writing Python that is consistent, type-safe, observable, and testable. It covers coding style and naming, type hints and static analysis, structured error handling, logging (standard library and logging libraries), OpenTelemetry, shipping telemetry into Azure Monitor, pytest testing, packaging, and CI/CD.
+An opinionated, production-grade set of standards for writing Python that is consistent, type-safe, observable, secure, and testable. It covers coding style and naming, type hints and static analysis, structured error handling, logging (standard library and logging libraries), OpenTelemetry, shipping telemetry into Azure Monitor, secrets handling and supply-chain security, pytest testing, packaging, and CI/CD.
 
 > **Scope:** Python 3.12+, managed with `uv`, linted with `Ruff`, type-checked with `mypy --strict`, and tested with `pytest`. Examples target service and automation code (CLIs, FastAPI services, Azure-integrated tooling).
 >
@@ -513,6 +513,62 @@ client.upload(
     ],
 )
 ```
+
+---
+
+## Security & Secrets
+
+### Secrets from a store or the environment, never source
+
+```python
+import os
+
+from azure.identity import DefaultAzureCredential
+from azure.keyvault.secrets import SecretClient
+
+# ✅ Key Vault via managed identity / workload identity - no secret in code or config
+credential = DefaultAzureCredential()
+secrets = SecretClient("https://kv-ldo-prd.vault.azure.net", credential)
+db_password = secrets.get_secret("db-password").value
+
+# ✅ Or read an injected environment variable, failing fast if it is absent
+api_token = os.environ["API_TOKEN"]          # KeyError at startup beats a None failing deep in a call
+
+# ❌ Never hardcode a secret, and never commit a .env holding real values
+API_TOKEN = "sk-live-1a2b3c..."              # in source = leaked the moment it is pushed
+```
+
+> **Rule:** Secrets come from a secret store (Key Vault via `DefaultAzureCredential`) or an injected environment variable - never literals or committed config. Model secrets as `pydantic.SecretStr` so they cannot be accidentally `repr()`-ed into a log, add a logging filter that redacts known secret keys, and never place a secret in an exception message, URL, or log `extra`.
+
+### Validate untrusted input; avoid the dangerous builtins
+
+```python
+from typing import Literal
+
+from pydantic import BaseModel, Field
+
+
+class DeployRequest(BaseModel):
+    environment: Literal["dev", "tst", "prd"]
+    replicas: int = Field(ge=1, le=20)
+
+
+# Parse, don't validate: this raises on a malformed payload, so the rest of the
+# code works with a typed, already-validated object.
+request = DeployRequest.model_validate(payload)
+```
+
+> **Rule:** Validate external input at the boundary with `pydantic` (or `dataclasses` plus explicit checks). Never `eval`/`exec` untrusted input, never `pickle.loads` data you did not produce, never `subprocess(..., shell=True)` with interpolated values (pass an argument list), and always `yaml.safe_load`. `bandit` (the Ruff `S` rules, already enabled in Tooling) flags these in the lint gate.
+
+### Supply chain - lock, hash, and audit dependencies
+
+```bash
+uv lock                  # commit uv.lock - exact, hash-pinned versions for every dependency
+uv sync --locked         # CI installs only what the lock allows; fails on any drift
+uvx pip-audit            # fail the build on known CVEs anywhere in the dependency tree
+```
+
+> **Rule:** Commit the lockfile and install with `--locked` (hash-pinned) so builds are reproducible and tamper-evident. Run `pip-audit` in CI and treat a known-vulnerable dependency as a build failure. Resolve internal packages from a private index, and pin third-party GitHub Actions to a full commit SHA.
 
 ---
 

@@ -8,6 +8,54 @@ description: GitHub Actions platform engineering reference - workflow syntax, ev
 GitHub Actions reference for platform and DevOps engineers. Covers workflow YAML, events and triggers, expressions and contexts, secrets and `GITHUB_TOKEN` permissions, OIDC cloud auth, reusable workflows and composite actions, runner and container options, environments, and the supply-chain hardening that production workflows need.
 
 > **Versions:** Workflow schema and runner images as of 2026 (`actions/checkout@v4`, `actions/cache@v4`, `actions/upload-artifact@v4`). Workflows live in `.github/workflows/*.yml`. Examples assume a Linux runner unless noted. Security guidance reflects current GitHub recommendations - **pin third-party actions to a full commit SHA** and **default `GITHUB_TOKEN` to read-only**.
+>
+> **Last reviewed:** May 2026
+
+---
+
+## GitHub CLI (`gh`)
+
+The `gh` CLI drives Actions from the terminal and from scripts - dispatch runs, tail logs, and manage secrets/variables without the web UI.
+
+### Install and authenticate
+
+```bash
+brew install gh                          # macOS / Linux (Homebrew)
+winget install GitHub.cli                # Windows (or: scoop install gh)
+# Debian/Ubuntu: add the official apt repo from cli.github.com
+
+gh auth login                            # interactive: browser or token
+gh auth status                           # authenticated account + token scopes
+
+# CI / non-interactive: read a token from the environment
+export GH_TOKEN="$GITHUB_TOKEN"          # the workflow token, or a fine-grained PAT
+```
+
+### Drive workflows and runs
+
+```bash
+gh workflow list                         # workflows in this repo
+gh workflow run ci.yml -f environment=dev  # dispatch a workflow_dispatch run with inputs
+gh workflow disable ci.yml               # or: enable
+
+gh run list --workflow ci.yml -L 10      # recent runs
+gh run watch                             # live-tail the latest run
+gh run view <run-id> --log               # full logs (--log-failed for just failures)
+gh run rerun <run-id> --failed           # re-run only the failed jobs
+gh run download <run-id> -n dist         # pull a named artifact
+```
+
+### Manage secrets and variables
+
+```bash
+gh secret set API_KEY                     # prompts for the value (repo scope)
+gh secret set API_KEY --env production    # environment-scoped secret
+gh secret list
+gh variable set REGION --body uksouth
+gh cache list                             # or: gh cache delete <key>
+```
+
+> ✅ Inside a workflow `gh` is preinstalled and authenticates from `GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}` - no login step. From a developer machine or external CI, scope a PAT to the minimum (fine-grained, single repo).
 
 ---
 

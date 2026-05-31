@@ -4,7 +4,7 @@ import { ExternalLink } from 'lucide-react';
 import { ScrollNav } from '@/components/scroll-nav';
 
 export const metadata: Metadata = {
-    title: 'Projects - Libre DevOps',
+    title: 'Projects',
     description: 'Open-source projects from Libre DevOps covering platform engineering, Azure, and DevOps tooling.',
 };
 

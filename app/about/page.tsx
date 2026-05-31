@@ -2,7 +2,7 @@ import { Metadata } from 'next';
 import Image from 'next/image';
 
 export const metadata: Metadata = {
-    title: 'About - Libre DevOps',
+    title: 'About',
     description: 'About Libre DevOps - platform engineering, DevOps, and security engineering in the open.',
 };
 

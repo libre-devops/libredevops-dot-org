@@ -1256,6 +1256,44 @@ func TestLogicAppModuleComplete(t *testing.T) {
 
 ---
 
+## Security & Compliance
+
+### Treat the state backend as a secret store
+
+Terraform stores **every** managed attribute in state as plaintext - including generated passwords, connection strings, and any value an API returns. Anyone who can read the state file can read those secrets.
+
+- Restrict the backend container to the apply identity and break-glass admins only (`Storage Blob Data Contributor` via `use_azuread_auth = true`, never an access key).
+- Enable blob **versioning and soft delete** on the state container, and rely on Azure Storage encryption at rest (add a customer-managed key where the data classification requires it).
+- Never `terraform state pull` onto a workstation or paste state into a ticket - that exfiltrates every secret in it.
+- Prefer **ephemeral resources and write-only arguments** (see Ephemeral Values) so high-value secrets never land in state at all.
+
+> **Rule:** The state file is as sensitive as the most sensitive secret it contains. Lock down backend RBAC to the smallest possible set, keep versioning and soft delete on, and keep secrets out of state with write-only arguments wherever the provider supports them.
+
+### Commit the dependency lock file
+
+`.terraform.lock.hcl` pins provider versions **and their checksums** - the supply-chain control that makes `terraform init` verify it is downloading the exact providers you reviewed. Commit it, and generate hashes for every platform your developers and CI run on, or `init` fails on the platform whose hash is missing:
+
+```bash
+terraform providers lock \
+  -platform=linux_amd64 \
+  -platform=darwin_arm64 \
+  -platform=windows_amd64
+```
+
+> **Rule:** Commit `.terraform.lock.hcl` with hashes for every platform in use. CI runs plain `terraform init`, which fails closed if the lock and configuration disagree; never run `terraform init -upgrade` in an automated pipeline - bump providers deliberately in a reviewed PR.
+
+### Static analysis and policy-as-code gate the pipeline
+
+The pipeline already runs `tflint` and a Trivy config scan (see Pipelines). Treat those findings, and any organisational policy, as merge-blocking:
+
+- **Misconfiguration scanning** - Trivy / tfsec / Checkov for insecure defaults (public network access, unencrypted storage, permissive NSGs). Fail the build on HIGH/CRITICAL.
+- **Policy-as-code** - Conftest/OPA against the plan JSON for org rules (required tags, allowed regions, naming), backed by **Azure Policy** at the platform so drift created outside Terraform is caught too.
+- **Least-privilege apply identity** - the CI workload identity authenticates with OIDC (no stored secret) and holds only the roles its stack needs, scoped to its resource group or subscription, never tenant-wide Owner.
+
+> **Rule:** Security scanning and policy checks run *before* plan and fail closed. A HIGH/CRITICAL misconfiguration or a policy violation blocks the merge - it is never a warning to be merged past.
+
+---
+
 ## Pipelines
 
 ### Standard CI/CD stage order

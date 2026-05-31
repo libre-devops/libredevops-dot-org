@@ -1,0 +1,302 @@
+---
+title: CLI Utilities Cheatsheet
+description: Text-wrangling command-line utilities - jq for JSON, yq for YAML, sed stream editing, awk field processing, and the PowerShell/Windows equivalents (Select-String, ConvertFrom-Json, findstr, Test-NetConnection).
+---
+
+# CLI Utilities Cheat Sheet
+
+The text-processing toolkit every platform engineer leans on: `jq` for JSON, `yq` for YAML, `sed` for stream editing, `awk` for field processing, and the PowerShell/Windows equivalents. Some of these appear in the [Bash](/docs/cheatsheets/bash-cheatsheet) and [PowerShell](/docs/cheatsheets/powershell-cheatsheet) sheets in context; this is the one-stop reference when you just need the tool.
+
+> **Versions:** `jq` 1.7+, mikefarah `yq` 4.x, GNU `sed`/`awk` (`gawk`) on Linux. macOS ships BSD `sed`/`awk` - behaviour differs (noted inline); `brew install gnu-sed gawk` for the GNU versions. Windows section assumes PowerShell 7+.
+>
+> **Last reviewed:** May 2026
+
+---
+
+## jq - JSON
+
+`jq` is a filter language for JSON. A program is a pipeline of filters; the identity filter is `.`.
+
+### Selecting and filtering
+
+```bash
+echo '{"name":"app","tags":["a","b"]}' | jq '.name'   # "app"
+jq '.tags[]'         file.json     # stream each array element
+jq '.items[].name'   file.json     # a field from every element
+jq '.a.b.c'          file.json     # nested access
+jq '.["odd-key"]'    file.json     # keys that need quoting
+jq '.items[] | select(.env == "prod")'  file.json      # filter
+jq '.items[] | select(.cpu > 80)'       file.json
+jq -r '.name'        file.json     # -r raw output (no quotes) - use for shell vars
+```
+
+### Reshaping
+
+```bash
+jq '{name: .name, first_tag: .tags[0]}'   file.json     # build a new object
+jq '.items | map(.name)'                  file.json     # transform an array
+jq '.items | map({id, name})'             file.json     # pick fields (shorthand)
+jq '.items | group_by(.env)'              file.json
+jq '.items | length'                      file.json
+jq 'to_entries | map({k:.key, v:.value})' file.json     # iterate object keys
+jq '.a // "default"'                      file.json     # fallback if null/missing
+```
+
+### Output formats and arguments
+
+```bash
+jq -c '.'            file.json     # compact, one line per object (NDJSON / logs)
+jq -r '.items[] | [.name, .env] | @csv'  file.json      # CSV row
+jq -r '.items[] | [.name, .env] | @tsv'  file.json
+jq --arg env prod '.items[] | select(.env == $env)' f.json   # pass a shell value safely
+jq --argjson n 5  '.items[0:$n]'  file.json             # numeric/JSON argument
+jq -n --arg v "$VALUE" '{key: $v}'                      # build JSON from scratch (-n null input)
+jq -s 'add'  a.json b.json         # slurp multiple inputs into one array
+```
+
+### Real pipelines
+
+```bash
+az vm list -o json        | jq -r '.[].name'
+kubectl get pods -o json  | jq -r '.items[] | select(.status.phase != "Running") | .metadata.name'
+curl -s "$API"            | jq -r '.data[] | "\(.id)\t\(.name)"'
+aws ec2 describe-instances | jq -r '.Reservations[].Instances[].InstanceId'
+```
+
+### Exit codes, error handling & safe quoting (production)
+
+```bash
+# -e sets the exit status from the LAST output: non-zero if it is null/false or empty.
+# This is how you branch on JSON in `set -e` scripts and CI - a plain `jq '.x'` exits 0
+# even when .x is missing, so a naive `if jq '.x'` is always true.
+if jq -e '.enabled' config.json >/dev/null; then echo "feature on"; fi
+jq -e '.items | length > 0' data.json >/dev/null || { echo "no items"; exit 1; }
+
+jq '.a?'                       # suppress "cannot index" errors on a missing/typed path
+jq '.a? // empty'              # missing -> produce nothing
+jq 'try .a.b catch "n/a"'      # explicit error handling
+jq -r '@sh "rm -- \(.path)"'   # @sh shell-quotes every value - safe to hand to a shell
+
+jq 'sort_by(.created) | reverse'  file.json    # sort and de-duplicate
+jq 'unique_by(.id)'               file.json
+jq --stream -cn '...'             huge.json     # process a multi-GB file without loading it all
+```
+
+> ✅ Drive control flow with `jq -e`, not a bare filter. Quote anything destined for a shell with `@sh`, and **never `eval` raw jq output**.
+
+> ✅ Build JSON with `jq -n` and pass shell values via `--arg`/`--argjson` - never interpolate `"$var"` into a jq program (it breaks on quotes and is an injection vector). Use `-r` whenever the result feeds a shell variable.
+
+---
+
+## yq - YAML (and JSON/XML/TOML)
+
+[mikefarah `yq`](https://mikefarah.gitbook.io/yq/) (Go) applies jq-style syntax to YAML - most jq filters work unchanged.
+
+```bash
+yq '.metadata.name'                          deploy.yaml
+yq '.spec.template.spec.containers[].image'  deploy.yaml
+yq '.items[] | select(.kind == "Service")'   all.yaml     # multi-document aware
+yq -i '.spec.replicas = 3'                   deploy.yaml   # edit IN PLACE
+yq -i '.metadata.labels.env = "prod"'        deploy.yaml
+
+# Convert formats
+yq -o=json '.'           deploy.yaml     # YAML  -> JSON
+yq -p=json -o=yaml '.'   data.json       # JSON  -> YAML
+yq -o=props '.'          config.yaml     # flatten to key=value
+
+# Merge and env
+yq eval-all '. as $i ireduce ({}; . * $i)' base.yaml override.yaml   # deep merge
+yq '.a.b = env(HOME)'    file.yaml       # inject an environment variable
+```
+
+> ⚠️ Two different tools are called `yq`. These examples are **mikefarah/yq v4** (Go - `yq --version` shows `v4.x`). The Python `yq` (kislyuk) wraps `jq` and has different syntax (`yq -y '...'`). Pin and document which one your scripts assume.
+
+---
+
+## sed - stream editing
+
+Line-oriented text transforms. The workhorse is substitution: `s/pattern/replacement/flags`.
+
+```bash
+sed 's/old/new/'        file       # replace the FIRST match per line
+sed 's/old/new/g'       file       # replace ALL matches (g = global)
+sed 's/old/new/gi'      file       # global + case-insensitive
+sed -E 's/v([0-9]+)/version \1/g' file   # -E extended regex + capture group \1
+sed -n '5,10p'          file       # print only lines 5-10 (-n = suppress default print)
+sed -n '/START/,/END/p' file       # print everything between two patterns
+sed '/^#/d'             file       # delete comment lines
+sed '/^$/d'             file       # delete blank lines
+sed '2d'                file       # delete line 2
+sed 's#/old/path#/new/path#g' file # use # as the delimiter to avoid escaping every /
+sed 's/.*/[&]/'         file       # & = the ENTIRE match in the replacement (wraps each line)
+sed -E 's/\b(\w+)\b/<\1>/g' file   # \b word boundary, \w word chars (GNU ERE)
+sed -z 's/\n/, /g'      file       # -z: NUL-separated records (GNU) - lets you edit ACROSS lines
+```
+
+### In-place editing (mind the portability trap)
+
+```bash
+sed -i     's/old/new/g' file      # GNU/Linux: edit in place
+sed -i ''  's/old/new/g' file      # BSD/macOS: REQUIRES a separate backup-suffix argument
+sed -i.bak 's/old/new/g' file      # both: edit in place, keep file.bak
+```
+
+> ⚠️ `sed -i` is **not portable**: GNU attaches the optional suffix (`-i.bak`); BSD/macOS needs it as a separate argument (`-i ''`). In cross-platform scripts, standardise on `sed -i.bak` and delete the backups, or write to a temp file and `mv`.
+
+---
+
+## awk - field processing
+
+`awk` splits each line into fields (`$1`, `$2`, ... `$NF`) and runs `pattern { action }` on every line. Ideal for columnar data.
+
+```bash
+awk '{print $1}'             file  # first field (whitespace-split)
+awk -F, '{print $1, $3}'     file  # comma-separated; print fields 1 and 3
+awk -F'\t' '{print $NF}'     file  # last field (tab-separated)
+awk 'NR > 1'                 file  # skip the header row (NR = record number)
+awk '/ERROR/ {print}'        file  # lines matching a regex (grep-like)
+awk '$3 > 100 {print $1}'    file  # condition on a field value
+awk 'length($0) > 80'        file  # lines longer than 80 characters
+```
+
+### Aggregate and reformat
+
+```bash
+awk '{sum += $2} END {print sum}'            file  # sum column 2
+awk '{sum += $2} END {print sum/NR}'         file  # average of column 2
+awk -F, '{c[$1]++} END {for (k in c) print k, c[k]}' file  # value counts (associative array)
+awk '!seen[$0]++'           file  # dedupe, preserving original order (classic)
+awk 'BEGIN{OFS="\t"} {print $2, $1}' file  # swap columns 1 and 2, tab-separated output
+awk -F: '{printf "%-20s %s\n", $1, $3}' /etc/passwd
+
+# Pass shell values and use string functions
+awk -v limit="$LIMIT" '$2 > limit {print $1}' file  # -v passes a shell value SAFELY (no injection)
+awk '{gsub(/[0-9]+/, "N"); print}'           file   # gsub = replace all; sub = first only
+awk 'match($0, /id=([0-9]+)/, m) {print m[1]}' file  # capture groups into m[] (gawk)
+LC_ALL=C awk '...'                            file   # bytewise + markedly faster on ASCII data
+```
+
+> ✅ Reach for `awk` when you need fields *and* logic together (filter on a column, sum, count). For a single fixed column `cut -d, -f1` is simpler; for find-and-replace use `sed`. `gawk` (GNU awk) adds `gensub`, true multidimensional arrays, and time functions.
+
+---
+
+## Windows / PowerShell equivalents
+
+PowerShell passes **objects**, not text, so the Unix string tools map to cmdlets you can dot into - skipping fragile parsing entirely.
+
+| Unix | PowerShell |
+|:--|:--|
+| `grep` | `Select-String -Pattern` |
+| `sed 's/a/b/'` | `... -replace 'a','b'` (regex) |
+| `jq` | `ConvertFrom-Json` / `ConvertTo-Json` |
+| `awk '{print $2}'` | `... \| ForEach-Object { ($_ -split '\s+')[1] }` |
+| `cut -d, -f1` | `Import-Csv` / `ConvertFrom-Csv`, then `.Column` |
+| `sort -u` | `Sort-Object -Unique` |
+| `wc -l` | `Measure-Object -Line` |
+| `which` | `Get-Command` / `where.exe` |
+| `tail -f` | `Get-Content -Wait -Tail 20` |
+
+```powershell
+# grep with a capture group
+Select-String -Path *.log -Pattern 'ERROR (\d+)' |
+    ForEach-Object { $_.Matches.Groups[1].Value }
+
+# jq-equivalent: JSON -> objects -> filter -> reshape
+(Get-Content data.json -Raw | ConvertFrom-Json).items |
+    Where-Object env -eq 'prod' | Select-Object name, env
+
+# CSV: read, filter, write
+Import-Csv hosts.csv | Where-Object { [int]$_.cpu -gt 80 } |
+    Select-Object name, cpu | Export-Csv hot.csv -NoTypeInformation
+
+# awk-style column sum
+(Get-Content nums.txt | ForEach-Object { [int]$_ } | Measure-Object -Sum).Sum
+```
+
+### Classic cmd / built-in utilities
+
+```powershell
+findstr /S /I /C:"TODO" *.cs       # grep (cmd): /S recurse, /I ignore case, /C literal string
+where.exe terraform                # locate an executable on PATH (where.exe, not the alias)
+tasklist | findstr node            # list processes (cmd)
+taskkill /IM node.exe /F           # kill by image name, forcefully
+Test-NetConnection api.example.com -Port 443   # nc/telnet replacement
+Resolve-DnsName example.com                    # dig/nslookup replacement
+"hello" | Set-Clipboard                        # pipe into the clipboard (clip.exe also works)
+```
+
+> ✅ When you want the real tools on Windows, install them: `winget install jqlang.jq` and `scoop install yq sed gawk` (or use Git Bash / WSL). But inside PowerShell scripts prefer the native cmdlets - they hand you typed objects, so there is no text to parse.
+
+---
+
+## just - command runner
+
+[`just`](https://just.systems) runs project tasks from a `justfile` - like `make` without the build-system baggage (no `.PHONY`, real arguments, no tab traps). Run `just` to list recipes, `just <recipe>` to run one.
+
+```bash
+brew install just            # macOS / Linux
+cargo install just           # any platform with Rust
+scoop install just           # Windows (or: winget install Casey.Just)
+```
+
+```just
+# justfile - `just` lists recipes; the first recipe (or `default`) runs with no args
+set dotenv-load                       # auto-load a .env file into recipe environments
+set positional-arguments              # expose $1, $2 ... inside recipe scripts
+
+registry := "myregistry.io"           # variables
+tag := `git rev-parse --short HEAD`   # backticks run a command at parse time
+
+default:
+    @just --list                      # @ hides the command line itself from output
+
+# A recipe with a dependency and a parameter (with a default value)
+build target="app": lint
+    docker build -t {{registry}}/{{target}}:{{tag}} .
+
+lint:
+    golangci-lint run ./...
+
+# Shebang recipe: the whole body runs in ONE process - use it for multi-line logic
+deploy env:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "deploying to {{env}}"
+    ./deploy.sh "{{env}}"
+```
+
+```bash
+just                 # list recipes
+just build api       # run `build` with target=api (runs `lint` first via the dependency)
+just deploy prod     # parameters are positional
+just --choose        # interactive recipe picker (uses fzf)
+just --fmt --unstable   # format the justfile
+```
+
+> ✅ Each ordinary recipe line runs in its **own shell**, so `cd` and shell variables do not persist line-to-line - use a `#!/usr/bin/env bash` shebang recipe for multi-step logic. Interpolate with `{{var}}` and quote it in shell context (`"{{env}}"`) exactly as you would any expansion.
+
+---
+
+## Anti-patterns
+
+- 🚨 **Parsing JSON or YAML with `grep`/`sed`/`awk`** - they are line-oriented and break on nesting, escaping, multiline values, and key order. Use `jq` for JSON and `yq` for YAML, every time.
+- 🚨 **Interpolating shell variables into a `jq` program** - `jq ".name == \"$x\""` breaks on quotes and is injectable. Pass values with `--arg`/`--argjson` and reference `$x` inside the program.
+- ⚠️ **Assuming `sed -i` is portable** - GNU and BSD/macOS disagree on the backup-suffix argument. Use `-i.bak` (then clean up) or a temp file and `mv`.
+- ⚠️ **`cat file | grep` / `cat file | jq`** - a useless fork. Pass the file directly: `grep ... file`, `jq ... file`.
+- ⚠️ **`awk` where `cut` would do (or the reverse)** - `cut -f` for fixed columns is faster and clearer; reach for `awk` only when you need fields, logic, and aggregation together.
+- 🔬 **Confusing the two `yq`s** - mikefarah (Go) and kislyuk (Python) share a name and little else. Pin and document which your scripts expect.
+- 🔬 **A regex that should be a parser** - if you are escaping `[`, `{`, and quotes to match a structured format, stop and use the right parser.
+- ⚠️ **Unpinned tool versions in CI** - `jq` 1.6 vs 1.7, GNU vs BSD `sed`/`awk`, and the two `yq`s behave differently. Pin versions in the runner image so a base-image bump does not silently change output.
+- 🔬 **Loading a multi-gigabyte JSON into `jq`** - it buffers the whole document in memory. Use `jq --stream` for huge inputs; for line-oriented data `awk`/`sed` are far faster, and `LC_ALL=C` speeds ASCII processing.
+
+---
+
+## References
+
+- [jq manual](https://jqlang.github.io/jq/manual/) - filters, functions, formats
+- [mikefarah yq](https://mikefarah.gitbook.io/yq/) - YAML/JSON/XML processor
+- [GNU sed manual](https://www.gnu.org/software/sed/manual/sed.html) - addresses, commands, regex
+- [GNU awk (gawk) manual](https://www.gnu.org/software/gawk/manual/gawk.html) - the definitive awk reference
+- [PowerShell `ConvertFrom-Json`](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.utility/convertfrom-json) - JSON to objects
+- [Bash Cheatsheet](/docs/cheatsheets/bash-cheatsheet) - these tools used in real scripts
+- [PowerShell Cheatsheet](/docs/cheatsheets/powershell-cheatsheet) - object-pipeline patterns

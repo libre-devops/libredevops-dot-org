@@ -1,0 +1,535 @@
+---
+title: GitLab CI/CD Cheatsheet
+description: GitLab CI/CD platform engineering reference - .gitlab-ci.yml syntax, stages and needs (DAG), rules and workflow, CI/CD variables and masking, OIDC id_tokens and Vault secrets, includes/extends/components, runners, Docker-in-Docker, caching and artifacts, environments and protected deployments, security scanners, and anti-patterns.
+---
+
+# GitLab CI/CD Cheat Sheet
+
+GitLab CI/CD reference for platform and DevOps engineers. Covers `.gitlab-ci.yml` structure, stages and the `needs` DAG, `rules`/`workflow` flow control, CI/CD variables and masking, OIDC `id_tokens` and Vault-backed `secrets`, includes/extends/components, runners and executors, Docker-in-Docker, caching and artifacts, environments and protected deployments, and the security hardening production pipelines need.
+
+> **Versions:** GitLab 17.x (GitLab.com and self-managed). Pipelines live in `.gitlab-ci.yml` at the repo root. `rules` supersedes the legacy `only`/`except`. Examples assume the `docker` executor on a Linux runner unless noted. Security guidance reflects current GitLab recommendations - **mask and protect secret variables**, **scope the `CI_JOB_TOKEN`**, and **pin images by digest**.
+>
+> **Last reviewed:** May 2026
+
+---
+
+## GitLab CLI (`glab`)
+
+`glab` is the GitLab terminal client - lint `.gitlab-ci.yml`, run and trace pipelines, and manage CI/CD variables without the web UI. It works against GitLab.com and self-managed.
+
+### Install and authenticate
+
+```bash
+brew install glab                        # macOS / Linux (Homebrew)
+winget install glab.glab                 # Windows (or: scoop install glab)
+
+glab auth login                          # interactive; --hostname gitlab.example.com for self-managed
+glab auth status
+
+# CI / non-interactive: read a token from the environment
+export GITLAB_TOKEN="<token>"            # project/group access token, least privilege
+export GITLAB_HOST="gitlab.example.com"  # self-managed only
+```
+
+### Lint, run and trace pipelines
+
+```bash
+glab ci lint                             # validate .gitlab-ci.yml BEFORE you push - catches syntax errors fast
+glab ci run -b main                      # trigger a pipeline on a branch
+glab ci status                           # status of the current branch's pipeline
+glab ci list                             # recent pipelines
+glab ci trace                            # live-tail the running job's log
+glab ci retry <job-id>                   # or: glab ci cancel
+glab ci artifact main build              # download artifacts from <ref> <job>
+```
+
+### Manage CI/CD variables
+
+```bash
+glab variable set AZURE_CLIENT_ID --masked --protected   # value read from stdin / prompt
+glab variable list
+glab variable get AZURE_CLIENT_ID
+```
+
+> ✅ Run `glab ci lint` locally or in a pre-push hook - validating the pipeline file before it reaches a runner saves a slow round-trip. For self-managed, set the host once with `glab auth login --hostname` (or `GITLAB_HOST`).
+
+---
+
+## Basics
+
+### Pipeline anatomy
+
+A pipeline is a set of `stages`; each stage runs its `jobs` in parallel; stages run in sequence. A job is a `script` running on a runner.
+
+```yaml
+stages: [build, test, deploy]
+
+build:
+  stage: build
+  image: node:22-bookworm
+  script:
+    - npm ci
+    - npm run build
+
+unit-test:
+  stage: test
+  image: node:22-bookworm
+  script: npm test
+```
+
+### `script`, `before_script`, `after_script`
+
+```yaml
+default:
+  image: alpine:3.20
+  before_script:
+    - apk add --no-cache curl          # runs before every job's script
+  after_script:
+    - echo "always runs, even on failure - do cleanup here"
+
+job:
+  script:
+    - set -euo pipefail                # treat the script as a real shell script
+    - ./deploy.sh
+```
+
+> ⚠️ `after_script` runs in a **separate shell** with a fresh environment and a short timeout - it cannot see variables exported in `script`. Use it only for cleanup, not for logic that depends on the job state.
+
+---
+
+## Stages, `needs` & DAG
+
+By default a job waits for its whole stage. `needs` builds a **directed acyclic graph** so a job starts the moment its dependencies finish, ignoring stage order.
+
+```yaml
+build-app:
+  stage: build
+  script: make app
+
+build-docs:
+  stage: build
+  script: make docs
+
+deploy:
+  stage: deploy
+  needs: [build-app]                   # starts as soon as build-app is done, before build-docs
+  script: ./deploy.sh
+
+smoke:
+  needs: []                            # no dependencies - starts immediately, in parallel
+  script: ./ping.sh
+```
+
+> ✅ `needs` can pull artifacts from a specific job (`needs: [{ job: build-app, artifacts: true }]`). Use a DAG to shorten critical-path time; use plain stages when ordering is genuinely sequential.
+
+---
+
+## Rules & `workflow`
+
+`rules` decide whether a job is added to the pipeline and with what attributes. Evaluated top-to-bottom; first match wins.
+
+```yaml
+deploy:
+  script: ./deploy.sh
+  rules:
+    - if: $CI_COMMIT_TAG                                  # tag pipeline
+      when: never                                        # ...never auto-deploy on a tag
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH        # on main
+      when: manual                                       # require a click
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      changes: [ "infra/**/*" ]                          # only when infra files changed
+    - when: never                                        # default: don't add the job
+```
+
+Common `rules` keys: `if`, `changes`, `exists`, `when` (`on_success` | `manual` | `delayed` | `always` | `never`), `allow_failure`, and `variables` (set vars when the rule matches).
+
+### `workflow` - stop duplicate pipelines
+
+Without this, a push to a branch with an open MR creates **two** pipelines (branch + MR). This is the canonical fix:
+
+```yaml
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"   # run MR pipelines
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never                                        # ...but not the duplicate branch pipeline
+    - if: $CI_COMMIT_BRANCH                               # otherwise run branch pipelines
+```
+
+> ⚠️ `only`/`except` is legacy and cannot be combined with `rules` in the same job. Use `rules` everywhere in new pipelines.
+
+---
+
+## Variables & Secrets
+
+```yaml
+variables:
+  DEPLOY_REGION: uksouth               # pipeline-level, visible in logs - non-sensitive only
+
+job:
+  variables:
+    LOG_LEVEL: debug                   # job-level override
+  script:
+    - echo "region=$DEPLOY_REGION"
+    - ./deploy.sh                       # secret vars are injected from project/group settings
+```
+
+Define secrets in **Settings → CI/CD → Variables** (project, group, or instance scope), never in `.gitlab-ci.yml`:
+
+| Flag | Effect |
+|:--|:--|
+| **Masked** | Value is hidden in job logs (must meet masking rules - no newlines, base64-ish) |
+| **Protected** | Exposed only to pipelines on **protected** branches/tags - keeps prod secrets off feature branches and fork MRs |
+| **Mask and hide** | Masked in logs **and** write-only in the UI after saving (cannot be re-read) |
+| **File** type | Value is written to a temp file; the variable holds the **path** (good for kubeconfig, certs, JSON keys) |
+
+### Useful predefined variables
+
+`CI_COMMIT_BRANCH`, `CI_COMMIT_TAG`, `CI_COMMIT_SHA` / `CI_COMMIT_SHORT_SHA`, `CI_COMMIT_REF_SLUG` (URL/DNS-safe), `CI_DEFAULT_BRANCH`, `CI_PIPELINE_SOURCE` (`push`, `merge_request_event`, `schedule`, `web`, `trigger`), `CI_PIPELINE_ID`, `CI_PROJECT_PATH`, `CI_REGISTRY` / `CI_REGISTRY_IMAGE`, `CI_JOB_TOKEN`, `CI_ENVIRONMENT_NAME`, `CI_MERGE_REQUEST_IID`.
+
+> ✅ Mark every credential **Masked + Protected**. Protected keeps it off non-protected branches (so a fork MR or feature branch can never read your production secret), and Masked keeps it out of logs. Prefer **File** type for multi-line material like kubeconfigs and service-account JSON.
+
+---
+
+## OIDC & Vault (`id_tokens`) ✅
+
+No long-lived cloud secrets. GitLab mints a short-lived **ID token** (a signed JWT) per job that the cloud or Vault trusts via a federated credential.
+
+### Cloud login with an ID token (Azure)
+
+```yaml
+deploy:
+  image: mcr.microsoft.com/azure-cli:latest
+  id_tokens:
+    AZURE_TOKEN:
+      aud: api://AzureADTokenExchange          # must match the federated credential's audience
+  script:
+    - az login --service-principal -u "$AZURE_CLIENT_ID" -t "$AZURE_TENANT_ID"
+        --federated-token "$AZURE_TOKEN"
+    - az group list -o table
+```
+
+### Vault-backed secrets (`secrets:`)
+
+```yaml
+deploy:
+  id_tokens:
+    VAULT_ID_TOKEN:
+      aud: https://vault.example.com
+  secrets:
+    DB_PASSWORD:
+      vault: ops/data/db/password@secrets      # path@mount
+      token: $VAULT_ID_TOKEN
+  script:
+    - echo "fetched into $DB_PASSWORD (masked)"
+```
+
+> ✅ Scope the federated credential on the cloud/Vault side to a **specific project, ref, and environment** (GitLab JWT claims `project_path`, `ref`, `ref_type`, `environment`). A wildcard subject lets any branch or fork assume the identity. `secrets:` also supports `azure_key_vault` and `gcp_secret_manager`.
+
+---
+
+## Includes, `extends` & Templates
+
+Keep pipelines DRY: factor shared jobs into includes and inherit with `extends`.
+
+```yaml
+include:
+  - local: '/.ci/build.yml'                          # file in this repo
+  - project: 'platform/ci-templates'                 # another project
+    ref: v1.4.0                                       # PIN to a tag/SHA, never a branch
+    file: '/jobs/deploy.yml'
+  - template: 'Jobs/SAST.gitlab-ci.yml'              # GitLab-maintained template
+  - component: 'gitlab.com/platform/ci/build@1.2.0'  # CI/CD Component (versioned, typed inputs)
+
+.build:                                # hidden job - a reusable template, never runs on its own
+  image: node:22-bookworm
+  script: npm ci && npm run build
+
+build:
+  extends: .build                      # inherit and override
+  stage: build
+  artifacts:
+    paths: [dist/]
+```
+
+> ✅ Pin `include: project` to a tag or SHA - an unpinned `ref` (or omitting it) tracks the default branch, so someone else's merge silently changes your pipeline. Prefer **CI/CD Components** for shared logic: they are versioned and declare typed `inputs`.
+
+---
+
+## Child/Parent Pipelines
+
+Split a large pipeline, or generate one dynamically, by triggering a child pipeline.
+
+```yaml
+trigger-tests:
+  stage: test
+  trigger:
+    include:
+      - local: '/.ci/tests.yml'
+    strategy: depend                   # parent job mirrors the child's status (wait + propagate failure)
+
+# Multi-project: kick off a downstream project's pipeline
+deploy-downstream:
+  stage: deploy
+  trigger:
+    project: platform/infrastructure
+    branch: main
+```
+
+---
+
+## Runners
+
+| Runner type | Use when | Watch out for |
+|:--|:--|:--|
+| Instance (shared) | Standard CI, no private network | Shared with others; never run privileged/untrusted on them |
+| Group / project | Team or repo-specific needs | You own patching and capacity |
+| Executor: `docker` | Most jobs - clean container per job | Need a registry/base images |
+| Executor: `kubernetes` | Autoscaling, ephemeral pods | Pod spec + RBAC to manage |
+| Executor: `shell` | Legacy/host tooling | No isolation - avoid for untrusted code |
+
+```yaml
+job:
+  tags: [ docker, linux, x64 ]         # routed to runners advertising these tags
+```
+
+> ⚠️ Never let **untrusted MRs from forks** run on a runner that has protected variables or privileged Docker. Use ephemeral, autoscaled runners (Kubernetes/Docker autoscaler) and keep production runners tag-isolated from open contribution.
+
+---
+
+## Services & Docker-in-Docker
+
+```yaml
+integration-test:
+  image: node:22-bookworm
+  services:
+    - name: postgres:16
+      alias: db
+  variables:
+    POSTGRES_PASSWORD: test
+    DATABASE_URL: 'postgres://postgres:test@db:5432/postgres'
+  script: npm run test:integration
+
+build-image:
+  image: docker:27
+  services:
+    - docker:27-dind                   # Docker daemon as a service
+  variables:
+    DOCKER_TLS_CERTDIR: '/certs'       # keep TLS on between client and daemon
+  script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+    - docker build -t "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" .
+    - docker push "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+```
+
+> ✅ Authenticate to the built-in registry with the predefined `CI_REGISTRY_USER`/`CI_REGISTRY_PASSWORD` (a scoped job token), not a personal token. Prefer a daemonless builder (`kaniko`, `buildah`) over privileged DinD where your runner security policy forbids `--privileged`.
+
+---
+
+## Caching & Artifacts
+
+**Cache** = speed-up of recreatable dependencies. **Artifacts** = job outputs passed to later stages or downloaded.
+
+```yaml
+build:
+  cache:
+    key:
+      files: [ package-lock.json ]     # cache invalidates when the lockfile changes
+    paths: [ .npm/ ]
+    policy: pull-push
+  script:
+    - npm ci --cache .npm --prefer-offline
+    - npm run build
+  artifacts:
+    paths: [ dist/ ]
+    expire_in: 1 week
+    reports:
+      junit: report.xml                # surfaces test results in the MR
+      dotenv: build.env                # exports vars to downstream jobs
+  dependencies: [ ]                     # this job pulls NO upstream artifacts
+```
+
+> ✅ Key the cache on the lockfile, not the branch, so it survives across pipelines. Set `expire_in` on artifacts - unbounded artifacts fill storage. Use `dependencies: []` to stop a job from downloading artifacts it does not need.
+
+---
+
+## Environments & Deployments
+
+```yaml
+deploy-prod:
+  stage: deploy
+  script: ./deploy.sh
+  environment:
+    name: production
+    url: https://app.example.com
+    deployment_tier: production
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual                     # require a human to start the prod deploy
+```
+
+- **Protected environments** (Premium+): restrict who can deploy and add **required approvals** before a job runs.
+- **Deployment freeze** windows block deploys during change-freeze periods.
+- An `environment` with a `stop` job (`action: stop`) lets review apps tear down automatically.
+
+> ✅ Gate production behind a **protected environment** with approvals, not just `when: manual` - manual only controls *who clicked*, the protected environment controls *who is allowed to*.
+
+---
+
+## Security & Compliance ✅
+
+> ✅ **Mask and protect** every secret CI/CD variable. Protected variables are withheld from fork MRs and non-protected branches, which is what stops untrusted pipelines from reading production credentials.
+
+> ✅ **Scope the `CI_JOB_TOKEN`.** In **Settings → CI/CD → Token Access**, limit which projects may use this project's job token. An unscoped job token is a lateral-movement path across your projects.
+
+> ✅ **Pin images by digest** in production jobs - a tag is mutable:
+
+```yaml
+job:
+  image: node@sha256:6b3f...e91   # immutable, reproducible
+```
+
+> ✅ **Protect branches, tags, and environments.** Production secrets and deploys should only ever run from a protected ref, reviewed via MR approval rules.
+
+> ✅ **Turn on the built-in scanners** - they run as jobs and post findings to the MR:
+
+```yaml
+include:
+  - template: Jobs/SAST.gitlab-ci.yml
+  - template: Jobs/Secret-Detection.gitlab-ci.yml
+  - template: Jobs/Dependency-Scanning.gitlab-ci.yml
+  - template: Jobs/Container-Scanning.gitlab-ci.yml
+```
+
+> ✅ **Compliance pipelines** (Ultimate): a compliance framework can force a required pipeline (e.g. mandatory scans, segregation of duties) onto labelled projects, so teams cannot opt out by editing their own `.gitlab-ci.yml`.
+
+---
+
+## Terraform
+
+Two distinct uses: **running** Terraform in a pipeline against a GitLab-managed state backend, and **managing GitLab itself** with the `gitlabhq/gitlab` provider.
+
+### GitLab-managed state + OIDC to Azure ✅
+
+GitLab hosts the state in an HTTP backend it manages per project; authenticate to Azure with an `id_token`, no stored secret.
+
+```yaml
+include:
+  - template: Terraform/Base.gitlab-ci.yml   # provides the gitlab-terraform helper image
+
+variables:
+  TF_STATE_NAME: prod                          # GitLab-managed state file name
+  TF_ROOT: ${CI_PROJECT_DIR}/infra
+
+.azure_oidc: &azure_oidc
+  id_tokens:
+    ARM_OIDC_TOKEN:
+      aud: api://AzureADTokenExchange
+  variables:
+    ARM_USE_OIDC: "true"
+    ARM_CLIENT_ID: $AZURE_CLIENT_ID
+    ARM_TENANT_ID: $AZURE_TENANT_ID
+    ARM_SUBSCRIPTION_ID: $AZURE_SUBSCRIPTION_ID
+
+plan:
+  <<: *azure_oidc
+  stage: build
+  script:
+    - gitlab-terraform plan
+    - gitlab-terraform plan-json
+  artifacts:
+    reports:
+      terraform: ${TF_ROOT}/plan.json          # renders the plan summary in the MR
+
+apply:
+  <<: *azure_oidc
+  stage: deploy
+  script: gitlab-terraform apply
+  environment: { name: production }
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      when: manual
+```
+
+### Manage GitLab with the `gitlabhq/gitlab` provider
+
+```hcl
+terraform {
+  required_providers {
+    gitlab = {
+      source  = "gitlabhq/gitlab"
+      version = "~> 17.0"
+    }
+  }
+}
+
+# Auth via GITLAB_TOKEN (a group access token), GITLAB_BASE_URL for self-managed.
+provider "gitlab" {}
+
+resource "gitlab_project" "app" {
+  name             = "app"
+  namespace_id     = var.group_id
+  visibility_level = "private"
+  # Limit which projects this project's CI job token can reach
+  ci_restrict_pipeline_cancellation_role = "maintainer"
+}
+
+# Masked + protected CI/CD variable, managed and auditable
+resource "gitlab_project_variable" "azure_client_id" {
+  project   = gitlab_project.app.id
+  key       = "AZURE_CLIENT_ID"
+  value     = var.azure_client_id
+  protected = true
+  masked    = true
+}
+
+# Protected production branch with approval rules upstream
+resource "gitlab_branch_protection" "main" {
+  project                = gitlab_project.app.id
+  branch                 = "main"
+  push_access_level      = "no one"     # changes only via MR
+  merge_access_level     = "maintainer"
+}
+```
+
+> ✅ Manage CI/CD variables, protected branches, and protected environments in Terraform so they are reviewed and auditable - but keep the GitLab-admin state in a separate, tightly controlled project.
+
+---
+
+## Anti-patterns
+
+- 🚨 **Secret values in `.gitlab-ci.yml` or `variables:`** - anything in the file or pipeline-level `variables` is readable by anyone with repo access and printed in logs. Put secrets in masked + protected CI/CD variables or a vault.
+
+- 🚨 **Unprotected secrets exposed to fork MRs** - a non-protected variable is handed to pipelines from forks, so a malicious MR can exfiltrate it. Mark every credential **Protected** so it is withheld from non-protected refs.
+
+- 🚨 **Unscoped `CI_JOB_TOKEN`** - leaving token access open lets any project that triggers yours reach across to others. Restrict the token's project allowlist.
+
+- 🚨 **`include: project` without a pinned `ref`** - it tracks the default branch, so an upstream change silently rewrites your pipeline. Pin to a tag or SHA; prefer versioned CI/CD Components.
+
+- 🚨 **Privileged DinD on shared runners for untrusted code** - `--privileged` is host-level access. Keep it off shared/instance runners; use ephemeral runners or a daemonless builder.
+
+- ⚠️ **Mutable image tags in production jobs** - `image: app:latest` is not reproducible and a moved tag changes your build. Pin by `@sha256:` digest.
+
+- ⚠️ **Duplicate branch + MR pipelines** - without `workflow:rules` you run (and pay for) two pipelines per push. Add the standard `workflow` block.
+
+- ⚠️ **`when: manual` mistaken for authorization** - it controls *that* a click is needed, not *who* may click. Gate production with a **protected environment** and approvals.
+
+- ⚠️ **`only`/`except` mixed with `rules`** - they are mutually exclusive per job and `only`/`except` is legacy. Standardise on `rules`.
+
+- 🔬 **Artifacts with no `expire_in`** - they accumulate forever and consume storage quota. Set an expiry on every artifact.
+
+- 🔬 **One giant job doing build + test + deploy** - no caching boundaries, no DAG parallelism, no environment gate. Split into staged jobs with `needs` and gate delivery separately.
+
+---
+
+## References
+
+- [`.gitlab-ci.yml` keyword reference](https://docs.gitlab.com/ee/ci/yaml/) - authoritative syntax
+- [CI/CD `rules` and `workflow`](https://docs.gitlab.com/ee/ci/yaml/#rules) - flow control
+- [OIDC / ID tokens with cloud providers](https://docs.gitlab.com/ee/ci/secrets/id_token_authentication.html) - federated auth
+- [Vault and external secrets (`secrets:`)](https://docs.gitlab.com/ee/ci/secrets/) - secret managers
+- [CI/CD variables and masking](https://docs.gitlab.com/ee/ci/variables/) - protected/masked/file vars
+- [CI/CD Components](https://docs.gitlab.com/ee/ci/components/) - versioned reusable pipeline units
+- [Pipeline security and the job token](https://docs.gitlab.com/ee/ci/jobs/ci_job_token.html) - `CI_JOB_TOKEN` scoping
+- [GitLab-managed Terraform state](https://docs.gitlab.com/ee/user/infrastructure/iac/terraform_state.html) - HTTP backend + `gitlab-terraform`
+- [GitLab Cheatsheet companions](/docs/cheatsheets/github-actions-cheatsheet) - GitHub Actions and [Azure DevOps](/docs/cheatsheets/azure-devops-cheatsheet)

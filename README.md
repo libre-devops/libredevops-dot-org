@@ -50,10 +50,10 @@ components/                 # Shared React components
   theme-toggle.tsx          # Dark/light toggle button
 
 content/docs/               # MDX content rendered by Nextra
-  cheatsheets/              # 20 cheatsheets: AI, Ansible, AWS, Azure, Azure DevOps,
-                            # Bash, Containers, .NET, Git, GitHub Actions, Go, KQL,
-                            # Linux, Nginx, PowerShell, Python, Security, Terraform,
-                            # TypeScript, Windows
+  cheatsheets/              # 22 cheatsheets: AI, Ansible, AWS, Azure, Azure DevOps,
+                            # Bash, CLI Utilities, Containers, .NET, Git, GitHub Actions,
+                            # GitLab, Go, KQL, Linux, Nginx, PowerShell, Python, Security,
+                            # Terraform, TypeScript, Windows
   documents/                # Reference docs: Azure naming convention, plus the
                             # Libre DevOps standards (Terraform, PowerShell, Bash,
                             # Python, Azure Logic Apps)

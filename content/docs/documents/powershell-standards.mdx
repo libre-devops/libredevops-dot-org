@@ -1,11 +1,11 @@
 ---
 title: PowerShell Standards
-description: Production standards for authoring, structuring, testing, and operating PowerShell - coding style and naming, strict mode and error handling, structured logging, logging libraries, OpenTelemetry tracing, Azure telemetry sync, Pester testing, modules, and CI/CD. Targets PowerShell 7.4+.
+description: Production standards for authoring, structuring, testing, and operating PowerShell - coding style and naming, strict mode and error handling, structured logging, logging libraries, OpenTelemetry tracing, Azure telemetry sync, secrets handling and supply-chain security, Pester testing, modules, and CI/CD. Targets PowerShell 7.4+.
 ---
 
 # PowerShell Standards
 
-An opinionated, production-grade set of standards for writing PowerShell that is consistent, safe, observable, and testable. It covers coding style, naming, strict mode, structured error handling, logging (native streams and logging libraries), OpenTelemetry tracing, shipping telemetry into Azure Monitor, Pester testing, module publishing, and CI/CD.
+An opinionated, production-grade set of standards for writing PowerShell that is consistent, safe, observable, secure, and testable. It covers coding style, naming, strict mode, structured error handling, logging (native streams and logging libraries), OpenTelemetry tracing, shipping telemetry into Azure Monitor, secrets handling and supply-chain security, Pester testing, module publishing, and CI/CD.
 
 > **Scope:** PowerShell 7.4+ (cross-platform `pwsh`), authored as advanced functions and modules. Windows PowerShell 5.1 is legacy - new code targets 7.x. Examples assume `Az` 12+, `Pester` 5.6+, and `PSScriptAnalyzer` 1.22+.
 >
@@ -614,6 +614,60 @@ $tracerProvider = [OpenTelemetry.Sdk]::CreateTracerProviderBuilder().
 > **Rule:** Set `APPLICATIONINSIGHTS_CONNECTION_STRING` from configuration and prefer `DefaultAzureCredential` over the connection string's instrumentation key where the exporter supports it. Never paste an instrumentation key into source.
 
 > **Rule:** Long-running PowerShell automation (Automation runbooks, Container Apps jobs, AKS cron jobs) should ship telemetry continuously, not buffer it to the end. Use a `BatchActivityExportProcessor` (the SDK default with `AddOtlpExporter`) and always `Dispose()` the provider in a `finally` so the final batch flushes on exit.
+
+---
+
+## Security & Secrets
+
+### Keep secrets as `SecureString` / `PSCredential`; decrypt only at the point of use
+
+```powershell
+# ✅ Pull from Key Vault with a managed identity - no stored credential anywhere
+Connect-AzAccount -Identity
+$secret = Get-AzKeyVaultSecret -VaultName 'kv-ldo-prd' -Name 'db-password'        # SecureString
+$plain  = Get-AzKeyVaultSecret -VaultName 'kv-ldo-prd' -Name 'db-password' -AsPlainText  # only when an API demands a string
+
+# ✅ Local dev: SecretManagement + an encrypted SecretStore vault, never plaintext in the script
+$cred = Get-Secret -Name 'ServicePrincipal' -Vault LocalStore                     # returns a PSCredential
+
+# ❌ Plaintext literal, or a secret round-tripped through ConvertTo-SecureString -AsPlainText
+$pw = ConvertTo-SecureString 'hunter2' -AsPlainText -Force                        # the secret is in the file
+```
+
+> **Rule:** Secrets are `SecureString`/`PSCredential` in memory and come from Key Vault (via managed identity) or `Microsoft.PowerShell.SecretManagement` - never plaintext literals, and never `ConvertFrom-SecureString` output committed to source (it is DPAPI/machine-bound, not a vault). Pass credentials with `-Credential`, not by hand-building a connection string, and never emit a secret to `Write-Host` or the pipeline.
+
+### Validate input at the parameter boundary
+
+```powershell
+function Set-Environment {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('dev', 'tst', 'prd')]
+        [string] $Environment,
+
+        [Parameter(Mandatory)]
+        [ValidatePattern('^[a-z][a-z0-9-]{2,23}$')]
+        [string] $ResourceGroupName
+    )
+    # $Environment and $ResourceGroupName are guaranteed valid here - no body checks needed
+}
+```
+
+> **Rule:** Constrain parameters with `[ValidateSet]`, `[ValidatePattern]`, `[ValidateRange]`, and strong types - validation belongs at the boundary, not in the body. Never build a command or script block from untrusted input and run it: `Invoke-Expression` (alias `iex`) is PowerShell's `eval` and a code-injection vector. Call cmdlets with parameters or splatting instead.
+
+### Supply chain - pin and trust deliberately
+
+```powershell
+# ✅ Pin exact module versions; install from a vetted (ideally private) repository
+Install-PSResource -Name Az -Version '12.1.0' -Repository PSGallery -TrustRepository -Scope CurrentUser
+
+# ✅ Verify a published script is Authenticode-signed before running it in production
+$sig = Get-AuthenticodeSignature ./build.ps1
+if ($sig.Status -ne 'Valid') { throw "Refusing to run unsigned or tampered script: ./build.ps1" }
+```
+
+> **Rule:** Pin module versions (an unpinned `Install-Module Az` is non-reproducible and a supply-chain risk), prefer a private PSResource repository for internal modules, and run published scripts under a `RemoteSigned`/`AllSigned` execution policy with Authenticode signing in CI. The `PSScriptAnalyzer` security rules (`PSAvoidUsingPlainTextForPassword`, `PSAvoidUsingConvertToSecureStringWithPlainText`, `PSUsePSCredentialType`) run in the lint gate and fail the build.
 
 ---
 

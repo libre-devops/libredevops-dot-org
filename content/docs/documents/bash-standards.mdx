@@ -1,11 +1,11 @@
 ---
 title: Bash Standards
-description: Production standards for writing, structuring, testing, and operating Bash - strict mode and safety, coding style and naming, quoting, functions, error handling and traps, structured logging, observability and Azure telemetry sync, ShellCheck and bats testing, and CI/CD. Targets Bash 4.4+.
+description: Production standards for writing, structuring, testing, and operating Bash - strict mode and safety, coding style and naming, quoting, functions, error handling and traps, structured logging, observability and Azure telemetry sync, secrets handling and supply-chain security, ShellCheck and bats testing, and CI/CD. Targets Bash 4.4+.
 ---
 
 # Bash Standards
 
-An opinionated, production-grade set of standards for writing Bash that is safe, predictable, observable, and testable. It covers strict mode, coding style and naming, quoting, functions, error handling and traps, structured logging, observability, shipping telemetry into Azure Monitor, ShellCheck and bats testing, and CI/CD.
+An opinionated, production-grade set of standards for writing Bash that is safe, predictable, observable, secure, and testable. It covers strict mode, coding style and naming, quoting, functions, error handling and traps, structured logging, observability, shipping telemetry into Azure Monitor, secrets handling and supply-chain security, ShellCheck and bats testing, and CI/CD.
 
 > **Scope:** Bash 4.4+ (5.x preferred) for automation, CI/CD glue, and operational tooling. macOS ships Bash 3.2 - install 5.x with Homebrew (`brew install bash`). If a script must run under POSIX `sh`, that is a different language with its own constraints; these standards assume a real `bash` interpreter. For anything with non-trivial data structures, real error types, or heavy logic, reach for Python or PowerShell instead - Bash is for orchestrating processes, not for building applications.
 >
@@ -431,6 +431,63 @@ send_log_analytics "${DCE_ENDPOINT}" "${DCR_IMMUTABLE_ID}" 'Custom-DeployLog_CL'
 
 ---
 
+## Security & Secrets
+
+Shell scripts hold credentials, run as automation identities, and shell out to other processes - three places enterprise incidents start. Treat every script as security-relevant.
+
+### Secrets never live in source, arguments, or `set -x`
+
+```bash
+# ✅ Read from the environment the platform injected, or from Key Vault at the point of use
+api_token="${API_TOKEN:?API_TOKEN must be set}"                 # fail fast if unset
+db_password="$(az keyvault secret show --vault-name kv-ldo-prd \
+  --name db-password --query value -o tsv)"                     # managed identity, no stored creds
+
+# ❌ Never hardcode, and never pass a secret as a CLI argument - arguments are
+#    world-readable in `ps -ef` and /proc/<pid>/cmdline for the life of the process
+mytool --password 'hunter2'
+
+# ✅ Hand secrets to tools via stdin instead of an argument
+printf '%s' "${db_password}" | docker login -u "${user}" --password-stdin registry.example.com
+```
+
+> **Rule:** Secrets come from the environment, stdin, or a secret store (Key Vault via managed identity) - never hardcoded, never in a CLI argument, never committed. `set -x` echoes expanded values, so never enable xtrace in production, or bracket sensitive regions with `{ set +x; } 2>/dev/null` ... `set -x`. Set `umask 077` before `mktemp` when a temp file will hold a secret.
+
+### Validate input; close off command injection
+
+```bash
+# ✅ Validate against an allowlist before use; reject anything unexpected
+case "${env}" in
+  dev|tst|prd) ;;
+  *) log_error "invalid --env: ${env}"; exit 2 ;;
+esac
+
+# ✅ Use `--` so a value beginning with '-' cannot be parsed as an option
+grep -- "${pattern}" "${file}"
+rm -rf -- "${dir}"
+
+# ❌ Interpolating untrusted input into a command string and eval-ing it is injection
+eval "backup_${name}"
+```
+
+> **Rule:** Validate every external input (arguments, environment, file contents, API responses) against an explicit allowlist or pattern before use. Pass user-controlled values as quoted array elements, never spliced into a command string, and terminate option parsing with `--`. `eval` and unquoted expansion into a command are injection vectors with no safe use on dynamic data.
+
+### Supply chain - pin and verify what you download
+
+```bash
+# ✅ Pin an exact version and verify the checksum of any binary fetched in CI
+readonly SHFMT_VERSION='3.10.0'                  # bump deliberately, never float on "latest"
+readonly SHFMT_SHA256='<sha256 from the release checksums file>'
+curl -fsSL -o /tmp/shfmt \
+  "https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_linux_amd64"
+echo "${SHFMT_SHA256}  /tmp/shfmt" | sha256sum -c -            # fails the build on mismatch
+install -m 0755 /tmp/shfmt /usr/local/bin/shfmt
+```
+
+> **Rule:** Never pipe a remote script straight into a shell (`curl ... | bash`) in automation, and never install from a floating `latest` tag. Pin an exact version, verify a checksum or signature, and pin third-party GitHub Actions to a full commit SHA. Builds fail closed on any mismatch.
+
+---
+
 ## Testing
 
 ### ShellCheck and shfmt are the first line
@@ -532,9 +589,14 @@ jobs:
           scandir: ./bin
 
       - name: shfmt (format check)
+        env:
+          SHFMT_VERSION: '3.10.0'                       # pinned, not "latest"
+          SHFMT_SHA256: '<sha256 from the release checksums>'
         run: |
-          curl -fsSL -o /usr/local/bin/shfmt https://github.com/mvdan/sh/releases/latest/download/shfmt_linux_amd64
-          chmod +x /usr/local/bin/shfmt
+          curl -fsSL -o /tmp/shfmt \
+            "https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_linux_amd64"
+          echo "${SHFMT_SHA256}  /tmp/shfmt" | sha256sum -c -
+          install -m 0755 /tmp/shfmt /usr/local/bin/shfmt
           shfmt -i 2 -d bin/ lib/
 
       - name: bats

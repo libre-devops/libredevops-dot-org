@@ -70,6 +70,33 @@ Names follow a structured pattern. Prefer alphanumeric characters and hyphens on
 
 ---
 
+## Tagging
+
+A name identifies a resource; **tags** make the estate queryable for cost, ownership, security, and automation. CAF treats naming and tagging as one discipline - apply a consistent tag schema alongside this convention.
+
+### Minimum required tags
+
+Every resource group, and every resource that supports tags, carries at least:
+
+| Tag | Purpose | Example |
+|:--|:--|:--|
+| `environment` | Lifecycle stage (matches the name suffix) | `prd` |
+| `application` | Workload or product the resource serves | `hello-world` |
+| `owner` | Accountable team or distribution list | `platform@example.com` |
+| `costCentre` | Chargeback / showback code | `CC-1234` |
+| `managedBy` | How the resource is provisioned | `terraform` |
+| `criticality` | Drives DR and alerting priority | `tier-1` |
+
+### Rules
+
+- **Set tags once, in the module.** Construct the baseline tag map in a `local`, then merge per-resource extras, so every resource is tagged identically without copy-paste. Tag inheritance from the resource group is not automatic - configure it explicitly or set tags on each resource.
+- **Enforce with Azure Policy.** A *Require a tag* (deny) or *Inherit a tag from the resource group* (modify) policy catches anything created outside Terraform; pair it with the module-level construction above.
+- **Tags are not a security boundary and not secret.** Never put credentials, PII, or access decisions in a tag - they are readable by anyone with reader access.
+
+> **Rule:** A resource is not production-ready until it has both a convention-compliant **name** and the minimum tag set. Names help humans reading an incident; tags let machines filter cost, compliance, and impact at scale.
+
+---
+
 ## Azure resource list
 
 The table below covers the resource types in Microsoft's [CAF abbreviations](https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/ready/azure-best-practices/resource-abbreviations) and [resource name rules](https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/resource-name-rules) guidance, extended with sub-resource types that follow the same pattern. The `${}` notation in constructs represents a dynamic value.

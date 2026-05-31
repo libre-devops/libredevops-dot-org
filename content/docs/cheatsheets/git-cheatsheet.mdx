@@ -8,6 +8,8 @@ description: Git configuration, core operations, branching, remotes, undoing cha
 A practical reference covering day-to-day Git usage, config templates, and bulk automation scripts for GitHub and Azure DevOps.
 
 > **Versions:** Git 2.40+ · gh CLI 2.x
+>
+> **Last reviewed:** May 2026
 
 ---
 
@@ -28,13 +30,13 @@ Place this at `~/.gitconfig`. The credential helper paths assume `gh` CLI is ins
     longpaths = true
 
 [credential]
-    helper = /mnt/c/Users/craig/scoop/apps/git/current/mingw64/bin/git-credential-manager.exe
+    helper = /mnt/c/Users/<you>/scoop/apps/git/current/mingw64/bin/git-credential-manager.exe
     useHttpPath = true
     azreposCredentialType = oauth
 
 [user]
-    name = Craig Thacker
-    email = craigthackerx@gmail.com
+    name = Your Name
+    email = you@example.com
 
 [filter "lfs"]
     process = git-lfs filter-process
@@ -70,8 +72,8 @@ Place this at `%USERPROFILE%\.gitconfig`. The `gh.exe` path assumes Scoop - adju
     azreposCredentialType = oauth
 
 [user]
-    name = Craig Thacker
-    email = craigthackerx@gmail.com
+    name = Your Name
+    email = you@example.com
 
 [filter "lfs"]
     process = git-lfs filter-process
@@ -81,11 +83,11 @@ Place this at `%USERPROFILE%\.gitconfig`. The `gh.exe` path assumes Scoop - adju
 
 [credential "https://github.com"]
     helper =
-    helper = !'C:\Users\craig\scoop\apps\gh\current\bin\gh.exe' auth git-credential
+    helper = !'C:\Users\<you>\scoop\apps\gh\current\bin\gh.exe' auth git-credential
 
 [credential "https://gist.github.com"]
     helper =
-    helper = !'C:\Users\craig\scoop\apps\gh\current\bin\gh.exe' auth git-credential
+    helper = !'C:\Users\<you>\scoop\apps\gh\current\bin\gh.exe' auth git-credential
 ```
 
 ### Useful global config one-liners
@@ -101,6 +103,66 @@ git config --global pull.rebase false        # merge on pull (safe default)
 git config --global core.autocrlf input      # LF on commit, leave checkouts alone (Linux/macOS)
 git config --global core.autocrlf true       # CRLF on checkout, LF on commit (Windows)
 ```
+
+### Signing commits (GPG) ✅
+
+Signed commits prove authorship and integrity - GitHub shows a **Verified** badge and branch protection can *require* signatures. Use the **same email** for the key, your Git config, and your verified account identity, or verification fails.
+
+**1. Generate a key**
+
+```bash
+# Linux / WSL / macOS (gnupg is usually preinstalled; else `sudo apt install gnupg`)
+gpg --full-generate-key
+# Choose: (1) RSA and RSA · 4096 bits · expiry to taste · your name + commit email
+```
+
+```powershell
+# Windows - install Gpg4win (bundles gpg + Kleopatra), then generate the key
+winget install GnuPG.Gpg4win      # or: scoop install gpg4win
+gpg --full-generate-key
+```
+
+**2. Find the key ID and export the public key**
+
+```bash
+# Key ID is the hex after the algorithm, e.g. rsa4096/ABCD1234EF567890
+gpg --list-secret-keys --keyid-format=long
+
+KEYID=ABCD1234EF567890                              # substitute yours (PowerShell: $KEYID="...")
+
+gpg --armor --export "$KEYID"                       # PUBLIC key - paste into the platform
+gpg --armor --export "$KEYID" > public-key.asc
+gpg --armor --export-secret-keys "$KEYID" > private-key.asc   # PRIVATE key - back up securely, never commit
+```
+
+**3. Add the public key to the platform**
+
+- **GitHub:** Settings → SSH and GPG keys → New GPG key (paste the block), or `gh gpg-key add public-key.asc`.
+- **Azure DevOps (Azure Repos):** no GPG key upload or Verified badge - the signature is still embedded in the commit and checkable locally with `git verify-commit`.
+
+**4. Sign automatically**
+
+```bash
+git config --global user.signingkey "$KEYID"
+git config --global commit.gpgsign true             # sign every commit
+git config --global tag.gpgsign true                # sign every annotated tag
+
+# Windows: point Git at the gpg binary if it isn't auto-detected
+git config --global gpg.program "C:/Program Files (x86)/GnuPG/bin/gpg.exe"
+
+# WSL / headless: let gpg prompt for the passphrase
+echo 'export GPG_TTY=$(tty)' >> ~/.bashrc
+```
+
+**5. Verify**
+
+```bash
+git commit -S -m "signed commit"   # -S is implicit once commit.gpgsign=true
+git log --show-signature -1         # expect "Good signature"
+git verify-commit HEAD
+```
+
+> **Lighter alternative - SSH signing.** Git 2.34+ can sign with an existing SSH key (no GPG): `git config --global gpg.format ssh` and `git config --global user.signingkey ~/.ssh/id_ed25519.pub`, then add it to GitHub as a **Signing** key. Simpler to manage; reach for GPG when you need keyservers, X.509/S-MIME, or a hardware token (YubiKey).
 
 ---
 
@@ -203,6 +265,25 @@ git revert HEAD                     # create a new commit that undoes HEAD (safe
 git reset --soft HEAD~1             # undo last commit, keep changes staged
 git reset --mixed HEAD~1            # undo last commit, keep changes unstaged (default)
 git reset --hard HEAD~1             # 🚨 undo last commit and discard all changes (destructive)
+```
+
+### Recover lost commits (`git reflog`) ✅
+
+`reflog` records every move of `HEAD` - including commits "lost" to a hard reset, a botched rebase, or a deleted branch. It is the primary *undo-almost-anything* tool. Entries are local-only and expire (≈90 days for reachable, 30 for unreachable), so recover sooner rather than later.
+
+```bash
+git reflog                          # every position HEAD has held, newest first
+git reflog show feature/my-feature  # reflog for a specific branch
+
+# Undo a bad reset/rebase - move HEAD back to where it was N moves ago
+git reset --hard HEAD@{1}
+
+# Recover a specific dropped commit onto a fresh branch (non-destructive)
+git checkout -b recovered HEAD@{2}
+
+# Restore an accidentally deleted branch: find its old tip, then recreate it
+git reflog | grep "branch-name"
+git branch branch-name <sha-from-reflog>
 ```
 
 ---
@@ -405,6 +486,18 @@ git log --all --full-history -- "**/my-file.ts"
 git cherry-pick abc1234             # apply a single commit to the current branch
 git cherry-pick abc1234^..def5678   # apply a range inclusive of abc1234 through def5678
 git cherry-pick --no-commit abc1234 # apply changes without committing
+```
+
+### Work on multiple branches at once (`git worktree`)
+
+A worktree checks another branch out into a separate directory that shares the same `.git` - no stashing, no second clone. Ideal for reviewing a PR or hotfixing `main` while a long build or test run holds your main checkout.
+
+```bash
+git worktree add ../app-hotfix main      # check out main into a sibling directory
+git worktree add -b fix/bug ../app-bug   # create and check out a new branch there
+git worktree list                        # show all linked worktrees
+git worktree remove ../app-hotfix        # remove when done
+git worktree prune                       # clean up stale entries (manually deleted dirs)
 ```
 
 ---

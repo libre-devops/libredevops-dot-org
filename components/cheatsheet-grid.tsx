@@ -33,6 +33,16 @@ const AiIcon = (
     </svg>
 );
 
+const TerminalIcon = (
+    <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none"
+        stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+        aria-hidden="true" style={{ flexShrink: 0, opacity: 0.85 }}>
+        <rect x="3" y="4" width="18" height="16" rx="2"/>
+        <path d="m7 9 3 3-3 3"/>
+        <path d="M13 15h4"/>
+    </svg>
+);
+
 function DevIcon({ name, alt, width = 28 }: { name: string; alt: string; width?: number }) {
     return (
         <img
@@ -89,6 +99,13 @@ const CHEATSHEETS: Cheatsheet[] = [
         icon: <DevIcon name="bash/bash-original.svg" alt="Bash" />,
     },
     {
+        title: 'CLI Utilities',
+        href: '/docs/cheatsheets/cli-utilities-cheatsheet',
+        description: 'Text-wrangling tools - jq for JSON, yq for YAML, sed stream editing, awk field processing, and the PowerShell/Windows equivalents (Select-String, ConvertFrom-Json, findstr, Test-NetConnection).',
+        tags: ['jq', 'yq', 'sed', 'awk'],
+        icon: TerminalIcon,
+    },
+    {
         title: 'Containers',
         href: '/docs/cheatsheets/containers-cheatsheet',
         description: 'Docker setup scripts, Podman pod creation, Docker Compose examples, Kubernetes pod manifests, and nginx reverse proxy configs.',
@@ -115,6 +132,13 @@ const CHEATSHEETS: Cheatsheet[] = [
         description: 'Workflow syntax, events and triggers, expressions and contexts, secrets and least-privilege GITHUB_TOKEN permissions, OIDC cloud auth, reusable workflows, runners, containers, caching, environments, and supply-chain hardening.',
         tags: ['GitHub Actions', 'CI/CD', 'YAML', 'OIDC'],
         icon: <DevIcon name="githubactions/githubactions-original.svg" alt="GitHub Actions" />,
+    },
+    {
+        title: 'GitLab',
+        href: '/docs/cheatsheets/gitlab-cheatsheet',
+        description: 'GitLab CI/CD - .gitlab-ci.yml syntax, stages and the needs DAG, rules and workflow, masked/protected variables, OIDC id_tokens and Vault secrets, includes/extends/components, runners, Docker-in-Docker, caching and artifacts, protected environments, security scanners, and Terraform.',
+        tags: ['GitLab CI', 'CI/CD', 'YAML', 'OIDC'],
+        icon: <DevIcon name="gitlab/gitlab-original.svg" alt="GitLab" />,
     },
     {
         title: 'Go',

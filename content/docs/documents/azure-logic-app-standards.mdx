@@ -2119,6 +2119,31 @@ resource "azurerm_monitor_metric_alert" "logic_app_failures" {
 
 ---
 
+## Business Continuity & Disaster Recovery
+
+Logic Apps are often the automation that *responds* to incidents (Sentinel playbooks, alerting, remediation), so they must survive the failure they may be needed to handle. Recovery posture differs sharply by hosting model.
+
+### Standard (single-tenant) - zone redundancy and durable state
+
+- **Availability zones:** run the workflows on a zone-redundant App Service Plan (Workflow Standard WS1-WS3, in a region that supports zones, with `zoneRedundant = true` and at least three instances). The platform spreads instances across zones and survives a single-zone outage with no redeploy.
+- **Runtime state lives in storage:** a Standard Logic App's run history and the state of in-flight **stateful** workflows live in its associated storage account. Make that account **zone-redundant (ZRS)** - GZRS if you need cross-region durability. Losing the storage account loses in-flight runs.
+- **Definitions are code:** `workflow.json` and the Terraform that deploys it are the real recovery artefact. Run history is diagnostic, not a backup.
+
+### Consumption (multitenant) - redeploy in a paired region
+
+- Consumption Logic Apps are a Microsoft-managed regional service with no zone or storage configuration exposed. DR is **active-passive redeploy**: keep the workflow in source/Terraform and redeploy it into the paired region on a regional failure.
+- Run history is region-bound and is **not** replicated; treat it as lost when a region is gone.
+
+### Multi-region strategy
+
+- **HTTP-triggered** workflows: front both regions with **Azure Front Door** and fail traffic over; keep the secondary deployed-but-idle (IaC makes this cheap).
+- **Polling / event / recurrence triggers:** only **one** region may be active, or both process the same work. Either keep the secondary's triggers disabled until failover, or make every action **idempotent** (see Retries & Error Handling) so duplicate firing is safe.
+- **Connections and identity:** API connections, Key Vault references, and role assignments must exist in the secondary region too - deploy the whole stack per region from the same module, parameterised by region.
+
+> **Rule:** Define an explicit RPO/RTO per workflow and prove recovery by redeploying the stack into the secondary region from Terraform - infrastructure-as-code is the recovery mechanism. Make stateful, non-idempotent automation single-active across regions; make everything else idempotent so a failover cannot double-process.
+
+---
+
 ## Anti-patterns
 
 - **User account API connections in production** - user connections break on password changes, MFA prompts, and when the account is disabled or leaves the organisation. Always use Managed Identity for Microsoft services and Service Principals with Key Vault-stored secrets for external services.

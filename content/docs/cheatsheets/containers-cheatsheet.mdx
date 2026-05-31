@@ -8,6 +8,8 @@ description: Docker, Podman, Compose, Kubernetes, Helm, and container security p
 Docker, Podman, Compose, Kubernetes, and Helm patterns for platform engineers. Covers images, networking, volumes, security, debugging, and production deployment patterns.
 
 > **Versions:** Docker 25+ / BuildKit 0.12+ · Kubernetes 1.29+ · Helm 3.14+ · kubectl 1.29+
+>
+> **Last reviewed:** May 2026
 
 ---
 
@@ -494,7 +496,13 @@ alias docker=podman
 
 ### Quadlet (systemd-native containers)
 
-Quadlet replaces `podman generate systemd` in Podman 4.4+. Drop a `.container` file in `~/.config/containers/systemd/` or `/etc/containers/systemd/`.
+Quadlet (Podman 4.4+) replaces `podman generate systemd`: you write declarative unit files and a systemd generator turns them into services. Seven types - `.container`, `.pod`, `.network`, `.volume`, `.kube`, `.build`, `.image` (plus `.artifact`).
+
+Place them where the generator looks:
+- **Rootful (system):** `/etc/containers/systemd/`
+- **Rootless (user):** `~/.config/containers/systemd/` (or `/etc/containers/systemd/users/` for every user)
+
+A `name.container` generates `name.service`; the container is named `systemd-name` unless you set `ContainerName=`.
 
 ```ini
 # ~/.config/containers/systemd/my-app.container
@@ -532,6 +540,47 @@ journalctl --user -u my-app.service -f
 systemctl --user enable podman-auto-update.timer
 podman auto-update --dry-run
 ```
+
+**Networks, volumes, and secrets - reference other quadlets by unit name:**
+
+```ini
+# my-app.network
+[Network]
+Subnet=10.89.0.0/24
+Gateway=10.89.0.1
+
+# my-app.volume  (an empty [Volume] just creates a named volume)
+[Volume]
+
+# in my-app.container - reference the .network / .volume / a Podman secret by name
+[Container]
+Network=my-app.network
+Volume=my-app.volume:/data:Z
+Secret=db-password,type=env,target=DB_PASSWORD     # podman secret create db-password ...
+```
+
+**Deploy a Kubernetes YAML as a quadlet (`.kube`):**
+
+```ini
+# my-app.kube
+[Kube]
+Yaml=my-app.yaml          # a `podman kube play` manifest in the same directory
+AutoUpdate=registry
+
+[Install]
+WantedBy=default.target
+```
+
+**Inspect generated units (Podman 5.x adds the `podman quadlet` subcommand):**
+
+```bash
+podman quadlet list                       # installed quadlets and their status
+podman quadlet print my-app.container     # show the resolved file
+# Debug generation without installing:
+/usr/lib/systemd/system-generators/podman-system-generator --dryrun
+```
+
+> ✅ Quadlets are the production way to run Podman as first-class systemd services - restart policies, ordering, journald logging, and `podman-auto-update`, with **no daemon**. Keep secrets in **Podman secrets** (`Secret=`) or an `EnvironmentFile=`, never inline in the unit, and run `systemctl [--user] daemon-reload` after every edit.
 
 ### Podman in WSL2
 
@@ -1169,6 +1218,31 @@ docker scout compare myregistry.io/my-app:latest myregistry.io/my-app:1.2.2
 syft myregistry.io/my-app:latest -o spdx-json > sbom.spdx.json
 syft myregistry.io/my-app:latest -o cyclonedx-json > sbom.cyclonedx.json
 ```
+
+### Image signing & verification (cosign) ✅
+
+Scanning tells you what is *in* an image; signing proves *who built it* and that it has not been tampered with since. Prefer **keyless** signing (Sigstore Fulcio + the Rekor transparency log): the signature is bound to an OIDC identity such as a GitHub Actions workflow, so there is no long-lived key to leak.
+
+```bash
+# Keyless sign in CI - identity comes from the OIDC token, no key material to manage
+cosign sign myregistry.io/my-app@sha256:<digest>
+
+# Verify, pinning the expected signer identity and issuer (do this at deploy time)
+cosign verify myregistry.io/my-app@sha256:<digest> \
+  --certificate-identity-regexp '^https://github.com/my-org/.+' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+# Attach an SBOM as a signed attestation, then verify it
+cosign attest --predicate sbom.spdx.json --type spdxjson myregistry.io/my-app@sha256:<digest>
+cosign verify-attestation --type spdxjson myregistry.io/my-app@sha256:<digest>
+
+# Key-based signing (when OIDC is not available) - keep the private key in a KMS / Key Vault
+cosign generate-key-pair
+cosign sign   --key cosign.key myregistry.io/my-app@sha256:<digest>
+cosign verify --key cosign.pub myregistry.io/my-app@sha256:<digest>
+```
+
+Always sign and verify by **immutable digest** (`@sha256:...`), never a mutable tag. Enforce signatures at admission with the Sigstore **policy-controller** or **Kyverno** so the cluster *rejects* unsigned images, rather than relying on a CI check that can be bypassed.
 
 ### OPA / Gatekeeper policies
 
