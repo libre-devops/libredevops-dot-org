@@ -7,6 +7,7 @@ export default {
     'bash-cheatsheet':     'Bash',
     'cli-utilities-cheatsheet': 'CLI Utilities',
     'containers-cheatsheet': 'Containers',
+    'developer-environment-cheatsheet': 'Developer Environment',
     'dotnet-cheatsheet':   '.NET',
     'git-cheatsheet':      'Git',
     'github-actions-cheatsheet': 'GitHub Actions',

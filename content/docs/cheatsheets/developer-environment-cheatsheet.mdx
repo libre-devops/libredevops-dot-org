@@ -1,0 +1,548 @@
+---
+title: Developer Environment Cheatsheet
+description: VS Code and JetBrains IDE setup for Azure DevOps engineering - extensions, settings, keybindings, language integrations, WSL integration, and platform-specific configuration for Linux and Windows. Assumes VS Code 1.90+ and JetBrains Toolbox 2.x.
+---
+
+# Developer Environment Cheat Sheet
+
+A practical reference for configuring VS Code and JetBrains IDEs as a production Azure DevOps engineering workstation, covering extensions, settings, language integrations, WSL, and platform-specific quirks.
+
+> **Versions:** VS Code 1.90+ · JetBrains Toolbox 2.x · Windows 11 / Fedora 44
+>
+> **Last reviewed:** May 2026
+
+---
+
+## VS Code
+
+### Installation (Linux / Fedora)
+
+```bash
+# Add Microsoft repo and install
+sudo rpm --import https://packages.microsoft.com/keys/microsoft.asc
+sudo sh -c 'echo -e "[code]\nname=Visual Studio Code\nbaseurl=https://packages.microsoft.com/yumrepos/vscode\nenabled=1\ngpgcheck=1\ngpgkey=https://packages.microsoft.com/keys/microsoft.asc" > /etc/yum.repos.d/vscode.repo'
+sudo dnf install code -y
+
+# Or via Flatpak
+flatpak install flathub com.visualstudio.code
+```
+
+### Installation (Windows)
+
+```powershell
+# winget (recommended - keeps VS Code updated via winget upgrade)
+winget install Microsoft.VisualStudioCode
+
+# Scoop (if you manage all tools via Scoop)
+scoop bucket add extras
+scoop install extras/vscode
+```
+
+After installation, add the `code` command to PowerShell by opening VS Code and running `Ctrl+Shift+P` -> `Shell Command: Install 'code' command in PATH`.
+
+### Recommended Extensions
+
+Install from the command line or the Extensions panel (`Ctrl+Shift+X`). On Windows with WSL, run these from inside the WSL terminal to install them in the WSL context as well.
+
+```bash
+# Core - language support
+code --install-extension hashicorp.terraform           # Terraform + HCL
+code --install-extension ms-python.python              # Python
+code --install-extension charliermarsh.ruff            # Ruff linter/formatter (replaces black + flake8)
+code --install-extension golang.go                     # Go (gopls)
+code --install-extension ms-vscode.powershell          # PowerShell
+
+# Azure
+code --install-extension ms-vscode.azurecli            # Azure CLI snippets
+code --install-extension ms-azuretools.vscode-azureterraform  # Azure Terraform
+
+# Git / GitHub
+code --install-extension github.copilot                # GitHub Copilot
+code --install-extension github.copilot-chat           # Copilot chat panel
+code --install-extension eamodio.gitlens               # Git blame, history, stash UI
+
+# Remote development
+code --install-extension ms-vscode-remote.remote-wsl       # WSL integration
+code --install-extension ms-vscode-remote.remote-ssh       # SSH remote development
+code --install-extension ms-vscode-remote.remote-containers # Dev containers
+
+# Productivity
+code --install-extension usernamehw.errorlens          # Inline error messages
+code --install-extension streetsidesoftware.code-spell-checker  # Spell check
+```
+
+> ⚠️ **WSL note:** Language extensions (Terraform, Python, Go, etc.) must be installed in **both** the Windows and WSL contexts. VS Code will prompt you when you open a WSL folder, or run `code --install-extension <id>` from inside the WSL terminal.
+
+### settings.json (Linux / Fedora) 🏠 Personal config
+
+Place this at `~/.config/Code/User/settings.json`. Adjust the Python interpreter path to match your uv-managed install (run `uv python find 3.14` to confirm).
+
+```json
+{
+    "workbench.colorTheme": "JetBrains Rider Dark Theme",
+    "editor.fontFamily": "'JetBrainsMono Nerd Font', 'JetBrains Mono', monospace",
+    "editor.fontLigatures": true,
+    "editor.fontSize": 13,
+    "editor.lineHeight": 1.6,
+    "terminal.integrated.fontFamily": "'JetBrainsMono Nerd Font'",
+    "terminal.integrated.fontSize": 13,
+
+    "editor.formatOnSave": true,
+    "editor.formatOnPaste": false,
+    "editor.tabSize": 2,
+    "editor.insertSpaces": true,
+    "editor.rulers": [120],
+    "editor.wordWrap": "off",
+    "editor.minimap.enabled": false,
+    "editor.renderWhitespace": "boundary",
+    "editor.bracketPairColorization.enabled": true,
+    "editor.guides.bracketPairs": true,
+    "editor.suggestSelection": "first",
+    "editor.acceptSuggestionOnEnter": "smart",
+    "editor.inlayHints.enabled": "on",
+    "editor.stickyScroll.enabled": true,
+    "files.trimTrailingWhitespace": true,
+    "files.insertFinalNewline": true,
+
+    "terminal.integrated.defaultProfile.linux": "bash",
+    "terminal.integrated.gpuAcceleration": "on",
+
+    "[terraform]": {
+        "editor.defaultFormatter": "hashicorp.terraform",
+        "editor.formatOnSave": true,
+        "editor.formatOnSaveMode": "file"
+    },
+    "[terraform-vars]": {
+        "editor.defaultFormatter": "hashicorp.terraform",
+        "editor.formatOnSave": true
+    },
+    "terraform.languageServer.enable": true,
+    "terraform.languageServer.terraform.path": "/home/linuxbrew/.linuxbrew/bin/terraform",
+    "terraform.validation.enableEnhancedValidation": true,
+    "terraform-ls.experimentalFeatures.prefillRequiredFields": true,
+
+    "python.defaultInterpreterPath": "${env:HOME}/.local/share/uv/python/cpython-3.14-linux-x86_64-gnu/bin/python3.14",
+    "[python]": {
+        "editor.defaultFormatter": "charliermarsh.ruff",
+        "editor.formatOnSave": true
+    },
+    "ruff.fixAll": true,
+    "ruff.organizeImports": true,
+
+    "[go]": {
+        "editor.defaultFormatter": "golang.go",
+        "editor.formatOnSave": true
+    },
+    "go.useLanguageServer": true,
+
+    "powershell.powerShellDefaultVersion": "PowerShell (x64)",
+    "[powershell]": {
+        "editor.defaultFormatter": "ms-vscode.powershell",
+        "editor.formatOnSave": true,
+        "editor.tabSize": 4
+    },
+
+    "git.autofetch": true,
+    "git.confirmSync": false,
+    "git.enableSmartCommit": true,
+
+    "explorer.confirmDelete": false,
+    "explorer.confirmDragAndDrop": false,
+    "workbench.startupEditor": "none",
+    "telemetry.telemetryLevel": "off"
+}
+```
+
+### settings.json (Windows) 🏠 Personal config
+
+Place this at `%APPDATA%\Code\User\settings.json` (`$env:APPDATA\Code\User\settings.json` in PowerShell). The key differences from Linux are the terminal profiles, terraform binary path, and Python interpreter path.
+
+Run `uv python find 3.14` in PowerShell and `(Get-Command terraform).Source` to get the exact paths for your install.
+
+```json
+{
+    "workbench.colorTheme": "JetBrains Rider Dark Theme",
+    "editor.fontFamily": "'JetBrainsMono Nerd Font', 'JetBrains Mono', monospace",
+    "editor.fontLigatures": true,
+    "editor.fontSize": 13,
+    "editor.lineHeight": 1.6,
+    "terminal.integrated.fontFamily": "'JetBrainsMono Nerd Font'",
+    "terminal.integrated.fontSize": 13,
+
+    "editor.formatOnSave": true,
+    "editor.formatOnPaste": false,
+    "editor.tabSize": 2,
+    "editor.insertSpaces": true,
+    "editor.rulers": [120],
+    "editor.wordWrap": "off",
+    "editor.minimap.enabled": false,
+    "editor.renderWhitespace": "boundary",
+    "editor.bracketPairColorization.enabled": true,
+    "editor.guides.bracketPairs": true,
+    "editor.suggestSelection": "first",
+    "editor.acceptSuggestionOnEnter": "smart",
+    "editor.inlayHints.enabled": "on",
+    "editor.stickyScroll.enabled": true,
+    "files.trimTrailingWhitespace": true,
+    "files.insertFinalNewline": true,
+    "files.eol": "\n",
+
+    "terminal.integrated.defaultProfile.windows": "PowerShell",
+    "terminal.integrated.profiles.windows": {
+        "PowerShell": {
+            "source": "PowerShell",
+            "icon": "terminal-powershell"
+        },
+        "WSL": {
+            "path": "C:\\Windows\\System32\\wsl.exe",
+            "args": ["-d", "Ubuntu"],
+            "icon": "terminal-linux"
+        },
+        "Git Bash": {
+            "source": "Git Bash"
+        }
+    },
+
+    "[terraform]": {
+        "editor.defaultFormatter": "hashicorp.terraform",
+        "editor.formatOnSave": true,
+        "editor.formatOnSaveMode": "file"
+    },
+    "[terraform-vars]": {
+        "editor.defaultFormatter": "hashicorp.terraform",
+        "editor.formatOnSave": true
+    },
+    "terraform.languageServer.enable": true,
+    "terraform.languageServer.terraform.path": "${env:USERPROFILE}\\scoop\\shims\\terraform.exe",
+    "terraform.validation.enableEnhancedValidation": true,
+    "terraform-ls.experimentalFeatures.prefillRequiredFields": true,
+
+    "python.defaultInterpreterPath": "${env:LOCALAPPDATA}\\uv\\python\\cpython-3.14-windows-x86_64-none\\python.exe",
+    "[python]": {
+        "editor.defaultFormatter": "charliermarsh.ruff",
+        "editor.formatOnSave": true
+    },
+    "ruff.fixAll": true,
+    "ruff.organizeImports": true,
+
+    "[go]": {
+        "editor.defaultFormatter": "golang.go",
+        "editor.formatOnSave": true
+    },
+    "go.useLanguageServer": true,
+
+    "powershell.powerShellDefaultVersion": "PowerShell (x64)",
+    "[powershell]": {
+        "editor.defaultFormatter": "ms-vscode.powershell",
+        "editor.formatOnSave": true,
+        "editor.tabSize": 4
+    },
+
+    "git.autofetch": true,
+    "git.confirmSync": false,
+    "git.enableSmartCommit": true,
+
+    "remote.WSL.defaultDistro": "Ubuntu",
+
+    "explorer.confirmDelete": false,
+    "explorer.confirmDragAndDrop": false,
+    "workbench.startupEditor": "none",
+    "telemetry.telemetryLevel": "off"
+}
+```
+
+### keybindings.json 🏠 Personal config
+
+Place this at `~/.config/Code/User/keybindings.json` (Linux) or `%APPDATA%\Code\User\keybindings.json` (Windows).
+
+```json
+[
+    {
+        "key": "ctrl+shift+alt+c",
+        "command": "github.copilot.toggleCopilot"
+    }
+]
+```
+
+### WSL Integration (Windows) ✅
+
+The Remote - WSL extension lets VS Code run its server inside WSL while the UI stays on Windows. This is the recommended way to develop on Windows - your tools, interpreter, and file system all live in WSL where paths are predictable and Linux tooling works natively.
+
+```bash
+# Open the current WSL directory in VS Code from your WSL terminal
+code .
+
+# Open a specific WSL path from PowerShell
+code \\wsl.localhost\Ubuntu\home\youruser\project
+```
+
+When a WSL window is open, the VS Code status bar shows the WSL distro name (bottom-left). Extensions installed on Windows are not automatically available in WSL - VS Code will show a prompt to install them in the WSL context, or run from inside the WSL terminal:
+
+```bash
+# Install all required extensions in the WSL context
+code --install-extension hashicorp.terraform
+code --install-extension ms-python.python
+code --install-extension charliermarsh.ruff
+code --install-extension golang.go
+code --install-extension ms-vscode.powershell
+code --install-extension github.copilot
+code --install-extension github.copilot-chat
+code --install-extension eamodio.gitlens
+code --install-extension usernamehw.errorlens
+```
+
+WSL-specific settings (interpreter paths, terminal profile) are stored separately from your Windows settings. Set them via `Ctrl+Shift+P` -> `Open Remote Settings (WSL)` - this writes to `~/.vscode-server/data/Machine/settings.json` inside the WSL distro. In practice, the Linux `settings.json` above covers this when you open a WSL folder.
+
+### Terraform Integration ✅
+
+The `hashicorp.terraform` extension uses `terraform-ls` (the language server) which **requires `terraform init` to have been run** before provider-aware completion is available. Without it you get only basic HCL syntax.
+
+```bash
+# 1. Run init in your workspace - this populates .terraform/providers/
+terraform init
+
+# 2. Confirm the language server is running
+# VS Code: Ctrl+Shift+P -> "Terraform: Show Language Server Output"
+```
+
+Key settings that improve the experience significantly:
+
+- `terraform.languageServer.terraform.path` - explicit path avoids PATH lookup failures, especially important when terraform is installed via Homebrew (Linux), Scoop (Windows), or tfenv
+- `terraform-ls.experimentalFeatures.prefillRequiredFields` - scaffolds all required arguments when completing a resource block, closest equivalent to JetBrains behaviour
+- `terraform.validation.enableEnhancedValidation` - surfaces type and reference errors inline without running `terraform validate`
+
+**Finding the terraform binary path:**
+
+```bash
+# Linux / WSL
+which terraform
+
+# PowerShell (Windows)
+(Get-Command terraform).Source
+```
+
+**Scoop install path** (user-level): `%USERPROFILE%\scoop\shims\terraform.exe`
+
+**Chocolatey install path**: `C:\ProgramData\chocolatey\bin\terraform.exe`
+
+**winget** does not install to a predictable path - use `(Get-Command terraform).Source` to find it, then hardcode it in settings.
+
+### Python Integration (uv) ✅
+
+When managing Python with `uv`, VS Code needs to point at the uv-managed interpreter rather than the system Python.
+
+```bash
+# Linux / WSL - find the exact interpreter path
+uv python find 3.14
+# Example: /home/you/.local/share/uv/python/cpython-3.14-linux-x86_64-gnu/bin/python3.14
+```
+
+```powershell
+# Windows - find the exact interpreter path
+uv python find 3.14
+# Example: C:\Users\you\AppData\Local\uv\python\cpython-3.14.5-windows-x86_64-none\python.exe
+```
+
+Set `python.defaultInterpreterPath` in settings.json to the output path, or select it via `Ctrl+Shift+P` -> `Python: Select Interpreter`.
+
+Install Ruff as a uv tool so it is available to the VS Code extension:
+
+```bash
+# Linux / WSL
+uv tool install ruff
+
+# Windows (PowerShell)
+uv tool install ruff
+```
+
+### Go Integration
+
+The Go extension requires `gopls` (the Go language server). Install it after installing Go:
+
+```bash
+# Linux / WSL
+go install golang.org/x/tools/gopls@latest
+```
+
+```powershell
+# Windows
+go install golang.org/x/tools/gopls@latest
+```
+
+`go.useLanguageServer: true` in settings.json enables full navigation, completion, and inline diagnostics via gopls.
+
+### GitHub Copilot ✅
+
+Toggle Copilot inline suggestions without reloading VS Code:
+
+- **Status bar icon** (bottom-right): one click to enable/disable for the session or per language
+- **settings.json**: disable per language type
+
+```json
+"github.copilot.enable": {
+    "*": false,
+    "plaintext": false,
+    "markdown": false
+}
+```
+
+Set `"*": true` to re-enable globally. Useful when validating that your setup works without AI assistance.
+
+### Keyboard Shortcuts Reference
+
+| Action | Shortcut |
+|--------|----------|
+| Command palette | `Ctrl+Shift+P` |
+| Quick open file | `Ctrl+P` |
+| Toggle terminal | `` Ctrl+` `` |
+| Split editor | `Ctrl+\` |
+| Close tab | `Ctrl+W` |
+| Navigate tabs | `Ctrl+Tab` / `Ctrl+Shift+Tab` |
+| Go to definition | `F12` |
+| Peek definition | `Alt+F12` |
+| Find references | `Shift+F12` |
+| Rename symbol | `F2` |
+| Format document | `Shift+Alt+F` |
+| Toggle line comment | `Ctrl+/` |
+| Multi-cursor | `Ctrl+Alt+Down` |
+| Select all occurrences | `Ctrl+Shift+L` |
+| Open settings (JSON) | `Ctrl+Shift+P` -> `Open User Settings (JSON)` |
+| Open keybindings (JSON) | `Ctrl+Shift+P` -> `Open Keyboard Shortcuts (JSON)` |
+
+### Anti-patterns
+
+- ⚠️ **Opening a Terraform workspace cold** - if you haven't run `terraform init`, the language server has no provider schema and completion is nearly useless. Always init first.
+- ⚠️ **Installing the old community Terraform extension** - the extension by Anton Kulikov is unmaintained. Use `hashicorp.terraform` (publisher: HashiCorp) exclusively. Both installed simultaneously causes conflicts.
+- ⚠️ **Pointing Python interpreter at the system Python** - system Python on Fedora and Windows is used by the OS and tooling. Use the uv-managed interpreter to avoid polluting system packages and to get the version you actually want.
+- 🔬 **Relying on `editor.formatOnSave` without pinning a formatter** - if multiple formatters are installed for the same language, VS Code prompts or uses the wrong one. Always set `editor.defaultFormatter` explicitly per language block.
+- ⚠️ **Working on Windows without `"files.eol": "\n"`** - without this, VS Code creates new files with CRLF line endings on Windows. This causes spurious diffs and can break shell scripts and Dockerfiles that run in Linux contexts. Set it globally in your Windows settings.json.
+- ⚠️ **Editing WSL files from Windows Explorer or non-WSL tools** - accessing `\\wsl.localhost\` from Windows tools like File Explorer is fine for one-off copies, but editing files this way bypasses WSL's file system notifications and can cause permission and line-ending issues. Always edit WSL files through VS Code's Remote-WSL connection or from inside the WSL terminal.
+
+---
+
+## JetBrains
+
+### Installation via Toolbox (Linux) ✅
+
+JetBrains Toolbox is the recommended way to install and update all JetBrains IDEs. It manages bundled JRE versions and keeps IDEs up to date automatically.
+
+```bash
+# Download Toolbox - grab the latest tar.gz from https://www.jetbrains.com/toolbox-app/
+# Extract the full directory (Toolbox requires its bundled JRE alongside the binary)
+mkdir -p ~/.local/share/JetBrains/toolbox-app
+tar -xzf jetbrains-toolbox-*.tar.gz --strip-components=1 -C ~/.local/share/JetBrains/toolbox-app
+
+# Symlink the binary to PATH
+ln -sf ~/.local/share/JetBrains/toolbox-app/jetbrains-toolbox ~/.local/bin/jetbrains-toolbox
+
+# Launch - Toolbox manages everything else from here
+jetbrains-toolbox &
+```
+
+> ⚠️ **Common mistake on Linux:** copying only the `jetbrains-toolbox` binary and not the full directory causes exit code 255 at launch. Toolbox looks for its bundled JRE at `<install-dir>/jre/lib/server/libjvm.so` - the full directory must be present.
+
+### Installation via Toolbox (Windows)
+
+On Windows, Toolbox is a standard installer. It handles everything including JRE management and icon registration automatically.
+
+```powershell
+# winget (recommended)
+winget install JetBrains.Toolbox
+
+# Scoop
+scoop bucket add extras
+scoop install extras/jetbrains-toolbox
+```
+
+Toolbox installs to `%LOCALAPPDATA%\JetBrains\Toolbox\` and adds a system tray icon. Individual IDEs are installed and updated from the Toolbox UI.
+
+### Recommended Plugins
+
+Install from the IDE's plugin marketplace (`Ctrl+Alt+S` -> Plugins) or via the Toolbox plugin list. Plugins are shared across all JetBrains IDEs that support them.
+
+| Plugin | Purpose |
+|--------|---------|
+| HashiCorp Terraform | HCL syntax, Terraform resource completion |
+| GitHub Copilot | AI completions (same subscription as VS Code) |
+| GitToolBox | Inline blame, enhanced git log |
+| Ruff | Python linting/formatting via Ruff |
+| Makefile Language | Syntax support for Makefiles |
+| .env files support | Syntax highlighting for `.env` files |
+| Azure Toolkit for IntelliJ | Azure resource browsing and deployment |
+| PowerShell | PSI-based PowerShell support in IntelliJ Platform IDEs |
+
+### Font Setup (Linux)
+
+JetBrains IDEs require the font to be installed system-wide or in `~/.local/share/fonts/`. Set it under `Settings -> Editor -> Font`.
+
+```bash
+# JetBrainsMono Nerd Font - install to user font directory
+mkdir -p ~/.local/share/fonts/JetBrainsMono
+# Download from https://www.nerdfonts.com/font-downloads and extract here
+fc-cache -fv
+
+# Verify the font is found
+fc-list | grep -i "JetBrainsMono"
+```
+
+Recommended font settings in the IDE: JetBrainsMono Nerd Font, size 13, line height 1.4, ligatures enabled.
+
+### Font Setup (Windows)
+
+```powershell
+# Via Scoop (recommended - handles updates automatically)
+scoop bucket add nerd-fonts
+scoop install nerd-fonts/JetBrainsMono-NF
+
+# Manual: download from https://www.nerdfonts.com/font-downloads
+# Extract the zip, select all .ttf files, right-click -> "Install for all users"
+# "Install for all users" requires admin and installs to C:\Windows\Fonts (system-wide)
+# "Install" (no admin) installs to %LOCALAPPDATA%\Microsoft\Windows\Fonts (user-only)
+```
+
+After installation, restart the JetBrains IDE and set the font under `Settings -> Editor -> Font`. Ligatures are enabled via the `Enable ligatures` checkbox on the same page.
+
+> ⚠️ **User vs system install:** If you installed the font as user-only (no admin), other users and elevated processes will not see it. For a shared machine or if the IDE runs elevated, install for all users.
+
+### KDE / Wayland - Icon Cache (Linux) ⚠️
+
+After Toolbox installs or updates an IDE, the application icons may not appear in KDE's application launcher until the icon cache is refreshed.
+
+```bash
+gtk-update-icon-cache -f -t ~/.local/share/icons/hicolor && kbuildsycoca6 --noincremental
+```
+
+Add as a shell alias if you use Toolbox regularly:
+
+```bash
+alias fix-jb-icons='gtk-update-icon-cache -f -t ~/.local/share/icons/hicolor && kbuildsycoca6 --noincremental'
+```
+
+This is not an issue on Windows - Toolbox handles icon registration automatically.
+
+### Keyboard Shortcuts Reference
+
+| Action | IntelliJ / Rider (Linux + Windows) |
+|--------|-------------------------------------|
+| Find action | `Ctrl+Shift+A` |
+| Search everywhere | `Shift` double-tap |
+| Go to file | `Ctrl+Shift+N` |
+| Go to symbol | `Ctrl+Alt+Shift+N` |
+| Go to definition | `Ctrl+B` |
+| Find usages | `Alt+F7` |
+| Rename | `Shift+F6` |
+| Refactor this | `Ctrl+Alt+Shift+T` |
+| Format file | `Ctrl+Alt+L` |
+| Optimise imports | `Ctrl+Alt+O` |
+| Run configuration | `Shift+F10` |
+| Debug configuration | `Shift+F9` |
+| Toggle terminal | `Alt+F12` |
+| Split editor | `Ctrl+Shift+A` -> "Split Right" |
+| VCS operations | `Alt+\`` |
+
+### Anti-patterns
+
+- ⚠️ **Using the IDE-bundled terminal instead of your configured terminal emulator** - the bundled terminal bypasses your shell profile (`~/.bashrc` on Linux, PowerShell profile on Windows), so goenv, uv, starship, and aliases are not loaded. Either source your profile explicitly or configure the shell path under `Settings -> Tools -> Terminal`.
+- 🔬 **Installing every available plugin** - JetBrains plugins run in-process and each one adds to startup time and memory. Install only what you actively use; disable the rest.
+- ⚠️ **Ignoring the `.idea/` directory in shared repos without team agreement** - some `.idea/` files (run configurations, code style) are worth committing; others (workspace.xml, shelf/) are personal. Use the `.gitignore` template from JetBrains and agree with your team which files to track.
+- ⚠️ **On Windows: opening WSL project files via a mapped network drive instead of the UNC path** - mapping `\\wsl.localhost\Ubuntu` as a drive letter and opening projects through it causes significantly slower indexing and file watching. Open WSL projects directly via `File -> Open` using the `\\wsl.localhost\Ubuntu\home\...` UNC path, or open them from inside the WSL terminal with the IDE's `idea .` / `rider .` launcher.

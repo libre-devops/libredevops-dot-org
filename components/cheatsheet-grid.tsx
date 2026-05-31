@@ -113,6 +113,13 @@ const CHEATSHEETS: Cheatsheet[] = [
         icon: <DevIcon name="docker/docker-original.svg" alt="Docker" />,
     },
     {
+        title: 'Developer Environment',
+        href: '/docs/cheatsheets/developer-environment-cheatsheet',
+        description: 'VS Code and JetBrains Toolbox setup for Azure DevOps engineering - extensions, settings.json, Terraform and Python integration, Copilot toggle, keybindings, and Linux-specific quirks.',
+        tags: ['VS Code', 'JetBrains', 'Terraform', 'Python', 'Linux'],
+        icon: <DevIcon name="vscode/vscode-original.svg" alt="VS Code" />,
+    },
+    {
         title: '.NET',
         href: '/docs/cheatsheets/dotnet-cheatsheet',
         description: 'dotnet CLI, interfaces, classes, records, pattern matching, LINQ, async patterns, dependency injection, Azure SDK authentication, Key Vault, Blob Storage, ARM, Kusto SDK, Log Analytics, and xUnit testing.',
