@@ -206,8 +206,8 @@ const CHEATSHEETS: Cheatsheet[] = [
     {
         title: 'Windows',
         href: '/docs/cheatsheets/windows-cheatsheet',
-        description: 'TCP port listeners, Scoop package management, WSL2 configuration, firewall rules, system diagnostics, and environment variable management.',
-        tags: ['Windows', 'PowerShell', 'WSL2'],
+        description: 'Windows admin for engineers - winget and Scoop, system inventory, processes and services, networking and firewall, disk and storage, users, scheduled tasks, event logs, registry, DISM/sfc repair, remote management, Windows Update, WSL2, and Sysinternals.',
+        tags: ['Windows', 'PowerShell', 'WSL2', 'winget'],
         icon: <DevIcon name="windows8/windows8-original.svg" alt="Windows" />,
     },
 ];

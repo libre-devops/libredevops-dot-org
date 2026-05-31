@@ -1,35 +1,140 @@
 ---
 title: Windows Cheatsheet
-description: Windows PowerShell snippets for networking, WSL2, Scoop, firewall rules, and system administration. Assumes Windows 10/11 / PowerShell 7+.
+description: Windows administration for platform engineers - winget and Scoop, system inventory, processes and services, networking and firewall, disk and storage, users, scheduled tasks, event logs, registry, system repair (DISM/sfc), remote management, Windows Update, WSL2, and Sysinternals. Assumes Windows 10/11 / PowerShell 7+.
 ---
 
 # Windows Cheat Sheet
 
-PowerShell and Windows administration snippets for common platform engineering tasks.
+Windows administration for platform and DevOps engineers - the OS-level commands you reach for on workstations, build agents, and Windows Server. PowerShell-first, with `cmd`/`sc.exe`/`netsh`/`DISM` where they remain the right tool. For the PowerShell *language* and Azure automation see the [PowerShell cheatsheet](/docs/cheatsheets/powershell-cheatsheet); for Windows *hardening* see [Security](/docs/cheatsheets/security-cheatsheet).
 
-> **Versions:** Windows 10/11 · PowerShell 7+ · WSL2 · Scoop (current)
+> **Versions:** Windows 10/11 and Windows Server 2019/2022/2025 · PowerShell 7+ (most cmdlets also work in Windows PowerShell 5.1) · WSL2. Run an **elevated** terminal for machine-scope changes.
 >
 > **Last reviewed:** May 2026
 
 ---
 
+## Package Management
+
+### winget (built-in, Microsoft)
+
+```powershell
+winget search terraform
+winget install --id Hashicorp.Terraform -e          # -e = match the exact package id
+winget list                                         # installed packages
+winget upgrade                                      # show available upgrades
+winget upgrade --all                                # upgrade everything
+winget uninstall --id Git.Git -e
+
+# Reproducible machine setup - export on one box, import on the next
+winget export -o packages.json
+winget import -i packages.json --accept-package-agreements --accept-source-agreements
+```
+
+> ✅ In CI/unattended runs add `--accept-package-agreements --accept-source-agreements --silent`. `winget` ships with Windows 10/11 and Server 2025; on older Server install **App Installer** (or use Scoop/Chocolatey).
+
+### Scoop (no admin, per-user) 🏠 Personal dev setup
+
+Scoop installs developer tools without requiring admin - ideal for dev machines and CI agents.
+
+```powershell
+# Install Scoop
+Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
+irm get.scoop.sh | iex
+
+# Buckets and tools
+scoop bucket add extras
+scoop bucket add versions
+scoop install git gh terraform packer kubectl helm azure-cli pwsh
+scoop install vscode starship
+
+scoop update *                                      # update everything
+scoop search terraform
+```
+
+---
+
+## System Information & Inventory
+
+```powershell
+Get-ComputerInfo | Select-Object CsName, OsName, OsVersion, OsBuildNumber, WindowsVersion, CsTotalPhysicalMemory
+(Get-CimInstance Win32_OperatingSystem).Caption     # edition/version, quick
+[System.Environment]::OSVersion.Version             # build number
+
+(Get-CimInstance Win32_OperatingSystem).LastBootUpTime          # uptime / last boot
+Get-HotFix | Sort-Object InstalledOn -Descending | Select-Object -First 10   # installed updates
+
+Get-CimInstance Win32_BIOS      | Select-Object Manufacturer, SerialNumber
+Get-CimInstance Win32_Processor | Select-Object Name, NumberOfCores, NumberOfLogicalProcessors
+
+Confirm-SecureBootUEFI                              # Secure Boot state (elevated, UEFI)
+Get-Tpm                                             # TPM presence/readiness
+```
+
+---
+
+## Processes & Services
+
+### Processes
+
+```powershell
+Get-Process | Sort-Object CPU -Descending |
+    Select-Object -First 15 Name, Id, CPU, @{n='WS(MB)';e={[math]::Round($_.WorkingSet/1MB)}}
+Stop-Process -Name node -Force                      # kill by name
+Stop-Process -Id 1234                               # kill by PID
+
+# Which process is using a port?
+Get-NetTCPConnection -LocalPort 8080 |
+    ForEach-Object { Get-Process -Id $_.OwningProcess }
+# cmd equivalent: netstat -ano | findstr :8080  ->  tasklist /FI "PID eq <pid>"
+```
+
+### Services
+
+```powershell
+Get-Service | Where-Object Status -eq 'Running' | Sort-Object DisplayName
+Restart-Service -Name W3SVC -Force
+Set-Service  -Name W3SVC -StartupType Automatic      # Automatic | Manual | Disabled
+
+# The binary path and the account a service runs as (a common audit question)
+Get-CimInstance Win32_Service -Filter "Name='W3SVC'" | Select-Object Name, StartName, PathName, State
+
+# Auto-restart a service on failure (sc.exe - the spaces after '=' are required)
+sc.exe failure W3SVC reset= 86400 actions= restart/60000/restart/60000/restart/60000
+```
+
+> ⚠️ Audit for services whose `PathName` contains spaces but **no quotes** - that is an unquoted-service-path privilege-escalation hole; a planted binary can run as the service account.
+
+---
+
 ## Networking
+
+```powershell
+Get-NetIPConfiguration                              # IP, gateway, DNS per adapter
+Test-NetConnection myserver -Port 443               # telnet/nc replacement
+Test-NetConnection 8.8.8.8 -InformationLevel Detailed
+Get-NetTCPConnection -State Listen | Sort-Object LocalPort | Select-Object LocalPort, OwningProcess
+Resolve-DnsName example.com                         # nslookup/dig
+Clear-DnsClientCache                                # ipconfig /flushdns
+Get-NetRoute -AddressFamily IPv4 | Sort-Object RouteMetric    # routing table
+
+# Reset the network stack (last resort, needs a reboot)
+netsh winsock reset
+netsh int ip reset
+```
 
 ### Temporary TCP port listener 🛠️ Operational helper
 
-Opens a firewall rule, listens on a port for connections, then cleans up the rule on exit. Useful for quickly verifying network connectivity from another host.
+Opens a firewall rule, listens on a port, then cleans the rule up on exit - handy for verifying connectivity from another host.
 
 ```powershell
-$portNumber       = 1433
-$durationSeconds  = 3600
-$ruleName         = "TempRuleForPort$portNumber"
+$portNumber      = 1433
+$durationSeconds = 3600
+$ruleName        = "TempRuleForPort$portNumber"
 
 try {
-    Write-Host "Adding firewall rule..." -ForegroundColor Yellow
     New-NetFirewallRule -DisplayName $ruleName -Direction Inbound `
         -LocalPort $portNumber -Action Allow -Protocol TCP
 
-    Write-Host "Listening on port $portNumber for $durationSeconds seconds..." -ForegroundColor Yellow
     $listener = [System.Net.Sockets.TcpListener]$portNumber
     $listener.Start()
     $endTime = (Get-Date).AddSeconds($durationSeconds)
@@ -44,57 +149,180 @@ try {
     }
 } finally {
     if ($listener) { $listener.Stop() }
-    Write-Host "Removing firewall rule..." -ForegroundColor Yellow
-    Remove-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue
+    Remove-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue   # always clean up
 }
-```
-
-### Test TCP connectivity (PowerShell equivalent of telnet)
-
-```powershell
-Test-NetConnection -ComputerName myserver.example.com -Port 443
-Test-NetConnection -ComputerName 10.0.0.5 -Port 1433 -InformationLevel Detailed
-```
-
-### Show all listening ports
-
-```powershell
-Get-NetTCPConnection -State Listen | Sort-Object LocalPort | Select-Object LocalPort, OwningProcess, State
 ```
 
 ---
 
-## Scoop Package Manager 🏠 Personal dev setup
-
-Scoop installs developer tools without requiring admin - ideal for development machines and CI agents.
+## Firewall 🔐
 
 ```powershell
-# Install Scoop
-Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
-irm get.scoop.sh | iex
+Get-NetFirewallProfile | Select-Object Name, Enabled         # Domain / Private / Public
+Get-NetFirewallRule | Where-Object Enabled -eq 'True' |
+    Select-Object DisplayName, Direction, Action | Sort-Object Direction
 
-# Add extras and versions buckets
-scoop bucket add extras
-scoop bucket add versions
+New-NetFirewallRule -DisplayName "Allow 8080 In" -Direction Inbound -LocalPort 8080 -Protocol TCP -Action Allow
+Remove-NetFirewallRule -DisplayName "Allow 8080 In"
 
-# Install common tools
-scoop install git gh terraform packer kubectl helm azure-cli pwsh
-scoop install vscode jetbrains-toolbox starship
-
-# Update everything
-scoop update *
-
-# Search for a package
-scoop search terraform
+# Scope a rule to a source subnet - least exposure
+New-NetFirewallRule -DisplayName "Allow RDP from mgmt" -Direction Inbound -LocalPort 3389 `
+    -Protocol TCP -Action Allow -RemoteAddress 10.0.0.0/24
 ```
+
+---
+
+## Disk & Storage
+
+```powershell
+Get-PSDrive -PSProvider FileSystem |
+    Select-Object Name, @{n='Used(GB)';e={[math]::Round($_.Used/1GB,1)}}, @{n='Free(GB)';e={[math]::Round($_.Free/1GB,1)}}
+Get-Volume | Sort-Object DriveLetter
+Get-Disk | Select-Object Number, FriendlyName, @{n='Size(GB)';e={[math]::Round($_.Size/1GB)}}, PartitionStyle, HealthStatus
+
+Repair-Volume -DriveLetter C -Scan                   # online scan (chkdsk /scan)
+chkdsk C: /f                                         # offline fix (schedules at next reboot for C:)
+
+Remove-Item "$env:TEMP\*" -Recurse -Force -ErrorAction SilentlyContinue   # free space fast
+```
+
+---
+
+## Users & Local Groups
+
+```powershell
+Get-LocalUser
+New-LocalUser -Name "svc-deploy" -Password (Read-Host -AsSecureString)
+Add-LocalGroupMember -Group "Administrators" -Member "svc-deploy"
+Get-LocalGroupMember -Group "Administrators"         # audit who is a local admin
+Disable-LocalUser -Name "Guest"
+```
+
+> ✅ Audit `Get-LocalGroupMember Administrators` on servers regularly - local-admin sprawl is a top finding. Prefer domain/Entra groups over per-machine local accounts.
+
+---
+
+## Scheduled Tasks
+
+```powershell
+Get-ScheduledTask | Where-Object State -ne 'Disabled' | Select-Object TaskName, State
+Get-ScheduledTaskInfo -TaskName "Nightly"            # last/next run + last result
+
+$action  = New-ScheduledTaskAction -Execute "pwsh.exe" -Argument "-File C:\scripts\job.ps1"
+$trigger = New-ScheduledTaskTrigger -Daily -At 2am
+Register-ScheduledTask -TaskName "Nightly" -Action $action -Trigger $trigger `
+    -User "SYSTEM" -RunLevel Highest
+
+Start-ScheduledTask -TaskName "Nightly"              # run now
+Unregister-ScheduledTask -TaskName "Nightly" -Confirm:$false
+schtasks /query /fo LIST /v /tn "Nightly"           # classic equivalent, works everywhere
+```
+
+---
+
+## Event Logs
+
+```powershell
+Get-WinEvent -LogName System -MaxEvents 50
+# Errors in the last day (Level 2 = Error)
+Get-WinEvent -FilterHashtable @{ LogName='System'; Level=2; StartTime=(Get-Date).AddDays(-1) }
+# Common diagnostics
+Get-WinEvent -FilterHashtable @{ LogName='System';      Id=41 }   # kernel-power: dirty/unexpected shutdown
+Get-WinEvent -FilterHashtable @{ LogName='Application'; Id=1000 } # application crash
+Get-WinEvent -FilterHashtable @{ LogName='Security';    Id=4625 } -MaxEvents 20  # failed logons (elevated)
+
+wevtutil el                                          # list every log name
+```
+
+> ✅ Prefer `Get-WinEvent -FilterHashtable` over `Get-EventLog` and over piping to `Where-Object` - the filter runs server-side, so it is far faster on large/remote logs.
+
+---
+
+## Registry
+
+```powershell
+Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' |
+    Select-Object ProductName, CurrentBuild
+New-ItemProperty -Path 'HKCU:\Software\MyApp' -Name 'LogLevel' -Value 'Info' -PropertyType String -Force
+Set-ItemProperty -Path 'HKCU:\Software\MyApp' -Name 'LogLevel' -Value 'Debug'
+Remove-ItemProperty -Path 'HKCU:\Software\MyApp' -Name 'LogLevel'
+
+reg export "HKCU\Software\MyApp" backup.reg          # back up a key before editing
+reg add  "HKCU\Software\MyApp" /v LogLevel /t REG_SZ /d Info /f
+```
+
+> ⚠️ `HKLM` changes are machine-wide and need elevation. Always `reg export` the key first - a wrong type or path can break boot or login, and there is no undo.
+
+---
+
+## System Repair & Windows Features
+
+```powershell
+DISM /Online /Cleanup-Image /RestoreHealth           # repair the component store (run first if sfc fails)
+sfc /scannow                                         # verify/repair protected system files
+
+Get-WindowsOptionalFeature -Online | Where-Object State -eq 'Enabled'
+Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux -NoRestart
+Install-WindowsFeature -Name Web-Server -IncludeManagementTools    # Windows Server roles
+```
+
+---
+
+## Remote Management
+
+```powershell
+Enable-PSRemoting -Force                             # enable WinRM (run on the target)
+Invoke-Command -ComputerName web01 -ScriptBlock { Get-Service W3SVC } -Credential (Get-Credential)
+Enter-PSSession  -ComputerName web01 -Credential (Get-Credential)
+
+# Enable RDP (registry + firewall group)
+Set-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name fDenyTSConnections -Value 0
+Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+```
+
+> ✅ Prefer **WinRM over HTTPS**, Kerberos, or **OpenSSH** (it ships with Windows) for remote management. Setting `WSMan:\localhost\Client\TrustedHosts` to `*` disables server-identity checks and enables MITM - scope it to named hosts instead.
+
+---
+
+## Windows Update
+
+```powershell
+Get-HotFix | Sort-Object InstalledOn -Descending | Select-Object -First 10
+winget upgrade --all                                 # application updates (not the OS)
+
+# OS updates via the PSWindowsUpdate module
+Install-Module PSWindowsUpdate -Scope CurrentUser
+Get-WindowsUpdate                                    # list pending
+Install-WindowsUpdate -AcceptAll -AutoReboot         # install (mind -AutoReboot on servers)
+```
+
+---
+
+## Environment Variables
+
+```powershell
+Get-ChildItem Env:                                   # list all
+$env:MY_VAR = "value"                                # current session only
+[System.Environment]::SetEnvironmentVariable("MY_VAR", "value", "User")     # persist for the user
+[System.Environment]::SetEnvironmentVariable("MY_VAR", "value", "Machine")  # persist machine-wide (admin)
+```
+
+> ⚠️ Persisted (`User`/`Machine`) variables are not visible in already-open shells - restart the terminal, or set `$env:MY_VAR` for the current session as well.
 
 ---
 
 ## WSL2
 
-### Set WSL2 resource limits
+```powershell
+wsl --list --verbose              # installed distros and status
+wsl --install -d Ubuntu-22.04     # install a specific distro
+wsl --set-default Ubuntu-22.04
+wsl --shutdown                    # stop all running distros (apply .wslconfig changes)
+wsl --export Ubuntu-22.04 ubuntu-backup.tar          # back up before destructive ops
+wsl --unregister Ubuntu-22.04     # 🚨 permanently destroys the distro's filesystem
+```
 
-Creates `~/.wslconfig` to cap memory and CPU used by the WSL2 VM.
+Cap the resources the WSL2 VM may use via `~/.wslconfig`:
 
 ```powershell
 @"
@@ -106,79 +334,50 @@ localhostForwarding=true
 "@ | Set-Content -Path "$Env:USERPROFILE\.wslconfig"
 ```
 
-### Manage WSL distributions
-
-```powershell
-wsl --list --verbose              # list installed distros and status
-wsl --install -d Ubuntu-22.04    # install a specific distro
-wsl --set-default Ubuntu-22.04   # change default distro
-wsl --set-version Ubuntu-22.04 2 # upgrade to WSL2
-wsl --shutdown                   # stop all running distros
-wsl --unregister Ubuntu-22.04    # 🚨 remove a distro - permanently destroys all data; export first
-```
-
-> **See also:** [Linux](/docs/cheatsheets/linux-cheatsheet) for the Ubuntu/Fedora setup scripts that run inside WSL2.
+> **See also:** [Linux](/docs/cheatsheets/linux-cheatsheet) for the Ubuntu/Fedora setup that runs inside WSL2.
 
 ---
 
-## Firewall 🔐
+## Sysinternals
+
+The essential deep-diagnostic toolkit - install the suite, or run a single tool live.
 
 ```powershell
-# List all firewall rules
-Get-NetFirewallRule | Where-Object { $_.Enabled -eq 'True' } | Select-Object DisplayName, Direction, Action | Sort-Object Direction
-
-# Allow inbound on a port
-New-NetFirewallRule -DisplayName "Allow 8080 Inbound" -Direction Inbound -LocalPort 8080 -Protocol TCP -Action Allow
-
-# Remove a rule by name
-Remove-NetFirewallRule -DisplayName "Allow 8080 Inbound"
+winget install --id Microsoft.Sysinternals -e
+# or run a tool directly, no install:
+\\live.sysinternals.com\tools\procexp64.exe
 ```
 
----
-
-## System Information
-
-```powershell
-# System summary
-Get-ComputerInfo | Select-Object CsName, OsName, OsVersion, CsTotalPhysicalMemory
-
-# Disk usage
-Get-PSDrive -PSProvider FileSystem | Select-Object Name, @{n='Used(GB)';e={[math]::Round($_.Used/1GB,2)}}, @{n='Free(GB)';e={[math]::Round($_.Free/1GB,2)}}
-
-# Running processes sorted by CPU
-Get-Process | Sort-Object CPU -Descending | Select-Object -First 20 Name, CPU, WorkingSet
-
-# Services that are stopped but set to auto-start
-Get-Service | Where-Object { $_.StartType -eq 'Automatic' -and $_.Status -ne 'Running' }
-```
-
----
-
-## Environment Variables
-
-```powershell
-# List all environment variables
-Get-ChildItem Env:
-
-# Set for current session
-$env:MY_VAR = "value"
-
-# Set permanently for current user
-[System.Environment]::SetEnvironmentVariable("MY_VAR", "value", "User")
-
-# Set permanently for all users (requires admin)
-[System.Environment]::SetEnvironmentVariable("MY_VAR", "value", "Machine")
-```
-
-> **See also:** [PowerShell](/docs/cheatsheets/powershell-cheatsheet) for Windows automation, Azure auth, and shell profile configuration.
+| Tool | Use |
+|:--|:--|
+| **Process Explorer** (`procexp`) | Task Manager on steroids - handles, DLLs, which process owns a file/port |
+| **Process Monitor** (`procmon`) | Live file/registry/network/process tracing - what a program *actually* touches |
+| **Autoruns** | Everything set to start automatically (persistence hunting) |
+| **PsExec** | Run a process on a remote machine or as `SYSTEM` |
+| **Handle** | Which process has a file or directory locked |
+| **TCPView** | Live per-process TCP/UDP connections |
 
 ---
 
 ## Anti-patterns
 
-- 🚨 **`irm <url> | iex` without reviewing the script** - executes arbitrary code from the network at current privilege. Inspect the URL in a browser first, or download to a file and review before running.
-- ⚠️ **`Set-ExecutionPolicy Bypass -Scope Process` in production scripts** - silently disables PowerShell script signing controls for that session. Use a properly signed script or `RemoteSigned` at minimum.
-- 🚨 **`wsl --unregister <distro>` without a backup** - permanently and irrecoverably deletes the distro's filesystem. Export first: `wsl --export Ubuntu-22.04 ubuntu-backup.tar`.
-- 🚨 **Hardcoding credentials in `.ps1` scripts** - PowerShell history and transcript logs may capture the value. Use `Get-Credential`, Azure Key Vault, or environment variables instead.
-- ⚠️ **`Set-ExecutionPolicy Unrestricted -Scope LocalMachine`** - disables all script execution controls machine-wide, including for other users and service accounts. Use the minimum required scope (`CurrentUser` or `Process`).
-- 🔬 **Leaving temporary firewall rules behind** - rules added with `New-NetFirewallRule` for testing persist across reboots unless explicitly removed. Always pair them with a `Remove-NetFirewallRule` in a `finally` block (as in the listener example above).
+- 🚨 **`irm <url> | iex` without reviewing the script** - executes arbitrary network code at your current privilege. Inspect the URL in a browser, or download and review before running.
+- 🚨 **Hardcoding credentials in `.ps1` scripts** - PowerShell history and transcripts may capture the value. Use `Get-Credential`, Azure Key Vault, or `SecretManagement`.
+- 🚨 **`wsl --unregister <distro>` without a backup** - irrecoverably deletes the distro's filesystem. `wsl --export` it first.
+- ⚠️ **`Set-ExecutionPolicy Unrestricted -Scope LocalMachine` (or `Bypass`)** - disables script-execution controls machine-wide. Use the smallest scope (`CurrentUser`/`Process`) and prefer signed scripts.
+- ⚠️ **`TrustedHosts = *` for WinRM** - disables server-identity verification, enabling man-in-the-middle. Scope it to named hosts and prefer HTTPS/Kerberos.
+- ⚠️ **Unquoted service paths** - a service `PathName` with spaces and no quotes lets a planted binary run as the service account. Quote it.
+- ⚠️ **Running everyday work as a local Administrator** - any malware you hit inherits admin. Use a standard account and elevate via UAC only when needed.
+- 🔬 **Editing `HKLM` without a `reg export` backup** - a wrong value can break boot or login with no undo. Export the key first and test the change.
+- 🔬 **Leaving temporary firewall rules behind** - rules from `New-NetFirewallRule` persist across reboots. Pair every test rule with a `Remove-NetFirewallRule` in a `finally` block.
+
+---
+
+## References
+
+- [winget documentation](https://learn.microsoft.com/en-us/windows/package-manager/winget/) - the built-in package manager
+- [Sysinternals](https://learn.microsoft.com/en-us/sysinternals/) - the deep-diagnostic suite
+- [Get-WinEvent](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.diagnostics/get-winevent) - event-log querying
+- [WSL documentation](https://learn.microsoft.com/en-us/windows/wsl/) - install, configure, `.wslconfig`
+- [PowerShell Cheatsheet](/docs/cheatsheets/powershell-cheatsheet) - the language, Azure auth, and shell profiles
+- [Security Cheatsheet](/docs/cheatsheets/security-cheatsheet) - Windows hardening and incident triage
