@@ -7,6 +7,37 @@ Source for [libredevops.org](https://libredevops.org) - a platform engineering p
 [![Last deployment](https://img.shields.io/github/deployments/libre-devops/libredevops-dot-org/github-pages?label=last%20deployment&logo=github)](https://github.com/libre-devops/libredevops-dot-org/deployments/github-pages)
 [![Live site](https://img.shields.io/website?url=https%3A%2F%2Flibredevops.org&label=libredevops.org)](https://libredevops.org)
 
+## Quick start
+
+Want to fix a typo or add a cheatsheet? Here is the whole contribution loop.
+
+**Prerequisites:** Node.js 20+ (CI builds on 22) and npm. Optional: [`just`](https://github.com/casey/just) as a task-runner shortcut, and - only if you edit diagrams - [`uv`](https://docs.astral.sh/uv/) plus [Graphviz](https://graphviz.org).
+
+```bash
+# 1. Fork on GitHub, then clone your fork
+git clone https://github.com/<your-username>/libredevops-dot-org.git
+cd libredevops-dot-org
+
+# 2. Install dependencies and start the dev server (http://localhost:3000)
+npm install
+npm run dev                 # or: just dev
+
+# 3. Create a branch and make your change
+git checkout -b docs/my-change
+#    Most content is MDX under content/docs/** and hot-reloads as you save.
+
+# 4. Verify before pushing - the build must pass (CI runs the same)
+npm run build               # static export to out/ + Pagefind search index
+npx tsc --noEmit            # type check
+npm run lint                # ESLint
+
+# 5. Commit, push to your fork, and open a pull request against main
+```
+
+That covers prose edits. For new pages, sidebar ordering, diagrams, or nav, see [Adding content](#adding-content). Deeper local-dev detail (preview the production build, regenerate diagrams) is under [Local development](#local-development).
+
+**House style:** use ASCII hyphens, not em or en dashes; keep the existing voice and structure of nearby files; and always run `npm run build` before opening a PR (search and static export only fail at build time, not in `npm run dev`).
+
 ## Stack
 
 | Layer | Technology |
@@ -50,13 +81,13 @@ components/                 # Shared React components
   theme-toggle.tsx          # Dark/light toggle button
 
 content/docs/               # MDX content rendered by Nextra
-  cheatsheets/              # 22 cheatsheets: AI, Ansible, AWS, Azure, Azure DevOps,
-                            # Bash, CLI Utilities, Containers, .NET, Git, GitHub Actions,
+  cheatsheets/              # 23 cheatsheets: AI, Ansible, AWS, Azure, Azure DevOps,
+                            # Bash, Bicep, CLI Utilities, Containers, .NET, Git, GitHub Actions,
                             # GitLab, Go, KQL, Linux, Nginx, PowerShell, Python, Security,
                             # Terraform, TypeScript, Windows
   documents/                # Reference docs: Azure naming convention, plus the
-                            # Libre DevOps standards (Terraform, PowerShell, Bash,
-                            # Python, Azure Logic Apps)
+                            # Libre DevOps standards (Terraform, CI/CD, PowerShell,
+                            # Bash, Python, Azure Logic Apps)
 
 lib/
   site.ts                   # Site config and social links definition
@@ -135,7 +166,7 @@ If you upgrade Nextra, re-apply and regenerate the patch with `npx patch-package
 
 ## Contributing
 
-Issues and pull requests are welcome. Use the [docs change request template](https://github.com/libre-devops/libredevops-dot-org/issues/new?template=docs_change_request.md&title=%5BDocs%5D%3A+) for documentation corrections.
+Issues and pull requests are welcome. See [Quick start](#quick-start) for the build-and-PR loop. For a documentation correction without cloning, use the [docs change request template](https://github.com/libre-devops/libredevops-dot-org/issues/new?template=docs_change_request.md&title=%5BDocs%5D%3A+).
 
 ## License
 

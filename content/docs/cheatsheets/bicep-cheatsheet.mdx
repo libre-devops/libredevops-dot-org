@@ -1,0 +1,947 @@
+---
+title: Bicep Cheatsheet
+description: Production Bicep reference for Azure - tooling, parameters, modules, private registries, loops, scopes, user-defined types, Key Vault secrets, deployment stacks, what-if, and CI/CD. Assumes Bicep CLI 0.30+ and Azure CLI 2.60+.
+---
+
+# Bicep Cheat Sheet
+
+Production Bicep patterns for Azure infrastructure. Covers the language, module and private-registry workflows, deployment scopes, secret handling, and the operational concerns around `what-if`, deployment stacks, and CI/CD.
+
+> **Versions:** Bicep CLI 0.30+ / Azure CLI 2.60+ / Az PowerShell 12+. User-defined types and functions require 0.21+, `.bicepparam` files require 0.18+, deployment stacks (`az stack`) reached GA in 2024. Features are called out inline where a minimum version matters.
+>
+> **Last reviewed:** May 2026
+
+---
+
+## Tooling & CLI
+
+Bicep ships inside the Azure CLI. There is no separate install for normal use.
+
+```bash
+# Install / upgrade the Bicep CLI via Azure CLI (manages its own binary)
+az bicep install
+az bicep upgrade
+az bicep version
+
+# Standalone binary (CI images without Azure CLI) - winget / brew / direct
+winget install -e --id Microsoft.Bicep
+brew install bicep
+```
+
+### Core CLI commands
+
+```bash
+# Compile a .bicep file to ARM JSON (usually unnecessary - deploy directly)
+az bicep build --file main.bicep
+az bicep build --file main.bicep --outfile main.json
+az bicep build --file main.bicep --stdout
+
+# Compile a .bicepparam params file to ARM parameters JSON
+az bicep build-params --file main.bicepparam
+
+# Decompile existing ARM JSON to Bicep (best-effort - always review the output)
+az bicep decompile --file template.json
+
+# Format and lint
+az bicep format --file main.bicep
+az bicep lint --file main.bicep
+
+# Generate a parameters file skeleton from a template
+az bicep generate-params --file main.bicep --output-format bicepparam
+```
+
+> **Rule:** Deploy `.bicep` files directly. `az deployment` transpiles in memory - you do not need to commit generated ARM JSON. Keep `main.json` out of source control unless a downstream tool genuinely needs it.
+
+### VS Code
+
+Install the official **Bicep** extension (`ms-azuretools.vscode-bicep`). It provides IntelliSense over the full resource schema, inline linting, `what-if` previews, and the visualiser. This is the single biggest productivity win - the language is designed around it.
+
+---
+
+## File Structure
+
+A Bicep file is declarative and order-independent. The compiler resolves the dependency graph from symbolic references, so declarations can appear in any order. Conventional layout top to bottom:
+
+```bicep
+// 1. Target scope (defaults to resourceGroup if omitted)
+targetScope = 'resourceGroup'
+
+// 2. Parameters - external inputs
+@description('Azure region for all resources.')
+param location string = resourceGroup().location
+
+@description('Short environment code, e.g. prd, dev.')
+param env string
+
+// 3. Variables - computed values
+var namePrefix = 'app-${env}'
+
+// 4. Resources
+resource sa 'Microsoft.Storage/storageAccounts@2023-05-01' = {
+  name: 'st${uniqueString(resourceGroup().id)}'
+  location: location
+  sku: { name: 'Standard_LRS' }
+  kind: 'StorageV2'
+}
+
+// 5. Outputs - values returned to the caller
+output storageId string = sa.id
+```
+
+> **Rule:** Always pin the API version (`@2023-05-01`), never float it. Use the latest stable (non-preview) version the resource supports and bump it deliberately. The VS Code extension autocompletes available versions.
+
+---
+
+## Parameters
+
+### Declaration, defaults, and decorators
+
+```bicep
+@description('Deployment environment.')
+@allowed([ 'dev', 'tst', 'prd' ])
+param env string
+
+@description('Number of app instances.')
+@minValue(1)
+@maxValue(10)
+param instanceCount int = 2
+
+@description('Resource tags.')
+param tags object = {}
+
+@description('Allowed inbound CIDR ranges.')
+param allowedCidrs array = [ '10.0.0.0/8' ]
+
+@description('Admin password - never stored in outputs or logs.')
+@secure()
+param adminPassword string
+
+@description('SKU name with constrained length.')
+@minLength(3)
+@maxLength(24)
+param storageName string
+```
+
+| Decorator | Purpose |
+|---|---|
+| `@description('...')` | Documents the parameter (shows in IntelliSense and the portal) |
+| `@allowed([...])` | Restricts to an explicit value set |
+| `@minValue` / `@maxValue` | Integer bounds |
+| `@minLength` / `@maxLength` | String or array length bounds |
+| `@secure()` | Marks a string or object secret - redacted from logs, history, and outputs |
+| `@metadata({...})` | Arbitrary extra metadata |
+
+> **Rule:** Mark every password, key, connection string, or token `@secure()`. A `@secure()` value is never written to deployment history or `what-if` output. Plain string params are visible in the portal deployment record.
+
+### `.bicepparam` files - typed parameter files ✅ Preferred (Bicep 0.18+)
+
+`.bicepparam` replaces JSON parameter files. It is itself Bicep, so it gets type checking, IntelliSense, expressions, and Key Vault references.
+
+```bicep
+// prod.bicepparam
+using './main.bicep'   // links to the template - enables type checking
+
+param env = 'prd'
+param location = 'uksouth'
+param instanceCount = 3
+param tags = {
+  costCentre: '671888'
+  managedBy: 'Bicep'
+}
+
+// Pull a secret straight from Key Vault at deploy time (never in source)
+param adminPassword = az.getSecret(
+  subscriptionId,
+  'rg-shared-prd',
+  'kv-shared-prd-001',
+  'vm-admin-password'
+)
+```
+
+Deploy with a `.bicepparam` file:
+
+```bash
+az deployment group create \
+  --resource-group rg-app-prd \
+  --template-file main.bicep \
+  --parameters prod.bicepparam
+```
+
+### Reading environment variables into params (Bicep 0.28+)
+
+```bicep
+// env.bicepparam
+using './main.bicep'
+
+param env = readEnvironmentVariable('TF_ENV', 'dev')   // second arg is the default
+param clientId = readEnvironmentVariable('ARM_CLIENT_ID')
+```
+
+---
+
+## Variables & Expressions
+
+Variables are computed at compile time (or from parameter inputs) and cannot be `@secure()`.
+
+```bicep
+var location = resourceGroup().location
+var prefix   = toLower('${env}-${workload}')
+
+// String interpolation - no concat() needed
+var saName = 'st${uniqueString(resourceGroup().id)}'
+
+// Objects and arrays
+var commonTags = union(tags, {
+  managedBy:   'Bicep'
+  environment: env
+})
+
+var subnetNames = [ 'app', 'data', 'mgmt' ]
+```
+
+### Common built-in functions
+
+```bicep
+// Deterministic unique strings (seeded - same inputs give same output)
+uniqueString(resourceGroup().id)            // stable per RG
+guid(subscription().subscriptionId, env)    // deterministic GUID (role assignment names)
+newGuid()                                    // non-deterministic - only in param defaults
+
+// Scope / context
+resourceGroup().location
+resourceGroup().id
+subscription().subscriptionId
+tenant().tenantId
+deployment().name
+environment().authentication.loginEndpoint   // cloud-aware (Public / Gov / China)
+
+// Collections
+union(obj1, obj2)        // merge - later wins
+concat(arr1, arr2)       // join arrays
+length(myArray)
+contains(myArray, 'x')
+first(arr)  / last(arr)
+intersection(a, b) / range(0, 5)
+
+// Strings
+toLower(s) / toUpper(s)
+substring(s, 0, 8)
+replace(s, ' ', '-')
+split(s, '/') / join(arr, ',')
+padLeft(string(i), 2, '0')   // "01", "02"
+format('{0}-{1:00}', prefix, i)
+
+// Safe access (Bicep 0.21+) - returns null instead of erroring
+obj.?optionalProperty ?? 'fallback'
+```
+
+> **Rule:** Use `uniqueString()` for globally-unique resource names (storage, key vault) so redeploys are idempotent. Use `guid()` for deterministic role-assignment names so re-running the deployment does not create duplicate assignments.
+
+---
+
+## Resources
+
+### Declaration and child resources
+
+```bicep
+resource vnet 'Microsoft.Network/virtualNetworks@2023-11-01' = {
+  name: 'vnet-${prefix}'
+  location: location
+  tags: commonTags
+  properties: {
+    addressSpace: { addressPrefixes: [ '10.0.0.0/16' ] }
+  }
+
+  // Nested child resource - parent inferred, no dependsOn needed
+  resource appSubnet 'subnets@2023-11-01' = {
+    name: 'snet-app'
+    properties: { addressPrefix: '10.0.1.0/24' }
+  }
+}
+
+// Reference a nested child with the :: operator
+output appSubnetId string = vnet::appSubnet.id
+```
+
+Child resources can also be declared at the top level with the `parent` property - preferred when the parent is large or the children are looped:
+
+```bicep
+resource dataSubnet 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' = {
+  parent: vnet
+  name: 'snet-data'
+  properties: { addressPrefix: '10.0.2.0/24' }
+}
+```
+
+### `existing` - reference resources not managed here
+
+```bicep
+// Read an existing resource without managing or modifying it
+resource kv 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
+  name: 'kv-shared-prd-001'
+  scope: resourceGroup('rg-shared-prd')   // optional cross-RG scope
+}
+
+// Use its secret at deploy time (see Key Vault section)
+output vaultUri string = kv.properties.vaultUri
+```
+
+### Dependencies
+
+Bicep infers `dependsOn` automatically from symbolic references (`sa.id`, `vnet::appSubnet.id`). Only declare it explicitly when there is a hidden ordering requirement with no reference between the resources.
+
+```bicep
+resource roleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  // ...
+  dependsOn: [ kvDiagnostics ]   // rare - prefer implicit references
+}
+```
+
+> **Rule:** Do not add `dependsOn` for resources you already reference by symbolic name. Redundant `dependsOn` entries are a lint warning and obscure the real graph.
+
+---
+
+## Loops & Conditions
+
+### Loop over an array
+
+```bicep
+param subnets array = [
+  { name: 'app',  prefix: '10.0.1.0/24' }
+  { name: 'data', prefix: '10.0.2.0/24' }
+]
+
+resource snet 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' = [
+  for subnet in subnets: {
+    parent: vnet
+    name: subnet.name
+    properties: { addressPrefix: subnet.prefix }
+  }
+]
+```
+
+### Loop with index
+
+```bicep
+resource nic 'Microsoft.Network/networkInterfaces@2023-11-01' = [
+  for i in range(0, instanceCount): {
+    name: 'nic-${prefix}-${padLeft(string(i + 1), 2, '0')}'   // nic-app-01, nic-app-02
+    location: location
+    properties: { /* ... */ }
+  }
+]
+```
+
+### Loop over a dictionary with `items()`
+
+```bicep
+param subnetMap object = {
+  app:  { prefix: '10.0.1.0/24' }
+  data: { prefix: '10.0.2.0/24' }
+}
+
+resource snet 'Microsoft.Network/virtualNetworks/subnets@2023-11-01' = [
+  for item in items(subnetMap): {
+    parent: vnet
+    name: item.key
+    properties: { addressPrefix: item.value.prefix }
+  }
+]
+```
+
+### Referencing a looped resource
+
+```bicep
+// Index access
+output firstNicId string = nic[0].id
+
+// Map all outputs from a loop
+output allNicIds array = [ for i in range(0, instanceCount): nic[i].id ]
+```
+
+### Conditional deployment with `if`
+
+```bicep
+@description('Deploy a bastion host only in production.')
+param deployBastion bool = false
+
+resource bastion 'Microsoft.Network/bastionHosts@2023-11-01' = if (deployBastion) {
+  name: 'bas-${prefix}'
+  location: location
+  // ...
+}
+```
+
+### Ternary for conditional property values
+
+```bicep
+resource sa 'Microsoft.Storage/storageAccounts@2023-05-01' = {
+  name: saName
+  location: location
+  sku: { name: env == 'prd' ? 'Standard_GRS' : 'Standard_LRS' }
+  kind: 'StorageV2'
+  properties: {
+    minimumTlsVersion: 'TLS1_2'
+    allowBlobPublicAccess: false
+    publicNetworkAccess: env == 'prd' ? 'Disabled' : 'Enabled'
+  }
+}
+```
+
+> **Rule:** Combine `if` with a loop by guarding the loop body: `[for x in items: if(x.enabled) { ... }]`. A conditional looped resource must still be referenced safely - guard downstream references with the same condition.
+
+---
+
+## Modules
+
+Modules are reusable Bicep files invoked with the `module` keyword. Each module deploys at its own scope and returns outputs.
+
+### Local module
+
+```bicep
+module networking './modules/networking.bicep' = {
+  name: 'networking-deploy'   // nested deployment name (must be unique per scope)
+  params: {
+    location: location
+    vnetCidr: '10.0.0.0/16'
+    subnets:  subnets
+    tags:     commonTags
+  }
+}
+
+// Consume a module output
+resource pe 'Microsoft.Network/privateEndpoints@2023-11-01' = {
+  // ...
+  properties: {
+    subnet: { id: networking.outputs.privateEndpointSubnetId }
+  }
+}
+```
+
+### Module at a different scope
+
+```bicep
+// Deploy a module into a different resource group (parent must target subscription)
+module spokeRg './modules/resource-group.bicep' = {
+  name: 'spoke-rg'
+  scope: subscription()
+  params: { name: 'rg-spoke-prd', location: location }
+}
+
+module appResources './modules/app.bicep' = {
+  name: 'app-resources'
+  scope: resourceGroup('rg-spoke-prd')   // target an existing RG by name
+  params: { /* ... */ }
+}
+```
+
+### Looping a module
+
+```bicep
+param environments array = [ 'dev', 'tst', 'prd' ]
+
+module envStack './modules/env.bicep' = [
+  for envName in environments: {
+    name: 'env-${envName}'
+    scope: resourceGroup('rg-${envName}')
+    params: { env: envName, location: location }
+  }
+]
+```
+
+> **Rule:** The module `name` is the Azure deployment name at the target scope and must be unique. In loops, suffix it with the loop variable (`'env-${envName}'`) or Azure will collide concurrent deployments.
+
+---
+
+## Private Bicep Registry (Azure Container Registry)
+
+Bicep modules can be published to and consumed from a private **OCI registry** - in Azure that is an **Azure Container Registry (ACR)**. This is the production pattern for sharing versioned, governed modules across teams instead of copying `.bicep` files around or relying on a public registry.
+
+### One-time ACR setup
+
+```bash
+# Create the registry that will hold modules (Basic SKU is fine for modules)
+az acr create \
+  --resource-group rg-platform-prd \
+  --name acrlibredevops \
+  --sku Basic
+
+# The publishing identity needs AcrPush; consumers need AcrPull
+az role assignment create \
+  --assignee <publisher-object-id> \
+  --role AcrPush \
+  --scope $(az acr show -n acrlibredevops --query id -o tsv)
+```
+
+### Publish a module
+
+```bash
+# Version tags are immutable by convention - publish a new tag per release
+az bicep publish \
+  --file ./modules/key-vault/main.bicep \
+  --target br:acrlibredevops.azurecr.io/bicep/modules/key-vault:1.2.0
+
+# --force overwrites an existing tag (avoid for released versions)
+az bicep publish \
+  --file ./modules/key-vault/main.bicep \
+  --target br:acrlibredevops.azurecr.io/bicep/modules/key-vault:1.2.0 \
+  --documentationUri https://github.com/libre-devops/bicep-modules \
+  --with-source   # embeds source for decompile/debug (Bicep 0.23+)
+```
+
+### Consume a module from the registry
+
+Full registry path with the `br:` scheme:
+
+```bicep
+module kv 'br:acrlibredevops.azurecr.io/bicep/modules/key-vault:1.2.0' = {
+  name: 'kv-deploy'
+  params: {
+    kvName:   'kv-${prefix}-001'
+    location: location
+    tenantId: tenant().tenantId
+    tags:     commonTags
+  }
+}
+```
+
+### Registry aliases in `bicepconfig.json` ✅ Recommended
+
+Hard-coding the registry FQDN everywhere is brittle. Define an alias once in `bicepconfig.json` at the repo root and reference modules with the short `br/<alias>:` form.
+
+```json
+{
+  "moduleAliases": {
+    "br": {
+      "LibreDevOps": {
+        "registry": "acrlibredevops.azurecr.io",
+        "modulePath": "bicep/modules"
+      }
+    }
+  }
+}
+```
+
+Now modules resolve through the alias - the registry and path live in one place:
+
+```bicep
+module kv 'br/LibreDevOps:key-vault:1.2.0' = {
+  name: 'kv-deploy'
+  params: { /* ... */ }
+}
+```
+
+### Restore and authentication
+
+```bash
+# Bicep restores external modules automatically on build/deploy and caches them in
+#   ~/.bicep/br/<registry>/...
+# Force a restore (e.g. CI cache warm-up):
+az bicep restore --file main.bicep --force
+
+# Auth uses your az login token. In CI, log in via OIDC first (see CI/CD section);
+# the AcrPull role on the deploying identity is what grants module access.
+az login
+az acr login --name acrlibredevops   # only needed for docker-style ops, not module pull
+```
+
+> **Rule:** Treat published module tags as immutable. Publish `1.2.0`, `1.2.1`, ... and pin consumers to an exact version. Use `--force` only to fix a broken publish before anyone consumes it. The public Microsoft registry equivalent is `br/public:avm/res/...` (Azure Verified Modules) - the same mechanism, hosted by Microsoft.
+
+> **See also:** [Terraform - Modules](/docs/cheatsheets/terraform) for the registry-module equivalent in HCL, and [Azure - Auth & Context](/docs/cheatsheets/azure-cheatsheet) for ACR role assignment and `az acr` commands.
+
+---
+
+## Deployment Scopes
+
+Every Bicep file declares a `targetScope`. The default is `resourceGroup`.
+
+```bicep
+targetScope = 'resourceGroup'    // default - deploys into one RG
+targetScope = 'subscription'     // create RGs, policy/role assignments at sub level
+targetScope = 'managementGroup'  // policy, RBAC, sub placement at MG level
+targetScope = 'tenant'           // tenant-wide (MG creation, etc.)
+```
+
+### Subscription-scope deployment - create the RG, then resources inside it
+
+```bicep
+targetScope = 'subscription'
+
+param location string = 'uksouth'
+param env string
+
+resource rg 'Microsoft.Resources/resourceGroups@2024-03-01' = {
+  name: 'rg-app-${env}'
+  location: location
+}
+
+// Deploy resources into the new RG via a module scoped to it
+module app './modules/app.bicep' = {
+  name: 'app-deploy'
+  scope: rg
+  params: { location: location, env: env }
+}
+```
+
+### Scope-targeting functions
+
+```bicep
+scope: resourceGroup('rg-other')                       // a different RG, same sub
+scope: resourceGroup('00000000-...-0000', 'rg-other')  // different sub + RG
+scope: subscription('00000000-...-0000')               // a specific subscription
+scope: managementGroup('mg-platform')                  // a management group
+scope: tenant()                                         // tenant root
+```
+
+> **Rule:** Match the deploy command to the `targetScope`. A `targetScope = 'subscription'` file deploys with `az deployment sub create` (not `group`). Mismatched scope is the most common first-deploy error.
+
+---
+
+## User-Defined Types & Functions
+
+### User-defined types ✅ (Bicep 0.21+)
+
+Define reusable, strongly-typed parameter shapes instead of loose `object`.
+
+```bicep
+@description('Subnet definition.')
+type subnetType = {
+  name: string
+  prefix: string
+  @description('Service endpoints to enable.')
+  serviceEndpoints: string[]?   // ? marks optional
+}
+
+type subnetArray = subnetType[]
+
+param subnets subnetArray
+
+// Union type (closed set of literal values)
+type skuName = 'Standard_LRS' | 'Standard_GRS' | 'Premium_LRS'
+param storageSku skuName = 'Standard_LRS'
+
+// Reuse a type exported from another file (Bicep 0.23+)
+import { subnetType } from './types.bicep'
+```
+
+Export types and functions from a shared file:
+
+```bicep
+// types.bicep
+@export()
+type tagsType = {
+  costCentre: string
+  managedBy: string
+  environment: string
+}
+```
+
+### User-defined functions ✅ (Bicep 0.26+)
+
+```bicep
+@description('Build a resource name from convention parts.')
+func buildName(resourceType string, workload string, env string) string =>
+  toLower('${resourceType}-${workload}-${env}')
+
+var kvName = buildName('kv', 'shared', env)   // "kv-shared-prd"
+```
+
+---
+
+## Key Vault & Secrets
+
+### Reference a secret at deploy time without exposing it
+
+The `getSecret()` function on an `existing` Key Vault passes the secret straight to a `@secure()` module parameter. The value never appears in templates, outputs, logs, or deployment history.
+
+```bicep
+resource kv 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
+  name: 'kv-shared-prd-001'
+  scope: resourceGroup('rg-shared-prd')
+}
+
+module sql './modules/sql.bicep' = {
+  name: 'sql-deploy'
+  params: {
+    adminLogin:    'sqladmin'
+    adminPassword: kv.getSecret('sql-admin-password')   // secure passthrough
+  }
+}
+```
+
+The receiving module parameter must be `@secure()`:
+
+```bicep
+// modules/sql.bicep
+@secure()
+param adminPassword string
+```
+
+### In `.bicepparam` files
+
+```bicep
+using './main.bicep'
+
+param adminPassword = az.getSecret(
+  subscription().subscriptionId,
+  'rg-shared-prd',
+  'kv-shared-prd-001',
+  'sql-admin-password'
+)
+```
+
+> **Rule:** Never output a secret. Never store a secret in a plain `param` or `var`. The only sanctioned paths are `@secure()` params, `kv.getSecret()` passthrough, and `az.getSecret()` in `.bicepparam`. Anything `@secure()` is stripped from the deployment record.
+
+> **See also:** [Terraform - Ephemeral Values & Write-Only Arguments](/docs/cheatsheets/terraform) for the equivalent "secret never lands in state" pattern in HCL.
+
+---
+
+## Deployment Commands
+
+### Resource-group scope
+
+```bash
+az deployment group create \
+  --resource-group rg-app-prd \
+  --name app-$(date +%Y%m%d-%H%M%S) \
+  --template-file main.bicep \
+  --parameters prod.bicepparam \
+  --parameters location=uksouth      # inline override wins over the param file
+```
+
+### Subscription / management-group / tenant scope
+
+```bash
+# Subscription scope (targetScope = 'subscription')
+az deployment sub create \
+  --location uksouth \
+  --template-file main.bicep \
+  --parameters prod.bicepparam
+
+# Management-group scope
+az deployment mg create \
+  --management-group-id mg-platform \
+  --location uksouth \
+  --template-file main.bicep
+
+# Tenant scope
+az deployment tenant create --location uksouth --template-file main.bicep
+```
+
+### Preview changes with `what-if` ✅ Always run before apply
+
+```bash
+az deployment group what-if \
+  --resource-group rg-app-prd \
+  --template-file main.bicep \
+  --parameters prod.bicepparam
+
+# Gate a pipeline on the result and emit machine-readable output
+az deployment group create \
+  --resource-group rg-app-prd \
+  --template-file main.bicep \
+  --parameters prod.bicepparam \
+  --confirm-with-what-if          # prompt to confirm the diff before applying
+```
+
+`what-if` change types: `Create`, `Delete`, `Modify`, `Deploy`, `NoChange`, `Ignore`. Note that some provider behaviours produce noisy `Modify` lines (properties the API normalises) - treat it as a strong signal, not gospel.
+
+### PowerShell equivalents
+
+```powershell
+New-AzResourceGroupDeployment `
+  -ResourceGroupName 'rg-app-prd' `
+  -TemplateFile 'main.bicep' `
+  -TemplateParameterFile 'prod.bicepparam' `
+  -WhatIf
+```
+
+---
+
+## Deployment Stacks
+
+A **deployment stack** manages a set of resources as one lifecycle unit. The stack tracks every resource it deploys, so removing a resource from the template can **delete** it (true reconciliation - closer to Terraform's behaviour than a plain deployment, which never deletes).
+
+```bash
+# Create or update a stack at resource-group scope
+az stack group create \
+  --name stack-app-prd \
+  --resource-group rg-app-prd \
+  --template-file main.bicep \
+  --parameters prod.bicepparam \
+  --action-on-unmanage deleteResources \   # delete resources removed from the template
+  --deny-settings-mode denyDelete          # protect managed resources from out-of-band deletion
+
+# Inspect
+az stack group show --name stack-app-prd --resource-group rg-app-prd
+az stack group list --resource-group rg-app-prd
+
+# Delete the stack and (optionally) everything it manages
+az stack group delete \
+  --name stack-app-prd \
+  --resource-group rg-app-prd \
+  --action-on-unmanage deleteAll
+```
+
+| `--action-on-unmanage` | Effect on resources no longer in the template |
+|---|---|
+| `deleteResources` | Delete the resources, keep resource groups |
+| `deleteAll` | Delete resources and resource groups |
+| `detachAll` | Leave everything in place, just stop tracking it |
+
+| `--deny-settings-mode` | Effect |
+|---|---|
+| `denyDelete` | Block deletion of managed resources outside the stack |
+| `denyWriteAndDelete` | Block writes and deletes outside the stack |
+| `none` | No protection |
+
+> **Rule:** Use deployment stacks (not plain `az deployment`) when you want reconciliation and drift protection. Plain deployments are additive - they never remove a resource you stopped declaring. Stacks `detach` vs `delete` is the single most important flag to get right; start with `detachAll` until you trust the blast radius.
+
+---
+
+## CI/CD
+
+### GitHub Actions - OIDC, lint, what-if, deploy
+
+```yaml
+# .github/workflows/bicep.yml
+permissions:
+  id-token: write       # required for OIDC
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC - no stored secret)
+        uses: azure/login@v2
+        with:
+          client-id:       ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id:       ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Lint
+        run: az bicep lint --file main.bicep
+
+      - name: What-if
+        run: |
+          az deployment group what-if \
+            --resource-group rg-app-prd \
+            --template-file main.bicep \
+            --parameters prod.bicepparam
+
+      - name: Deploy
+        run: |
+          az deployment group create \
+            --resource-group rg-app-prd \
+            --template-file main.bicep \
+            --parameters prod.bicepparam
+```
+
+### Azure DevOps - Workload Identity Federation
+
+```yaml
+steps:
+  - task: AzureCLI@2
+    inputs:
+      azureSubscription: 'sc-app-prd'   # WIF service connection
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: |
+        az bicep lint --file main.bicep
+        az deployment group what-if \
+          --resource-group rg-app-prd \
+          --template-file main.bicep \
+          --parameters prod.bicepparam
+        az deployment group create \
+          --resource-group rg-app-prd \
+          --template-file main.bicep \
+          --parameters prod.bicepparam
+```
+
+> **See also:** [GitHub Actions](/docs/cheatsheets/github-actions-cheatsheet) and [Azure DevOps](/docs/cheatsheets/azure-devops-cheatsheet) for OIDC / Workload Identity Federation setup detail.
+
+---
+
+## Linting & Governance
+
+Configure the linter and module aliases in `bicepconfig.json` at the repo root. Bicep walks up the directory tree to find it.
+
+```json
+{
+  "analyzers": {
+    "core": {
+      "enabled": true,
+      "rules": {
+        "no-hardcoded-env-urls":   { "level": "error" },
+        "secure-parameter-default": { "level": "error" },
+        "no-unused-params":        { "level": "warning" },
+        "no-unused-vars":          { "level": "warning" },
+        "prefer-interpolation":    { "level": "warning" },
+        "use-recent-api-versions": { "level": "warning" }
+      }
+    }
+  },
+  "moduleAliases": {
+    "br": {
+      "LibreDevOps": {
+        "registry": "acrlibredevops.azurecr.io",
+        "modulePath": "bicep/modules"
+      }
+    }
+  }
+}
+```
+
+```bash
+# Fail CI on any lint error
+az bicep lint --file main.bicep --diagnostics-format sarif > bicep.sarif
+```
+
+---
+
+## Bicep vs ARM vs Terraform - quick orientation
+
+| | Bicep | ARM JSON | Terraform |
+|---|---|---|---|
+| Syntax | Concise DSL | Verbose JSON | HCL |
+| State file | None (uses Azure as source of truth) | None | Explicit `.tfstate` |
+| Drift / delete on remove | Only via deployment stacks | No | Yes (core behaviour) |
+| Multi-cloud | Azure only | Azure only | Any provider |
+| Preview changes | `what-if` | `what-if` | `plan` |
+| Module registry | ACR (OCI) / public AVM | Template specs | Registry / OCI |
+| Secret handling | `@secure()`, `getSecret()` | `securestring` | ephemeral / write-only args |
+
+Bicep is the right default for Azure-only estates that want zero state-file maintenance; Terraform wins for multi-cloud, explicit-state reconciliation, and a larger ecosystem. Many teams run both.
+
+> **Rule:** Bicep handles Azure Resource Manager resources (`Microsoft.*`) and, via the Microsoft Graph Bicep extension, Entra ID. Terraform can manage all of the same ground - ARM through `azurerm` and `azapi`, and Entra/Microsoft Graph through the dedicated `msgraph` provider, `azapi`, and `azurerm` (with `azuread` still available for directory objects) - so this is not a capability Bicep has uniquely. The deciding factor is extensibility, not whether the target is Azure. **If a deployment will only ever manage Azure and Entra resources, Bicep is a fine choice.** The moment there is any chance of needing resources beyond that boundary - GitHub (repos, teams, branch protection), GitLab (projects, runners, variables), Databricks (workspaces, clusters, jobs), Cloudflare, Datadog, or anything multi-cloud - **Terraform is the preferred tool at Libre DevOps**, because Bicep's provider model cannot grow to cover those third-party systems. For in-guest and OS-level configuration (installing packages, templating config, running services), use **Ansible** rather than `deploymentScripts` hacks. Note that Terraform has a first-class [Ansible provider](/docs/cheatsheets/terraform) (inventory plus playbook execution via Terraform actions), so a Terraform estate wires Ansible in natively - the shell-out workaround is a Bicep-only compromise that Terraform does not need. The clean split: Bicep only when the scope is permanently limited to Azure/Entra, Terraform whenever future extensibility (non-Azure or multi-cloud providers) is on the table, Ansible for configuration management inside the machines.
+
+---
+
+## Anti-patterns
+
+- 🚨 **Secrets in plain parameters or outputs** - any non-`@secure()` param value is written to the deployment history and visible in the portal. Outputs are never redacted even if sourced from a secure value. Use `@secure()` params and `getSecret()`; never `output adminPassword`.
+- ⚠️ **Floating API versions or always-latest** - pin `@2023-05-01` explicitly. Letting versions drift means a resource schema can change under you between deploys.
+- ⚠️ **Committing generated ARM JSON** - deploy `.bicep` directly. Generated `main.json` rots out of sync and doubles review noise.
+- 🚨 **Mutable module tags in the private registry** - re-publishing `1.2.0` with `--force` after consumers pin to it silently changes their deployment. Publish a new version instead.
+- ⚠️ **Redundant `dependsOn`** - if you reference `sa.id`, the dependency already exists. Manual `dependsOn` on referenced resources is a lint warning and hides the real graph.
+- ⚠️ **`object` everywhere instead of user-defined types** - loose `object` params accept anything and fail at deploy time. Define `type` shapes so errors surface at compile time in the editor.
+- 🚨 **Plain deployments when you need reconciliation** - `az deployment group create` never deletes a resource you stopped declaring, so orphans accumulate. Use a deployment stack with `--action-on-unmanage` for true lifecycle management.
+- 🔬 **Deploying without `what-if`** - always run `az deployment group what-if` (or `--confirm-with-what-if`) first. It is the closest Bicep equivalent to `terraform plan`.
+- ⚠️ **Hard-coding the ACR FQDN in every module reference** - define a `moduleAliases` entry in `bicepconfig.json` and use `br/<alias>:` so the registry lives in one place.
+- 🚨 **Choosing Bicep when the scope might grow beyond Azure** - Bicep manages ARM (`Microsoft.*`) and, via the Microsoft Graph extension, Entra ID, but it cannot grow to GitHub, GitLab, Databricks, Cloudflare, or any other third-party provider, and `deploymentScripts` shelling out to a CLI to fake it is fragile and unauditable. Terraform covers the same Azure and Entra/Microsoft Graph ground (`azurerm` and `azapi` for ARM; the `msgraph` provider, `azapi`, and `azurerm` for Graph, plus `azuread`) and extends to those providers, so pick Bicep only when the scope is permanently Azure/Entra. Use Terraform whenever future extensibility is in play (the preferred tool at Libre DevOps), and Ansible for in-guest OS configuration - Terraform even has a native Ansible provider, so the shell-out hack is a Bicep-only limitation.
+
+---
+
+## References
+
+- [Bicep documentation](https://learn.microsoft.com/azure/azure-resource-manager/bicep/)
+- [Bicep functions reference](https://learn.microsoft.com/azure/azure-resource-manager/bicep/bicep-functions)
+- [Private module registry (ACR)](https://learn.microsoft.com/azure/azure-resource-manager/bicep/private-module-registry)
+- [bicepconfig.json reference](https://learn.microsoft.com/azure/azure-resource-manager/bicep/bicep-config)
+- [Bicep linter rules](https://learn.microsoft.com/azure/azure-resource-manager/bicep/linter)
+- [Deployment stacks](https://learn.microsoft.com/azure/azure-resource-manager/bicep/deployment-stacks)
+- [Azure Verified Modules](https://azure.github.io/Azure-Verified-Modules/)
+- [`.bicepparam` parameter files](https://learn.microsoft.com/azure/azure-resource-manager/bicep/parameter-files)

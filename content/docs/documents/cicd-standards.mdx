@@ -1,0 +1,330 @@
+---
+title: CI/CD Standards
+description: Enterprise CI/CD and secure SDLC standards - pipeline stages, trunk-based branching and PR gates, OIDC identity, secret scanning and git-leak prevention, SAST and dependency scanning, supply-chain hardening, build-once artifacts, and gated multi-environment deployment. Language-agnostic, with GitHub Actions as the worked example.
+---
+
+# CI/CD Standards
+
+An opinionated, production-grade standard for how code moves from a developer's machine to production: the pipeline shape, the security gates that run on every change, the identity model, and the deployment controls. It is deliberately language-agnostic - the same flow governs Terraform, Python, TypeScript, .NET, and container builds. Only the build and test steps differ per language.
+
+> **Scope:** Applies to every repository that ships code or infrastructure. Examples use **GitHub Actions**, but the model maps directly onto Azure DevOps, GitLab CI, and other runners (see Portability below). This document sets the pipeline and security standard; per-language build/test detail lives in the language standards and the [GitHub Actions](/docs/cheatsheets/github-actions-cheatsheet) and [Azure DevOps](/docs/cheatsheets/azure-devops-cheatsheet) cheatsheets.
+>
+> **Grounding:** [OWASP DevSecOps Guideline](https://owasp.org/www-project-devsecops-guideline/) · [SLSA supply-chain framework](https://slsa.dev/) · [NIST SSDF (SP 800-218)](https://csrc.nist.gov/pubs/sp/800/218/final) · [OpenSSF Scorecard](https://securityscorecards.dev/).
+
+> **Tooling portability:** GitHub Actions is the worked example. The pipeline shape (lint and test, then security scans, then build, then a gated deploy of a reviewed artifact) is identical on **Azure DevOps** (YAML pipelines + Workload Identity Federation), **GitLab CI** (`id_tokens` for OIDC), and any other runner. Only the YAML syntax and the OIDC wiring differ.
+
+> **Language portability:** The stages below are the same for **Terraform**, **Python**, **TypeScript/Node**, **.NET**, and containers. Substitute the language-specific build, test, and package commands; every other gate (secret scan, SAST, dependency scan, review, deploy) is unchanged.
+
+---
+
+## Why standards?
+
+A pipeline is the only path to production, so it is also the most effective place to enforce quality and security. A consistent CI/CD standard means:
+
+- **Every change is verified the same way** - no repo is a special case that skips tests or scans.
+- **Security shifts left** - secrets, vulnerable dependencies, and insecure code are caught on the pull request, not in production.
+- **Releases are predictable and reversible** - one artifact is built once and promoted unchanged through environments.
+- **The blast radius is bounded** - least-privilege identities, environment approvals, and protected branches mean a compromised step cannot reach production unchecked.
+
+The cost of a missed gate is asymmetric: a leaked credential or a supply-chain compromise is far more expensive than the seconds a scan adds to a build. Gates fail closed.
+
+---
+
+## The SDLC and where CI/CD fits
+
+The pipeline is the automation layer of the software development lifecycle. A change flows from a feature branch, through Continuous Integration gates on the pull request, past a human review gate, then through Continuous Deployment into progressively higher environments. Security checks are embedded in CI (DevSecOps), not bolted on afterwards.
+
+<figure className="doc-diagram">
+
+![Example secure CI/CD pipeline. A change in the protected main repo is raised as a pull request, which runs the Continuous Integration gates: lint and format and unit tests on GitHub Actions, then secure scans (gitleaks secret scanning, SAST, and software-composition/dependency analysis), then a single versioned build artifact. The reviewed result reaches a CODEOWNER approval gate that also requires all checks to be green. On approval the change is squash-merged to main, which triggers Continuous Deployment: automatic deploy to dev then staging, then a gated approval before deploy to production, releasing into the Azure environments. If a reviewer requests changes the flow loops back to the pull request.](/assets/diagrams/cicd-pipeline.svg)
+
+</figure>
+
+---
+
+## Pipeline stages - the standard shape
+
+Every pipeline runs these stages in this order. Earlier, cheaper, and more security-relevant checks run first so failures surface fast and fail closed.
+
+```
+format/lint  ->  unit test  ->  secret scan  ->  SAST  ->  dependency scan  ->
+build (once)  ->  artifact + SBOM  ->  [review gate]  ->  deploy dev  ->
+deploy staging  ->  [approval gate]  ->  deploy prod  ->  post-deploy verify
+```
+
+| Stage | Purpose | Fail action |
+|:--|:--|:--|
+| **format / lint** | Style and static correctness | Block - fix locally, never auto-format in CI |
+| **unit test** | Behaviour and regressions | Block |
+| **secret scan** | Catch committed credentials (git-leak prevention) | Block, fail closed |
+| **SAST** | Insecure code patterns | Block on HIGH/CRITICAL |
+| **dependency scan (SCA)** | Vulnerable / malicious packages | Block on HIGH/CRITICAL |
+| **build** | Produce one immutable, versioned artifact | Block |
+| **deploy** | Promote that same artifact per environment | Gated by environment approvals |
+| **post-deploy verify** | Smoke test / health check | Roll back on failure |
+
+> **Rule:** Build once, deploy many. The artifact (container image, wheel, zip, plan file) is produced a single time in CI and the identical artifact is promoted through dev, staging, and prod. Never rebuild per environment - a rebuild is a different artifact and invalidates everything that was tested.
+
+> **Rule:** Run `fmt`/`lint` in check mode in CI (e.g. `terraform fmt -check`, `ruff format --check`, `prettier --check`). CI verifies; it does not mutate the repo.
+
+---
+
+## Branching & trigger model
+
+Standardise on **trunk-based development with short-lived feature branches** and a protected `main`:
+
+- Work happens on a feature branch off `main`; branches are short-lived (hours to days, not weeks).
+- Every change reaches `main` through a pull request. **No direct pushes to `main`**, including for administrators.
+- CI runs on `pull_request` (the full gate set) and again on `push` to `main` (which triggers deployment).
+- `main` is always releasable.
+
+The pull-request gate (required CODEOWNER review, required status checks, plan/preview where applicable) is specified in detail in the [Terraform Standards - Code Review & Merge Gates](/docs/documents/terraform-standards#code-review--merge-gates) section. The same branch-protection rules and `CODEOWNERS` model apply to every repository regardless of language.
+
+---
+
+## Secure SDLC (DevSecOps)
+
+Security checks live inside the pipeline and run on every pull request, so problems are found by the engineer who introduced them while the change is cheap to fix. All security gates **fail closed**: a HIGH/CRITICAL finding blocks the merge and is never a warning to be clicked past.
+
+### Secret scanning & git-leak prevention
+
+Leaked credentials are the highest-frequency, highest-impact failure. Defend in depth, at three points:
+
+1. **Pre-commit** - run a secret scanner locally before the commit is even created, so secrets never enter history.
+2. **CI on every PR** - scan the diff (and full history on a schedule) and fail the build on any finding.
+3. **Platform push protection** - enable GitHub **Secret Scanning + Push Protection** (or the equivalent) so the forge itself rejects a push containing a known secret pattern.
+
+```yaml
+# .github/workflows/security.yml - gitleaks on every PR
+name: security
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # full history so the scan sees every commit
+      - name: Scan for secrets (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
+
+```yaml
+# .pre-commit-config.yaml - block secrets before they are committed
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks
+```
+
+> **Rule:** Enable GitHub Secret Scanning with Push Protection on every repository, and run `gitleaks` (or `trufflehog`) in CI with `fetch-depth: 0`. A scanner that only sees the latest commit misses secrets buried earlier in the branch.
+
+> **Rule:** A leaked secret is compromised the moment it is pushed, even if later removed. **Rotate it immediately** - rewriting history does not un-leak it. This is exactly why OIDC (no stored long-lived secrets) is mandatory; see Identity below.
+
+### Static analysis (SAST)
+
+Scan source for insecure patterns (injection, unsafe deserialisation, hard-coded crypto) on every PR. **CodeQL** is the default for GitHub-hosted repos; **Semgrep** is a strong language-agnostic alternative.
+
+```yaml
+  codeql:
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: python, javascript    # match the repo
+      - uses: github/codeql-action/analyze@v3
+```
+
+### Dependency / supply-chain scanning (SCA)
+
+Most code is third-party. Scan dependencies for known vulnerabilities and keep them current:
+
+- **Dependabot** (or Renovate) for automated update PRs - patches land continuously, not in a quarterly scramble.
+- Per-ecosystem audit in CI: `pip-audit` / `uv` for Python, `npm audit --audit-level=high` for Node, `trivy fs` for general/lockfile scanning, `tfsec`/`checkov`/`trivy config` for IaC.
+- Fail the build on HIGH/CRITICAL with a known fix.
+
+### Supply-chain hardening
+
+The pipeline itself is an attack surface. Harden it:
+
+- **Pin third-party actions to a full commit SHA**, not a tag - a tag can be silently repointed at malicious code.
+
+  ```yaml
+  # good - immutable
+  - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11   # v4.1.1
+  # risky - a tag is mutable
+  - uses: actions/checkout@v4
+  ```
+- **Least-privilege `GITHUB_TOKEN`** - set `permissions: { contents: read }` at the top level and widen only per-job where needed.
+- **Generate an SBOM** (e.g. Syft / `anchore/sbom-action`) and, for released artifacts, **sign them and emit provenance** (Cosign + SLSA provenance) so consumers can verify origin.
+- **Untrusted input never reaches a shell** - never interpolate `${{ github.event.* }}` (PR titles, branch names) directly into `run:`; pass it through `env:` and quote it. See [GitHub Actions - Security Hardening](/docs/cheatsheets/github-actions-cheatsheet#security-hardening-).
+- **Track posture with OpenSSF Scorecard** as a scheduled job to catch regressions in repo hygiene.
+
+---
+
+## Identity & secrets in the pipeline
+
+> **Rule:** No long-lived cloud credentials in CI. Authenticate with **OIDC / Workload Identity Federation** so every job receives a short-lived, per-run token and there is no secret to leak or rotate.
+
+```yaml
+permissions:
+  id-token: write    # request the OIDC token
+  contents: read
+
+steps:
+  - uses: azure/login@v2
+    with:
+      client-id:       ${{ vars.AZURE_CLIENT_ID }}   # non-secret - store as a var
+      tenant-id:       ${{ vars.AZURE_TENANT_ID }}
+      subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+```
+
+Rules for what few secrets remain:
+
+- Application/runtime secrets live in a **secret store** (Azure Key Vault), fetched at deploy time - not in pipeline variables.
+- Scope the deploying identity to **least privilege**: the roles its environment needs, on that environment's scope, never tenant-wide Owner.
+- Use a **distinct identity per environment** so a dev credential cannot touch production.
+
+The same model is `azure/login` here, a Workload Identity Federation service connection on Azure DevOps, and `id_tokens` on GitLab. See [GitHub Actions - OIDC Cloud Authentication](/docs/cheatsheets/github-actions-cheatsheet#oidc-cloud-authentication-) and [Azure DevOps - Service Connections](/docs/cheatsheets/azure-devops-cheatsheet#service-connections--authentication).
+
+---
+
+## Per-language build & test (the part that differs)
+
+Only the build and test steps change per language; every other stage is identical. Keep these in a reusable workflow so the security gates are defined once and inherited.
+
+| Language | Lint / format | Test | Build artifact |
+|:--|:--|:--|:--|
+| **Terraform** | `terraform fmt -check`, `tflint` | `terraform test`, `terraform validate` | `terraform plan -out` (the plan is the artifact) |
+| **Python** | `ruff check`, `ruff format --check` | `pytest`, `mypy --strict` | wheel / container via `uv build` |
+| **TypeScript/Node** | `eslint`, `prettier --check` | `vitest`/`jest`, `tsc --noEmit` | bundle / container via `npm run build` |
+| **.NET** | `dotnet format --verify-no-changes` | `dotnet test` | `dotnet publish` / container |
+| **Container** | `hadolint` | structure tests | `docker build` + `trivy image` |
+
+> **Rule:** Define the security and deploy gates **once** in a reusable workflow (`workflow_call`) or an `extends` template, and have every repo call it. Copy-pasted pipeline YAML drifts; a central reusable workflow is patched in one place. See [GitHub Actions - Reusable Workflows](/docs/cheatsheets/github-actions-cheatsheet#reusable-workflows--composite-actions).
+
+### Worked example - a Python service pipeline
+
+The stages assembled for a Python service. The security gates (secret scan, SAST, dependency audit) are the same ones defined above; the Python-specific part is only lint/format, type-check, test, and build. The commands match the [Python Standards](/docs/documents/python-standards) - `uv` for everything, `ruff` for lint and format, `mypy --strict` for types, `pytest` with a coverage floor.
+
+```yaml
+# .github/workflows/python-ci.yml
+name: python-ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read          # least privilege - widen per-job only if needed
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0                  # full history so the secret scan sees every commit
+
+      - name: Secret scan (git-leak prevention)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install (locked, reproducible)
+        run: uv sync --locked --extra dev # hash-pinned; fails on any lockfile drift
+
+      - name: Lint
+        run: uv run ruff check --output-format=github .
+
+      - name: Format check
+        run: uv run ruff format --check .  # check only - never auto-format in CI
+
+      - name: Type check
+        run: uv run mypy src
+
+      - name: Test (coverage gate)
+        run: uv run pytest --cov --cov-fail-under=85
+
+      - name: Dependency audit (SCA)
+        run: uvx pip-audit                # known CVEs anywhere in the dependency tree
+
+      - name: Build once (versioned artifact)
+        run: uv build                     # wheel + sdist into dist/, promoted unchanged
+```
+
+CodeQL/SAST runs as a separate workflow with `security-events: write` (see [Static analysis](#static-analysis-sast)), and Dependabot keeps the lockfile current. Note the ordering: the **secret scan runs first**, and the install uses **`uv sync --locked`** so a tampered or drifted lockfile fails the build before any code executes.
+
+> **Rule:** In CI, install with `uv sync --locked` and gate coverage with `--cov-fail-under`. A reproducible, hash-pinned install plus an enforced coverage floor is what makes a Python build trustworthy enough to promote unchanged through environments. See [Python Standards - Supply chain](/docs/documents/python-standards#supply-chain---lock-hash-and-audit-dependencies).
+
+---
+
+## Artifacts, versioning & releases
+
+- **Semantic versioning** for released artifacts; derive the version from a git tag, not a hand-edited file.
+- **Immutable, addressable artifacts** - push to a registry (GitHub Packages, ACR) or artifact store; never overwrite a published version.
+- **The artifact reviewed and tested is the artifact deployed** - deployment consumes the build output, it does not rebuild from source.
+
+---
+
+## Environments & deployment gates
+
+Promote one artifact through ordered environments with increasing protection:
+
+- **dev** - automatic on merge to `main`; fast feedback.
+- **staging** - automatic; mirrors production for integration and smoke tests.
+- **production** - **manual approval gate** via a protected environment (GitHub Environments / Azure DevOps environment checks), restricted to authorised approvers, plus a deployment window if required.
+
+```yaml
+deploy-prod:
+  needs: deploy-staging
+  runs-on: ubuntu-latest
+  environment: production      # required reviewers + protected branches enforced here
+  if: github.ref == 'refs/heads/main'
+  steps:
+    - run: ./deploy.sh prod    # deploys the artifact built earlier, not a rebuild
+```
+
+For higher-risk services, layer **progressive delivery** (canary or blue-green) and automated rollback on failed post-deploy health checks. Keep it proportional - not every service needs canary, but every production deploy needs an approval gate and a rollback path.
+
+---
+
+## Anti-patterns
+
+- 🚨 **Long-lived cloud secrets in CI variables** - a stored `ARM_CLIENT_SECRET` or cloud key is a standing liability. Use OIDC/WIF; there is nothing to leak.
+- 🚨 **Security scans as non-blocking warnings** - a `continue-on-error` secret or SAST scan is theatre. Gates fail closed or they do not exist.
+- 🚨 **Secret scanning that only sees the latest commit** - without `fetch-depth: 0`, secrets earlier in the branch slip through. And once leaked, rotate - do not just delete.
+- ⚠️ **Rebuilding per environment** - building separately for staging and prod means prod runs an artifact that was never tested. Build once, promote the same artifact.
+- ⚠️ **Floating action tags** - `uses: action@v4` can be repointed at malicious code. Pin to a full commit SHA for third-party actions.
+- ⚠️ **Wide-open `GITHUB_TOKEN`** - the default token should be `contents: read`; widen per-job only where required.
+- ⚠️ **Copy-pasted pipeline YAML across repos** - it drifts and the weakest copy sets your security floor. Centralise in a reusable workflow.
+- 🔬 **No production approval gate** - auto-deploying to prod with no human checkpoint removes the last chance to stop a bad change. Gate prod behind a protected environment.
+
+---
+
+## See Also
+
+- [GitHub Actions Cheatsheet](/docs/cheatsheets/github-actions-cheatsheet) - workflow syntax, OIDC, reusable workflows, security hardening
+- [Azure DevOps Cheatsheet](/docs/cheatsheets/azure-devops-cheatsheet) - YAML pipelines, WIF service connections, environment checks
+- [Terraform Standards - Code Review & Merge Gates](/docs/documents/terraform-standards#code-review--merge-gates) - branch protection, CODEOWNERS, the PR workflow
+- [GitLab Cheatsheet](/docs/cheatsheets/gitlab-cheatsheet) - the same model on GitLab CI/CD
+- [OWASP DevSecOps Guideline](https://owasp.org/www-project-devsecops-guideline/)
+- [SLSA supply-chain security framework](https://slsa.dev/)
+- [NIST Secure Software Development Framework (SP 800-218)](https://csrc.nist.gov/pubs/sp/800/218/final)
+- [OpenSSF Scorecard](https://securityscorecards.dev/)
+- [gitleaks](https://github.com/gitleaks/gitleaks) - secret scanning
+- [CodeQL](https://codeql.github.com/) - static analysis

@@ -9,6 +9,12 @@ An opinionated set of standards for authoring, structuring, testing, and publish
 
 > **Scope:** The module-level rules (file structure, variable patterns, dynamic blocks) apply most strictly to public registry modules. The pipeline and state rules apply to workspace (root module) configurations.
 
+> **Cloud portability:** The examples target **Azure** (the `azurerm`, `azapi`, `azuread`, and `msgraph` providers) because that is our primary platform. The standards themselves are provider-agnostic - file layout, variable and validation patterns, `for_each` over `count`, module design, state separation, testing, and the PR/CI gates apply unchanged to **AWS** (`aws`), **Google Cloud** (`google`), **Kubernetes**, or any other provider. Swap the resources and the provider block to match your target. This is a Terraform standard that uses Azure for its examples, not an "Azure Terraform" standard.
+
+> **Engine portability:** Everything here applies equally to **OpenTofu**, the open-source fork (same HCL, same module and state model, same CLI surface), and to orchestrators layered on top such as **Terragrunt** and **Atmos**. Where a feature is version-gated (for example `import` blocks or `check` blocks), use the equivalent OpenTofu release. Pick whichever engine your organisation has standardised on - the rules do not change.
+
+> **CI portability:** The pipeline examples use **GitHub Actions**, but the model (fmt and validate and lint and scan, then plan, then a gated apply of the reviewed plan) is identical on **Azure DevOps**, **GitLab CI**, and any other runner. Only the YAML syntax and the OIDC wiring differ.
+
 ---
 
 ## Why standards?
@@ -156,6 +162,65 @@ resource "azapi_resource" "new_service" {
   # ...
 }
 ```
+
+### Entra ID with the azuread and msgraph providers
+
+Resource Manager resources (`Microsoft.*`) live in `azurerm`/`azapi`. **Entra ID (Azure AD) directory objects** - app registrations, service principals, groups, directory roles, conditional access - live in a separate API (Microsoft Graph) and need a Graph-aware provider. Terraform has two, and the choice mirrors the azurerm-vs-azapi decision exactly:
+
+| Provider | Source | Role | Use case |
+|:--|:--|:--|:--|
+| **azuread** | `hashicorp/azuread` | High-level, validated, schema-backed | Common directory objects - applications, service principals, users, groups. Start here. |
+| **msgraph** | `Microsoft/msgraph` | Thin, generic layer over the Graph REST API | Graph features `azuread` does not yet model (PIM, some M365/SharePoint Graph resources). Drop to this only when needed. |
+
+> **Rule:** `msgraph` is to `azuread` what `azapi` is to `azurerm` - a low-level escape hatch with automatic support for new resource types but weaker validation. Start with `azuread`; reach for `msgraph` (or `azapi`, which can also create some Graph resources) only for what `azuread` cannot yet express, and document the exception in a comment.
+
+```hcl
+# terraform.tf - both Graph providers alongside azurerm
+terraform {
+  required_providers {
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = "~> 4.0"
+    }
+    azuread = {
+      source  = "hashicorp/azuread"
+      version = "~> 3.0"
+    }
+    msgraph = {
+      # Public preview at time of writing - pin tightly and review before bumping.
+      source  = "Microsoft/msgraph"
+      version = "~> 0.1"
+    }
+  }
+}
+```
+
+Both Graph providers authenticate the **same way as azurerm** - OIDC in CI, no stored secret - and the provider configuration block belongs in the workspace root, never in a reusable module:
+
+```hcl
+# providers.tf - workspace root only
+provider "azuread" {
+  use_oidc = true   # same ARM_/AZURE_ OIDC env vars as the azurerm provider
+}
+
+provider "msgraph" {
+  use_oidc = true
+}
+
+# High-level object via azuread (preferred)
+resource "azuread_application" "api" {
+  display_name = "app-ldo-api-prd"
+}
+
+# A Graph resource azuread does not model yet, via the generic msgraph provider.
+# Documented because it is the lower-level escape hatch.
+resource "msgraph_resource" "pim_role_setting" {
+  url = "policies/roleManagementPolicies"
+  # body = { ... } - raw Microsoft Graph payload
+}
+```
+
+> **Note:** Granting the deploying identity Graph permissions (for example `Application.ReadWrite.All`) is a privileged operation. Scope it tightly, and keep Entra ID changes behind the same CODEOWNER and plan-review gates as everything else - a directory change has a wider blast radius than a single resource group.
 
 ### Version management on developer machines
 
@@ -1294,6 +1359,97 @@ The pipeline already runs `tflint` and a Trivy config scan (see Pipelines). Trea
 
 ---
 
+## Code Review & Merge Gates
+
+Infrastructure changes reach `main` through a pull request, never a direct push. The branch protection rules, the `CODEOWNERS` file, and a mandatory plan are what make the workflow production-ready: every change is reviewed by an owner of that code and every reviewer can see exactly what will change in Azure before approving.
+
+<figure className="doc-diagram">
+
+![Terraform pull-request workflow. A change in the protected main repo is raised as a pull request from a feature branch. The pull request triggers the required status-check gates: CI checks (fmt, validate, tflint, scan) followed by terraform plan, whose output is posted to the pull request. The reviewed plan reaches a CODEOWNER approval gate that also requires all checks to be green. On approval the branch is squash-merged to main, which runs terraform apply against the reviewed plan and provisions the Azure subscription. If a reviewer requests changes, the flow loops back to the pull request.](/assets/diagrams/terraform-pr-workflow.svg)
+
+</figure>
+
+### Branch protection - the non-negotiable gates
+
+Configure these on `main` (GitHub: Settings > Branches > branch protection rule, or a ruleset; Azure DevOps: branch policies):
+
+- **Require a pull request before merging** - no direct pushes to `main`, including for administrators.
+- **Require at least 1 approving review from a code owner** - tick *Require review from Code Owners*. One CODEOWNER approval is the floor; high-blast-radius repos (platform, networking, identity) should require 2.
+- **Require status checks to pass** - `fmt-check`, `validate`, `tflint`, `security-scan`, and crucially **`plan`** must all be green before the merge button unlocks.
+- **Require branches to be up to date before merging** - forces a re-plan against the current `main`, so an approval cannot be applied on top of a stale base.
+- **Dismiss stale approvals when new commits are pushed** - a re-review is required if the author changes the code after approval.
+- **Require conversation resolution** - no unresolved review threads at merge.
+- **Require linear history / squash merge** - keep `main` history clean and each change atomic.
+
+> **Rule:** Every PR must produce a successful `terraform plan` as a required status check, and the plan output must be posted to the PR. Reviewers approve a *specific plan*, not just a diff of HCL. A PR that cannot plan cannot merge.
+
+### CODEOWNERS
+
+`CODEOWNERS` maps paths to the teams or individuals that must approve changes to them. Combined with *Require review from Code Owners*, it guarantees the right people gate the right code. Place it at `.github/CODEOWNERS` (GitHub) or the repo root.
+
+```bash
+# .github/CODEOWNERS
+# Syntax: <path pattern>   <owner> [<owner> ...]
+# Later matches win, so order from general to specific.
+
+# Default owner for everything in the repo
+*                       @libre-devops/platform-engineering
+
+# Reusable modules - require a module maintainer
+/modules/               @libre-devops/terraform-maintainers
+
+# Environment roots - require the owning team per environment
+/env/prod/              @libre-devops/platform-leads
+/env/dev/               @libre-devops/platform-engineering
+
+# Pipeline and policy definitions - tightly held
+/.github/workflows/     @libre-devops/platform-leads
+/policy/                @libre-devops/security
+
+# A single sensitive file can have its own owner
+backend.tf              @libre-devops/platform-leads
+```
+
+Rules that keep CODEOWNERS effective:
+- **Owners must be teams, not individuals**, wherever possible - a team survives someone leaving; a named person becomes a bottleneck and a single point of failure.
+- **Every owning team needs write access** to the repo, or its approval will not count.
+- **The most specific matching line wins**, so list general patterns first and tighten downward.
+- **Protect the protection** - make `CODEOWNERS`, `/.github/workflows/`, and `backend.tf` owned by a restricted team so the gates themselves cannot be quietly weakened in a PR.
+
+### Production-ready PR workflow
+
+End to end, a change moves like this:
+
+1. **Branch** off `main` (`feat/add-storage-account`). Never commit to `main` directly.
+2. **Open a draft PR early.** On PR open, CI runs `fmt-check > validate > tflint > security-scan` and a **speculative plan** (a plan that is never applied). The plan output is posted back as a PR comment so reviewers and the author see the proposed Azure changes inline.
+3. **Iterate.** Each push re-runs the checks and refreshes the plan comment. Pushing new commits dismisses any stale approval.
+4. **Ready for review.** Mark the PR ready; `CODEOWNERS` automatically requests the owning team(s). At least one code owner reviews the HCL *and* the rendered plan.
+5. **Gates must be green.** Required status checks (including `plan`) pass, the branch is up to date with `main`, conversations are resolved, and at least one CODEOWNER has approved. Only then does merge unlock.
+6. **Merge** (squash) to `main`.
+7. **Apply.** The merge to `main` triggers the apply job, which downloads the **exact plan artifact that was reviewed** and runs `terraform apply tfplan` behind an environment approval gate for production. The plan that was reviewed is the plan that is applied - never a re-plan. See [Pipelines](#pipelines) for the job definitions.
+
+> **Rule:** The reviewed plan is the applied plan. The apply job consumes the saved plan artifact from the PR pipeline; it must not run a fresh `terraform plan`. Re-planning on apply discards the human review and can apply changes nobody approved.
+
+### TACOS and HCP Terraform - native git-driven workflows
+
+The gates above can be assembled from raw GitHub/Azure DevOps branch policies plus pipeline steps, but the **TACOS** category (Terraform Automation and Collaboration Software) implements this VCS-driven model natively. Commercial platforms with free tiers include **HCP Terraform**/Terraform Cloud, **Spacelift**, **env0**, and **Scalr**. Fully open-source / self-hosted options that run inside your own CI or cluster include:
+
+- **[Atlantis](https://www.runatlantis.io/)** - the original open-source Terraform PR automation. Listens on webhooks, runs `plan` on PR, posts the output as a comment, and applies on a `atlantis apply` comment after approval. Self-hosted, MPL-2.0.
+- **[Digger](https://digger.dev/)** - open-source; runs the plan/apply inside your existing GitHub Actions / Azure DevOps / GitLab CI runners (no separate compute) and orchestrates locking and PR comments. Apache-2.0.
+- **[Terrateam](https://terrateam.io/)** - open-source GitHub-native workflow engine (plan on PR, apply on comment, OPA policies, layered environments). Mozilla-2.0, self-hostable.
+- **[Terramate](https://terramate.io/)** - open-source orchestration and code generation that layers change detection and ordering onto your own pipeline.
+
+Whichever you pick, the native model is the same:
+
+- **Speculative plans on every PR**, posted back to the PR as a status check and comment, with no custom pipeline glue.
+- **Policy-as-code gates** (Sentinel or OPA) evaluated against the plan before apply, as a first-class run stage.
+- **Apply gated on merge** to the tracked branch, with the run reusing the reviewed plan and adding its own approval step, remote state, run locking, and a full audit log.
+- **Drift detection** and scheduled health checks out of the box.
+
+> **Rule:** If you use HCP Terraform or a TACOS, lean on its native VCS integration for the plan-on-PR and gated-apply flow rather than rebuilding it in pipeline YAML. Anything those platforms do not cover natively - bespoke approval routing, custom policy engines, cross-tool orchestration - requires custom automation, and that custom glue is where most workflow bugs and security gaps appear. Keep it minimal and own it deliberately.
+
+---
+
 ## Pipelines
 
 ### Standard CI/CD stage order
@@ -1305,6 +1461,8 @@ fmt-check → validate → tflint → security-scan → test → plan → [appro
 Never apply without a prior plan artifact. Never re-plan inside the apply job.
 
 ### GitHub Actions reference
+
+GitHub Actions is the worked example below, but the pipeline shape is the target, not the tool. **Azure DevOps** (YAML pipelines with a Workload Identity Federation service connection), **GitLab CI** (`id_tokens` for OIDC), and any other runner implement the identical flow: validate and scan, then plan to an artifact, then a gated apply of that same artifact. Only the YAML syntax and the OIDC wiring change.
 
 ```yaml
 name: Terraform

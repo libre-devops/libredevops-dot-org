@@ -33,6 +33,16 @@ const AiIcon = (
     </svg>
 );
 
+const BicepIcon = (
+    <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none"
+        stroke="#0078d4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+        aria-hidden="true" style={{ flexShrink: 0, opacity: 0.85 }}>
+        <path d="M4 13c0-3 2-5 5-5h3a4 4 0 0 1 4 4v0"/>
+        <path d="M16 12a4 4 0 0 1 4 4v4H8v-3a4 4 0 0 0-4-4"/>
+        <path d="M12 8V5a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v3"/>
+    </svg>
+);
+
 const TerminalIcon = (
     <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none"
         stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
@@ -97,6 +107,13 @@ const CHEATSHEETS: Cheatsheet[] = [
         description: 'Script boilerplate, strict mode, colour output helpers, argument parsing, PATH deduplication, and directory-iteration patterns.',
         tags: ['Bash', 'Shell', 'Linux'],
         icon: <DevIcon name="bash/bash-original.svg" alt="Bash" />,
+    },
+    {
+        title: 'Bicep',
+        href: '/docs/cheatsheets/bicep-cheatsheet',
+        description: 'Azure-native IaC - tooling and CLI, parameters and .bicepparam files, modules, the private Bicep registry (ACR), loops and conditions, deployment scopes, user-defined types, Key Vault secret passthrough, what-if, deployment stacks, and CI/CD.',
+        tags: ['Bicep', 'Azure', 'IaC', 'ARM'],
+        icon: BicepIcon,
     },
     {
         title: 'CLI Utilities',

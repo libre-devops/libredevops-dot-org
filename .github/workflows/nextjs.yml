@@ -76,6 +76,11 @@ jobs:
         # sources so the deployed site always matches architecture/*.py.
         run: just diagrams
 
+      - name: Verify diagrams are up to date
+        # Fails if a committed SVG drifts from what the sources produce - catches a
+        # contributor editing architecture/*.py without committing the regenerated SVG.
+        run: git diff --exit-code -- public/assets/diagrams
+
       - name: Build site
         run: npm run build
         env:

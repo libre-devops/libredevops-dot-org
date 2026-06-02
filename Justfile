@@ -26,8 +26,9 @@ preview: build
     npm run serve
 
 # Regenerate all architecture diagrams as SVG into public/assets/diagrams/
+# Skips diagram_post.py - that is the shared post-processing module, not a diagram.
 diagrams:
-    cd architecture && uv sync --quiet && for f in *.py; do echo "rendering $f"; uv run python "$f"; done
+    cd architecture && uv sync --quiet && for f in *.py; do [ "$f" = "diagram_post.py" ] && continue; echo "rendering $f"; uv run python "$f"; done
 
 # Type check
 typecheck:

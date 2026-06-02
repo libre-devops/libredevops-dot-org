@@ -42,6 +42,14 @@ const projects: Project[] = [
         docs: '/docs/documents/bash-standards',
     },
     {
+        title: 'CI/CD Standards',
+        description:
+            'Enterprise CI/CD and secure SDLC standards. Covers pipeline stages, trunk-based branching and pull-request gates, OIDC identity, secret scanning and git-leak prevention, SAST and dependency scanning, supply-chain hardening, build-once artifacts, and gated multi-environment deployment. Language-agnostic, with GitHub Actions as the worked example.',
+        tags: ['CI/CD', 'DevSecOps', 'SDLC', 'GitHub Actions'],
+        repo: 'https://github.com/libre-devops',
+        docs: '/docs/documents/cicd-standards',
+    },
+    {
         title: 'PowerShell Standards',
         description:
             'Production-grade standards for authoring, structuring, testing, and operating PowerShell. Covers coding style and naming, strict mode and structured error handling, logging, OpenTelemetry tracing, Azure Monitor telemetry sync, Pester testing, module publishing, and CI/CD. Targets PowerShell 7.4+.',

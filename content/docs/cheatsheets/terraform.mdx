@@ -11,6 +11,8 @@ Advanced Terraform patterns for Azure infrastructure. Covers the language deeply
 >
 > **Last reviewed:** May 2026
 
+> **Portability:** The examples use Azure (`azurerm`), but the language patterns - `for_each`, dynamic blocks, expressions, lifecycle, state, testing - are provider-agnostic and apply just as well to `aws`, `google`, or any other provider. They also apply unchanged to **OpenTofu** (the open-source fork) and to orchestrators such as **Terragrunt** and **Atmos** - same HCL, same rules. Where a snippet is version-gated, use the equivalent OpenTofu release.
+
 ---
 
 ## Provider & Authentication

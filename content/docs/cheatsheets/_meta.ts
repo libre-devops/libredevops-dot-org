@@ -5,6 +5,7 @@ export default {
     'azure-cheatsheet':    'Azure',
     'azure-devops-cheatsheet': 'Azure DevOps',
     'bash-cheatsheet':     'Bash',
+    'bicep-cheatsheet':    'Bicep',
     'cli-utilities-cheatsheet': 'CLI Utilities',
     'containers-cheatsheet': 'Containers',
     'developer-environment-cheatsheet': 'Developer Environment',
