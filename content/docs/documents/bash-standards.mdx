@@ -584,7 +584,8 @@ jobs:
           submodules: recursive          # pull in bats helper libraries
 
       - name: ShellCheck
-        uses: ludeeus/action-shellcheck@master
+        # Pin third-party actions to a full commit SHA, never a branch or tag.
+        uses: ludeeus/action-shellcheck@00cae500b08a931fb5698e11e79bfbd38e612a38 # v2.0.0
         with:
           scandir: ./bin
 

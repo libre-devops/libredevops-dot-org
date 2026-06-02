@@ -982,7 +982,7 @@ One state file per application component per environment. Resources that change 
 
 HCP Terraform is not required to use Terraform, but it is strongly recommended for production. It eliminates local state management, provides a single source of truth, and enforces a review-and-approve workflow.
 
-#### Terraform Stacks (GA - requires Terraform 1.13+)
+#### Terraform Stacks (GA - HCP Terraform feature)
 
 [Terraform Stacks](https://developer.hashicorp.com/terraform/language/stacks) is an HCP Terraform feature (requires HCP subscription) that composes multiple configurations into a single deployable unit. Each component maintains its own state file and applies independently while sharing outputs declaratively through the Stack deployment configuration.
 
@@ -1500,7 +1500,8 @@ jobs:
       - run: tflint --recursive
 
       - name: Trivy security scan
-        uses: aquasecurity/trivy-action@master
+        # Pin third-party actions to a full commit SHA, never a branch or tag.
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: config
           scan-ref: .

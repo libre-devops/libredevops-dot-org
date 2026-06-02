@@ -68,16 +68,8 @@ jobs:
       - name: Set up Homebrew
         uses: Homebrew/actions/setup-homebrew@main
 
-      - name: Install Graphviz (pinned to 15.0.0)
-        # Pinned to the homebrew-core formula commit that ships graphviz 15.0.0 so
-        # diagram rendering is reproducible. To bump: pick a newer commit of
-        # Formula/g/graphviz.rb and update the SHA below.
-        env:
-          HOMEBREW_NO_AUTO_UPDATE: 1
-          HOMEBREW_NO_INSTALL_FROM_API: 1
-        run: |
-          brew install "https://raw.githubusercontent.com/Homebrew/homebrew-core/3a5de9e5fbf32ce1438b6ea1dbdba0252ab0d6d0/Formula/g/graphviz.rb"
-          dot -V
+      - name: Install Graphviz
+        run: brew install graphviz
 
       - name: Generate architecture diagrams
         # Regenerates SVGs into public/assets/diagrams/ from the diagram-as-code
