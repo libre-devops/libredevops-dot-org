@@ -1843,6 +1843,14 @@ function Get-RequiredEnv {
 $clientId, $secret, $tenantId = Get-RequiredEnv AZURE_CLIENT_ID AZURE_CLIENT_SECRET AZURE_TENANT_ID
 ```
 
+### Watch a file for content changes by hash
+
+One-liner that polls a file every 5 seconds and reports whether its content changed, printing the new hash when it does.
+
+```powershell
+$h=''; while ($true) { $n=(Get-FileHash 'C:\path\to\file' -Algorithm SHA256).Hash; $t=Get-Date -Format 'yyyy-MM-dd HH:mm:ss'; if ($n -eq $h) { "[$t] Content unchanged ($n)" } else { "[$t] Content changed! ($n)"; $h=$n }; Start-Sleep 5 }
+```
+
 ### Script execution time
 
 ```powershell

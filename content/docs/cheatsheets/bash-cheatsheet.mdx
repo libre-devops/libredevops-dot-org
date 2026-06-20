@@ -992,6 +992,9 @@ du -sh */ | sort -rh | head -20
 
 # Watch a command every 2 seconds
 watch -n2 'kubectl get pods'
+
+# Watch a file for content changes by hash, polling every 5s
+h=""; while sleep 5; do n=$(sha256sum /path/to/file | cut -d' ' -f1); t=$(date '+%F %T'); [[ "$n" == "$h" ]] && echo "[$t] Content unchanged ($n)" || { echo "[$t] Content changed! ($n)"; h="$n"; }; done
 ```
 
 
