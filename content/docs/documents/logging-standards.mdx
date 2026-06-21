@@ -1,0 +1,410 @@
+---
+title: Logging Standards
+description: Enterprise, language-agnostic standards for application logging - structured JSON over stdout, canonical log levels and severity mapping, ISO-8601 UTC timestamps, trace correlation, secret and PII hygiene, and exporting to OpenTelemetry, Azure Monitor / Application Insights, and AWS CloudWatch. With a real-world PowerShell reference implementation.
+---
+
+# Logging Standards
+
+An opinionated, production-grade standard for **application logging**: what a log record must contain, how it is serialised, how it is emitted, and how it reaches an observability backend. It is deliberately language-agnostic - the rules apply equally to PowerShell, C#, Python, Go, TypeScript/Node, Bash, and Java - and grounded in the OpenTelemetry logs data model so that the same records ship to OpenTelemetry, Azure Monitor / Application Insights, or AWS CloudWatch without rework.
+
+> **Scope:** Application and automation logs - the diagnostic event stream a service or script emits about its own behaviour. It does **not** cover audit logs (immutable, compliance-retained, separate pipeline) or metrics and traces, except where logs must correlate with them. Examples use the canonical field names from the [OpenTelemetry log data model](https://opentelemetry.io/docs/specs/otel/logs/data-model/).
+>
+> **Grounding:** [OpenTelemetry logs data model](https://opentelemetry.io/docs/specs/otel/logs/data-model/) · [OTel semantic conventions](https://opentelemetry.io/docs/specs/semconv/) · [RFC 5424 syslog severities](https://www.rfc-editor.org/rfc/rfc5424) · [Azure Monitor Logs Ingestion API](https://learn.microsoft.com/en-us/azure/azure-monitor/logs/logs-ingestion-api-overview).
+
+---
+
+## Why a logging standard?
+
+Logs are the highest-cardinality, most ad-hoc signal a system produces, and the one engineers reach for first during an incident. Left ungoverned, every service invents its own format, timezone, level vocabulary, and field names - and the aggregator becomes a pile of opaque strings you can only `grep`. A standard turns logs into **queryable, correlatable, machine-parseable events**:
+
+- An on-call engineer can filter by `level`, `service.name`, and `trace_id` across every service, not just the one they wrote.
+- A single log line can be joined to the distributed trace and the metric spike that accompanied it.
+- Backends index fields instead of re-parsing free text, so queries are fast and cheap.
+- Alerting rules are stable because the level vocabulary and field names never change.
+- Switching or adding a backend (OTel Collector, Azure Monitor, CloudWatch) is a transport change, not a rewrite, because the record shape is backend-neutral.
+
+The cost of getting this wrong compounds: unstructured logs are re-parsed at ingestion (expensive and brittle), ambiguous timestamps make correlation impossible, and a leaked secret in a log line is a security incident with an indefinite blast radius.
+
+---
+
+## Core principles
+
+These are non-negotiable. Everything else in this document elaborates on them.
+
+1. **Structured, not stringly-typed.** Every log record is a structured object (a map of fields), serialised as JSON. Never log a pre-formatted human sentence as the only artifact.
+2. **One JSON object per line.** Emit newline-delimited JSON (NDJSON / `jsonl`) to `stdout`. One event = one line = one parse.
+3. **Machines first, humans second.** The default format is machine-parseable JSON. A human-readable coloured format is a developer-experience opt-in for interactive terminals, never the production default.
+4. **UTC, ISO-8601, always.** Timestamps are RFC 3339 / ISO-8601 with millisecond (or finer) precision, in UTC, with an explicit offset.
+5. **A fixed level vocabulary.** Use the canonical levels below and nothing else. Levels map deterministically to OpenTelemetry `SeverityNumber`.
+6. **Correlate by default.** When a trace context is active, every record carries `trace_id` and `span_id`.
+7. **Logs are not a data store and not a vault.** Never log secrets or unmasked PII. Never use logs as the system of record for business data.
+8. **Configure at the edge, log everywhere.** Logging level, format, and destination are decided once at the process entry point (from environment/config), never hard-coded inside library functions.
+9. **Logging must never break the program.** Emitting a log - including at `ERROR` - is side-effect-only. It must not throw, must not corrupt the function's return value, and must not block on the network in the hot path.
+
+---
+
+## The structured log record
+
+A log record is a flat (or shallowly-nested) JSON object. The following fields are standardised. Names follow OpenTelemetry semantic conventions where one exists so records map cleanly to the OTel data model and to backend schemas.
+
+| Field | Required | Type | Description |
+|:--|:--|:--|:--|
+| `timestamp` | **Yes** | string | Event time, RFC 3339 / ISO-8601, UTC, ≥ millisecond precision (e.g. `2026-06-21T14:32:08.123Z`). Maps to OTel `Timestamp`. |
+| `level` | **Yes** | string | Canonical severity text: `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`, `FATAL`. Maps to OTel `SeverityText`. |
+| `severity_number` | Recommended | int | OTel `SeverityNumber` (see mapping). Lets backends sort/filter by severity without parsing text. |
+| `message` | **Yes** | string | Human-readable event description. The constant part; variable data goes in fields, not interpolated here. Maps to OTel `Body`. |
+| `service.name` | **Yes** | string | Logical service or component emitting the record (e.g. `payments-api`, `LibreDevOpsHelpers`). Maps to OTel resource attribute. |
+| `service.version` | Recommended | string | Build/semver of the emitter. Essential for "started after the 2.3.1 deploy" queries. |
+| `deployment.environment` | Recommended | string | `prod`, `staging`, `dev`. |
+| `trace_id` | When in trace | string | W3C trace id (32 hex chars). Joins the log to its distributed trace. Maps to OTel `TraceId`. |
+| `span_id` | When in trace | string | W3C span id (16 hex chars). Maps to OTel `SpanId`. |
+| `host.name` | Recommended | string | Machine/container/pod identity. |
+| `error.type` | On error | string | Exception class / error category. |
+| `error.stack` | On error | string | Stack trace, when logging a caught exception. |
+| *(attributes)* | Optional | any | Any number of additional, domain-specific structured fields (e.g. `order_id`, `resource_group`, `duration_ms`). Map to OTel log `Attributes`. |
+
+A canonical record:
+
+```json
+{"timestamp":"2026-06-21T14:32:08.123Z","level":"ERROR","severity_number":17,"message":"Failed to create resource group","service.name":"LibreDevOpsHelpers","service.version":"2.1.0","deployment.environment":"prod","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","span_id":"00f067aa0ba902b7","resource_group":"rg-prod-uks","error.type":"Azure.RequestFailedException"}
+```
+
+> **Rule:** `message` is the *constant* description of an event; identifying and variable data are separate fields. Log `{"message":"order rejected","order_id":4412,"reason":"insufficient_funds"}`, never `{"message":"order 4412 rejected: insufficient funds"}`. Constant messages are groupable, alertable, and translatable; interpolated ones are not.
+
+### Field naming
+
+- Use a single, consistent convention per organisation. This standard uses OTel-style dotted namespaces for resource/semantic fields (`service.name`, `host.name`) and `snake_case` for domain attributes (`order_id`, `duration_ms`). Pick one and enforce it; do not mix `userId`, `user_id`, and `user.id` across services.
+- Never reuse a field name for two different types (a field that is sometimes a string and sometimes an object breaks backend indexing).
+- Reserve and never overload the standardised names above.
+
+---
+
+## Why JSON, and why one object per line
+
+**Why structured JSON at all.** Free-text logs must be re-parsed at ingestion with fragile regular expressions (Grok patterns), which break the moment a developer rewords a message. JSON moves parsing to the producer, where the schema is known: fields arrive typed, named, and ready to index. Every modern backend - the OTel Collector, Loki, Elasticsearch, Splunk, Azure Monitor, CloudWatch Logs - ingests JSON natively and exposes its fields as queryable columns.
+
+**Why one object per line (NDJSON).** A log stream is unbounded and read incrementally. Newline-delimited JSON lets a collector tail the stream and parse each event independently: a newline is an unambiguous record boundary, no streaming JSON parser or array-close needed, and a single corrupt line is skipped without poisoning the rest. Pretty-printed (multi-line, indented) JSON breaks this - a log shipper reading line-by-line sees each line as a separate, invalid record. **Indented JSON is a local-debugging affordance only and must never be the production output format.**
+
+**Why `stdout`.** In the [twelve-factor](https://12factor.net/logs) model a process writes its event stream, unbuffered, to `stdout` and stays oblivious to routing. The execution environment - the container runtime, systemd, the platform - captures the stream and the collector ships it. This decouples the application from the destination: the same binary logs to a file in dev, to the Docker json-file driver in CI, and to a DaemonSet collector in Kubernetes, with zero code change.
+
+> **Rule:** Diagnostics never pollute the data path. In shells and pipelines, the success/`stdout` channel may carry a function's actual return value; route log lines to a dedicated stream (stderr, or a language's information/log stream) so logging never corrupts a caller that captures output. The reference implementation below does exactly this.
+
+---
+
+## Timestamps
+
+```
+2026-06-21T14:32:08.123Z          ✅ ISO-8601 / RFC 3339, UTC, millisecond precision
+2026-06-21T14:32:08.123+00:00     ✅ explicit zero offset is equally valid
+2026-06-21 14:32:08               ❌ no timezone - ambiguous and unjoinable
+21/06/2026 2:32 PM                 ❌ locale-dependent, unsortable, lossy
+1750516328                         ❌ bare epoch - human-opaque, precision unclear
+```
+
+- **UTC, always.** Local time with DST shifts makes logs from different regions impossible to order and creates a duplicated/missing hour twice a year. Convert to local at display time only.
+- **ISO-8601 / RFC 3339 with an explicit offset (`Z` or `+00:00`).** It is lexicographically sortable (string sort = chronological sort), unambiguous, and parsed natively by every backend.
+- **Millisecond precision minimum.** Microsecond/nanosecond where available. Sub-second ordering matters when correlating events inside a single request.
+- **Stamp at the moment of the event,** not at flush or ingestion time. The producer owns the timestamp; the backend's receive-time is a separate, less trustworthy field.
+
+> **Rule:** One timestamp field, named consistently, in UTC ISO-8601. Backends expect this: Azure Monitor's `TimeGenerated` and CloudWatch's event timestamp both parse RFC 3339 directly, and OTel's `Timestamp` is a UTC instant.
+
+---
+
+## Log levels
+
+Use exactly these six. They map one-to-one onto the OpenTelemetry `SeverityNumber` ranges and onto RFC 5424 syslog severities, so records are portable across every backend.
+
+| Level | OTel `SeverityNumber` | Meaning | Use for |
+|:--|:--|:--|:--|
+| `TRACE` | 1 | Finest-grained, per-step flow | Loop iterations, deep protocol detail. Off outside targeted debugging. |
+| `DEBUG` | 5 | Developer diagnostics | Variable values, branch decisions. Off in production by default. |
+| `INFO` | 9 | Normal, noteworthy events | Service started, request handled, deployment completed. The default production floor. |
+| `WARN` | 13 | Recoverable / degraded | Retry succeeded, fell back to secondary, deprecated path hit. Nothing failed yet. |
+| `ERROR` | 17 | Operation failed | A request, job, or transaction did not complete. Needs attention; service still up. |
+| `FATAL` | 21 | Process is going down | Unrecoverable; the process is about to exit. Pages someone. |
+
+**Guidance:**
+
+- **`INFO` is the production floor.** Run production at `INFO`; raise to `DEBUG`/`TRACE` transiently and surgically when investigating. The minimum level is operator-controlled via environment/config (see the reference implementation), never a code change.
+- **`WARN` is not "minor error".** It means *handled and recovered*. If someone must act, it is `ERROR`. If nothing is wrong, it is `INFO`. An always-firing `WARN` is noise that trains responders to ignore the channel.
+- **`ERROR` means an operation failed**, not "an exception was caught". A caught-and-recovered exception is `WARN` or `INFO`. Reserve `ERROR` for work that did not complete.
+- **Semantic aliases collapse to a canonical level.** A friendly outcome level such as `SUCCESS` is emitted at `INFO` severity (`SeverityNumber` 9) - it is presentation sugar, not a new severity. The reference implementation does precisely this.
+- **One level scale, everywhere.** Do not invent `NOTICE`, `VERBOSE`, `CRITICAL`, `SEVERE` per service. If you need syslog's `NOTICE`/`CRITICAL`, map them onto this scale at the boundary.
+
+---
+
+## Correlation: tying logs to traces
+
+A log line is far more valuable when it can be joined to the distributed trace it occurred within. The OpenTelemetry context propagation model makes this automatic if you cooperate:
+
+- When a span is active, read the current trace context and stamp **`trace_id`** and **`span_id`** onto every record. Backends (Azure Monitor, CloudWatch, Grafana/Tempo, Jaeger) use these to render "show me the logs for this trace" with no extra work.
+- Propagate the W3C `traceparent` header across service boundaries so the `trace_id` is stable end-to-end.
+- Where logs and traces share a backend (Application Insights, an OTel-native stack), correlation is a built-in pivot; where they do not, `trace_id` is still the join key in your query language.
+
+> **Rule:** If your runtime has an ambient span (most do, via OTel SDKs or .NET `Activity.Current`), capture `trace_id`/`span_id` in the logging function once, centrally. Do not ask every call site to pass them.
+
+---
+
+## What never goes in a log
+
+Logs fan out to aggregators, dashboards, cold storage, and third-party SaaS, and are retained for months. Treat every record as potentially world-readable and permanent.
+
+- **Never log secrets** - passwords, tokens, API keys, connection strings, private keys, `SecureString`/credential plaintext. Mask at the call site (`****`, last-4, or a hash). The log backend is not a vault.
+- **Never log unmasked PII / sensitive data** - full card numbers, government IDs, health data, full auth headers. Redact, tokenise, or hash to satisfy GDPR/PCI-DSS/HIPAA. Prefer logging a stable opaque user id over an email address.
+- **Never build JSON by string concatenation.** Always serialise via a real JSON encoder so values are escaped - hand-built JSON breaks on a quote or newline in user input and is a log-injection vector.
+- **Cap field sizes.** Truncate large payloads (request bodies, blobs). Unbounded fields blow up ingestion cost and can DoS the pipeline.
+
+> **Rule:** Redaction is the producer's job, applied before serialisation. Do not rely on the backend to scrub - by the time data reaches it, it has already crossed the wire and may be cached or indexed.
+
+---
+
+## Exporting: getting logs to a backend
+
+Because the record shape is backend-neutral, the application's job ends at "emit NDJSON to stdout." A **collector** owns transport, batching, retries, and backend-specific formatting. This keeps the app free of vendor SDKs in the log path and lets you change or fan out destinations centrally.
+
+### OpenTelemetry (the neutral target)
+
+Model logs on the OTel log data model and they ship anywhere. Two common patterns:
+
+1. **Collector tails stdout (recommended for most services).** The application writes NDJSON; the [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/)'s `filelog` receiver tails it, a `json` parser lifts your fields into the record, and an operator maps `level` → `SeverityNumber`. From there an OTLP (or vendor) exporter forwards to any backend. The app needs **no OTel SDK** for logs.
+
+```yaml
+# otel-collector - tail NDJSON, map our fields onto the OTel log model
+receivers:
+  filelog:
+    include: [ /var/log/app/*.jsonl ]
+    operators:
+      - type: json_parser
+        timestamp: { parse_from: attributes.timestamp, layout_type: gotime, layout: "2006-01-02T15:04:05.999Z07:00" }
+        severity:  { parse_from: attributes.level }            # TRACE/DEBUG/INFO/WARN/ERROR/FATAL → SeverityNumber
+exporters:
+  otlp:
+    endpoint: collector.observability:4317
+service:
+  pipelines:
+    logs: { receivers: [filelog], exporters: [otlp] }
+```
+
+2. **SDK emits OTLP directly.** A service already instrumented with an OTel SDK can use the logs SDK/bridge to export `LogRecord`s over OTLP, populating `Timestamp`, `SeverityNumber`/`SeverityText`, `Body`, `Attributes`, `Resource`, and `TraceId`/`SpanId` from the same fields above. Prefer this only where you already run the SDK for traces; otherwise the Collector-tails-stdout pattern is simpler and decoupled.
+
+> **Rule:** Keep the application backend-agnostic. Emit the standard record; let the Collector translate. Do not scatter `Azure.Monitor`/`CloudWatch` SDK calls through business code.
+
+### Azure Monitor / Application Insights
+
+- **Custom structured logs → Logs Ingestion API.** Ship records to a custom table (`*_CL`) in a Log Analytics workspace via a Data Collection Endpoint (DCE) and Data Collection Rule (DCR). This is the modern, supported route (it supersedes the deprecated HTTP Data Collector API). The destination table requires a **`TimeGenerated`** column - map your `timestamp` to it. Authenticate with **managed identity / workload identity** holding *Monitoring Metrics Publisher* on the DCR; never a workspace shared key.
+- **Correlated traces + logs → Application Insights.** App Insights does not accept raw OTLP on a public endpoint; use the **Azure Monitor OpenTelemetry distro/exporter** (or the Collector's `azuremonitor` exporter) so `trace_id`/`span_id` light up the end-to-end transaction view. Configure via `APPLICATIONINSIGHTS_CONNECTION_STRING` from config; never paste an instrumentation key into source.
+- Because your records already carry ISO-8601 UTC timestamps, canonical levels, and `trace_id`/`span_id`, the mapping into KQL (`TimeGenerated`, `SeverityLevel`, `OperationId`) is mechanical.
+
+### AWS CloudWatch
+
+- **CloudWatch Logs auto-discovers JSON fields.** Emit the same NDJSON; CloudWatch parses each line and exposes your fields to **Logs Insights** queries (`fields @timestamp, level, message | filter level = "ERROR"`). No format change.
+- **Collector route:** the [AWS Distro for OpenTelemetry (ADOT)](https://aws-otel.github.io/) Collector receives your logs/traces and exports to CloudWatch Logs and X-Ray, keeping the application vendor-neutral - the same NDJSON that feeds Azure feeds AWS.
+- For metrics derived from logs, the CloudWatch Embedded Metric Format (EMF) is a JSON superset; the base record stays standard and EMF metadata is added at the edge when needed.
+
+> **Rule:** The application emits one record shape. Azure, AWS, and OTel are *destinations* selected by the collector/exporter, not formats the application knows about. This is what makes the standard portable.
+
+---
+
+## Reference implementation - `Write-LdoLog` (PowerShell)
+
+The [LibreDevOpsHelpers](https://www.powershellgallery.com/packages/LibreDevOpsHelpers) module is a real-world implementation of this standard. Its `Write-LdoLog` is the single logging entry point for every function in the module. It is worth reading as a concrete, production application of every rule above - in a language (PowerShell) that has no built-in structured logger.
+
+**How it satisfies the standard:**
+
+| Standard | How `Write-LdoLog` implements it |
+|:--|:--|
+| Structured JSON, one object per line | Default format is compact JSON via `ConvertTo-Json -Compress` - one NDJSON object per call. |
+| Machines first, humans opt-in | `Json` is the default; `Text` (coloured) and `JsonIndented` are explicit opt-ins for local debugging only. |
+| UTC ISO-8601 timestamps | `(Get-Date).ToUniversalTime().ToString('o')` - round-trip `o` format is RFC 3339 UTC. |
+| Fixed level vocabulary | `DEBUG, INFO, SUCCESS, WARN, ERROR`, validated by `[ValidateSet]`. |
+| Semantic alias collapses to canonical | `SUCCESS` is gated at the same threshold as `INFO` and routed to the information stream - presentation sugar over `INFO` severity. |
+| Configure at the edge | Level and format seed from `LDO_LOG_LEVEL` / `LDO_LOG_FORMAT` env vars, with `Set-LdoLogLevel` / `Set-LdoLogFormat` overrides - no code change to retune. |
+| Logging never corrupts output | Each level routes to a non-success stream (`Write-Debug`/`Write-Information`/`Write-Warning`/`Write-Error`); nothing touches stdout/stream 1. |
+| Logging never throws | `ERROR` is emitted with `-ErrorAction Continue` (explicitly non-terminating) even under `$ErrorActionPreference = 'Stop'`; the caller decides whether to throw. |
+| Extensible attributes | `-Data` merges arbitrary structured properties (correlation ids, resource names) into the JSON record. |
+
+```powershell
+Set-StrictMode -Version Latest
+
+# Module-scoped minimum level. Messages below this are suppressed. DEBUG also
+# respects $DebugPreference, so it stays hidden unless the caller opts in.
+$script:LdoLogLevels = @{ DEBUG = 0; INFO = 1; SUCCESS = 1; WARN = 2; ERROR = 3 }
+
+# Minimum level and output format. Both can be seeded from the environment so that
+# operators can control logging in CI/CD without touching code, and both fall back to
+# sensible defaults (show everything; structured JSON) when unset or invalid.
+$script:LdoMinLogLevel = if ($env:LDO_LOG_LEVEL -and $script:LdoLogLevels.ContainsKey($env:LDO_LOG_LEVEL.ToUpperInvariant())) {
+    $env:LDO_LOG_LEVEL.ToUpperInvariant()
+}
+else {
+    'DEBUG'
+}
+
+$script:LdoLogFormat = switch -Regex ($env:LDO_LOG_FORMAT) {
+    '^(?i)jsonindented$' { 'JsonIndented'; break }
+    '^(?i)text$'         { 'Text'; break }
+    default              { 'Json' }   # covers 'json', unset, and any unrecognised value
+}
+
+function Write-LdoLog {
+    <#
+    .SYNOPSIS
+        Writes a levelled, timestamped log message to the correct PowerShell stream.
+    .DESCRIPTION
+        The single logging entry point for all LibreDevOpsHelpers modules. By default
+        each message is rendered as one compact JSON object (newline-delimited JSON)
+        carrying a UTC ISO-8601 timestamp, level, invocation and message, plus any extra
+        properties supplied via -Data. Each level is routed to a stream that never
+        touches the success (output) pipeline, so the function is safe to call from
+        inside other functions without corrupting their return values.
+    #>
+    [CmdletBinding()]
+    [OutputType([void])]
+    param(
+        [Parameter(Mandatory)][ValidateSet('DEBUG', 'INFO', 'SUCCESS', 'WARN', 'ERROR')]
+        [string]$Level,
+
+        [Parameter(Mandatory)][AllowEmptyString()]
+        [string]$Message,
+
+        [string]$InvocationName,
+
+        [hashtable]$Data,
+
+        [ValidateSet('Json', 'JsonIndented', 'Text')]
+        [string]$Format
+    )
+
+    # Default the invocation name to the immediate caller so records are attributable.
+    if (-not $InvocationName) {
+        $caller = (Get-PSCallStack)[1]
+        $InvocationName = if ($caller -and $caller.Command) { $caller.Command } else { '<script>' }
+    }
+
+    # Honour the module-scoped minimum level - drop anything below the threshold.
+    if ($script:LdoLogLevels[$Level] -lt $script:LdoLogLevels[$script:LdoMinLogLevel]) {
+        return
+    }
+
+    if (-not $Format) { $Format = $script:LdoLogFormat }
+
+    $now = Get-Date
+
+    if ($Format -eq 'Text') {
+        $timestamp = $now.ToString('yyyy-MM-dd HH:mm:ss')
+        $line = '{0} [{1}] [{2}] {3}' -f $timestamp, $Level, $InvocationName, $Message
+    }
+    else {
+        # ISO-8601 in UTC ("o" round-trip format) so downstream log systems can parse
+        # an unambiguous, timezone-correct timestamp.
+        $record = [ordered]@{
+            timestamp  = $now.ToUniversalTime().ToString('o')
+            level      = $Level
+            invocation = $InvocationName
+            message    = $Message
+        }
+        if ($Data) {
+            foreach ($key in $Data.Keys) { $record[[string]$key] = $Data[$key] }
+        }
+        # Compact (one object per line) is the default for log ingestion. JsonIndented is an
+        # opt-in for local debugging and is deliberately not newline-delimited.
+        if ($Format -eq 'JsonIndented') {
+            $line = $record | ConvertTo-Json -Depth 10
+        }
+        else {
+            $line = $record | ConvertTo-Json -Depth 10 -Compress
+        }
+    }
+
+    # Route every level to a stream that never touches stdout (stream 1), so logging
+    # cannot corrupt the return value of a function that called us.
+    switch ($Level) {
+        'DEBUG'   { Write-Debug $line }
+        'INFO'    { Write-LdoInfoLine -Line $line -Level $Level -Format $Format -Color Cyan }
+        'SUCCESS' { Write-LdoInfoLine -Line $line -Level $Level -Format $Format -Color Green }
+        'WARN'    { Write-Warning $line }
+        # Explicitly non-terminating: logging an error must never throw on its own,
+        # even when the caller has $ErrorActionPreference = 'Stop'. The caller decides.
+        'ERROR'   { Write-Error $line -ErrorAction Continue }
+    }
+}
+```
+
+Usage - the same call works in interactive (`Text`) and CI (`Json`) contexts; only `LDO_LOG_FORMAT` changes:
+
+```powershell
+Write-LdoLog -Level INFO  -Message 'Starting deployment'
+Write-LdoLog -Level INFO  -Message 'Created resource group' -Data @{ resourceGroup = 'rg-prod'; correlationId = $cid }
+Write-LdoLog -Level ERROR -Message "Failed: $($_.Exception.Message)" -Data @{ exitCode = $LASTEXITCODE }
+```
+
+A `Json`-mode record from the second call is ready for any backend:
+
+```json
+{"timestamp":"2026-06-21T14:32:08.123Z","level":"INFO","invocation":"New-LdoResourceGroup","message":"Created resource group","resourceGroup":"rg-prod","correlationId":"e2c4..."}
+```
+
+> **Bridging to the canonical schema:** the module keeps field names lean (`invocation` rather than `service.name`) for ergonomics. When shipping to a shared backend, add `service.name`/`service.version`/`trace_id` either via `-Data` at the entry point or with a Collector `transform` operator that renames `invocation` and injects resource attributes - the application stays simple and the standard schema is satisfied at the edge.
+
+---
+
+## Operational guidance
+
+- **Level by environment.** `prod` at `INFO`; `dev`/debugging at `DEBUG`/`TRACE`. Toggle via env/config, never a redeploy.
+- **Sampling, not silence.** For very high-volume `INFO`/`DEBUG`, sample (e.g. 1-in-N) rather than dropping a level wholesale, so you keep a representative trail. Always keep 100% of `ERROR`/`FATAL`.
+- **Cost is a function of volume × retention × cardinality.** JSON fields are cheap to query but each indexed field has a cost; do not promote unbounded high-cardinality values (raw user input, GUIDs per request) to indexed columns unless you query them.
+- **Hot/cold tiering.** Keep recent logs in a fast queryable tier (Log Analytics, CloudWatch); archive older logs to cheap storage (Blob/S3) per your retention policy. Audit/compliance logs follow a separate, immutable pipeline.
+- **Don't block the request path.** Buffer and batch to the backend asynchronously; flush on shutdown. A logging backend outage must degrade to local stdout, never stall or crash the app.
+- **Clocks must be synced.** Correlation across services assumes NTP-disciplined clocks. Skew shows up as impossible event ordering.
+
+---
+
+## Anti-patterns
+
+- 🚨 **Unstructured / free-text logs** - `"order 4412 failed for user bob@x.com"`. Unqueryable, un-alertable, and it just leaked PII. Emit fields, not sentences.
+- 🚨 **Logging secrets or unmasked PII** - tokens, connection strings, card numbers in a record. The backend is not a vault and retains for months. Redact before serialising.
+- 🚨 **Hand-built JSON via string concatenation** - breaks on a quote/newline in user input and is a log-injection vector. Always use a real JSON encoder.
+- 🚨 **Logging to stdout's data channel in a pipeline** - diagnostics that corrupt a function's return value or a piped command's output. Use a non-success stream (stderr / information).
+- 🚨 **Logging that can throw** - an exception inside the logger takes down the caller. Logging is side-effect-only; `ERROR` records must not terminate.
+- ⚠️ **Local time / no timezone** - unsortable and unjoinable across regions; DST duplicates or drops an hour. UTC ISO-8601 with an explicit offset, always.
+- ⚠️ **Pretty-printed JSON in production** - multi-line records break line-based collectors. Compact NDJSON in prod; indented is local-debug only.
+- ⚠️ **Inventing per-service level names** - `NOTICE`, `VERBOSE`, `SEVERE`. Use the one canonical six-level scale so alerts and filters are portable.
+- ⚠️ **`WARN` as "small error" / `ERROR` as "caught an exception"** - trains responders to ignore the channel. `WARN` = recovered; `ERROR` = operation failed.
+- ⚠️ **Variable data interpolated into `message`** - kills grouping and alerting. Constant `message`, variable data in fields.
+- 🔬 **Vendor SDK calls scattered through business code** - couples the app to one backend. Emit the neutral record; let a collector translate to Azure/AWS/OTLP.
+- 🔬 **Configuring level/format inside library functions** - makes behaviour untunable in production. Decide once at the process entry point from env/config.
+- 🔬 **Unbounded fields** - logging whole request bodies/blobs balloons ingestion cost and can DoS the pipeline. Truncate and cap.
+
+---
+
+## Compliance checklist
+
+A service meets this standard when:
+
+- [ ] Every log record is JSON, one object per line (NDJSON), on stdout.
+- [ ] `timestamp` is RFC 3339 / ISO-8601, UTC, ≥ ms precision, stamped at event time.
+- [ ] `level` is one of `TRACE/DEBUG/INFO/WARN/ERROR/FATAL` and maps to OTel `SeverityNumber`.
+- [ ] `message` is constant; variable data is in separate fields.
+- [ ] `service.name` (and ideally `service.version`, `deployment.environment`) is present.
+- [ ] `trace_id`/`span_id` are present whenever a trace context is active.
+- [ ] No secrets or unmasked PII appear in any field; redaction happens before serialisation.
+- [ ] Minimum level and output format are set from environment/config at the entry point.
+- [ ] The human-readable/coloured format is opt-in and never the production default.
+- [ ] Logging is side-effect-only: it cannot throw, block the hot path, or corrupt return values.
+- [ ] Records reach the backend via a collector/exporter; the application carries no vendor logging SDK in business code.
+
+---
+
+## See Also
+
+- [OpenTelemetry logs data model](https://opentelemetry.io/docs/specs/otel/logs/data-model/) - the canonical record shape this standard mirrors
+- [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/) - standardised field names
+- [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/) - the receive/transform/export pipeline
+- [RFC 5424 - syslog severities](https://www.rfc-editor.org/rfc/rfc5424) - the level/severity lineage
+- [The Twelve-Factor App - Logs](https://12factor.net/logs) - logs as event streams on stdout
+- [Azure Monitor Logs Ingestion API](https://learn.microsoft.com/en-us/azure/azure-monitor/logs/logs-ingestion-api-overview) - custom structured logs into Log Analytics
+- [Azure Monitor OpenTelemetry](https://learn.microsoft.com/en-us/azure/azure-monitor/app/opentelemetry-enable) - correlated logs/traces in Application Insights
+- [AWS Distro for OpenTelemetry](https://aws-otel.github.io/) - exporting to CloudWatch Logs and X-Ray
+- [LibreDevOpsHelpers on the PowerShell Gallery](https://www.powershellgallery.com/packages/LibreDevOpsHelpers) - the reference implementation
+- [PowerShell Standards](/docs/documents/powershell-standards) - native streams, PSFramework, OTel tracing, Azure telemetry sync
+- [Python Standards](/docs/documents/python-standards) · [Bash Standards](/docs/documents/bash-standards) · [CI/CD Standards](/docs/documents/cicd-standards) - logging in context

@@ -1734,7 +1734,7 @@ terraform_run() {
   terraform fmt -recursive -check && \
   terraform plan -out tfplan.plan && \
   terraform show -json tfplan.plan > tfplan.json && \
-  { command -v tfsec    &>/dev/null && tfsec . --force-all-dirs; } && \
+  { command -v trivy    &>/dev/null && trivy config .; } && \
   { command -v checkov  &>/dev/null && checkov -f tfplan.json; } && \
   echo "✓ All checks passed"
 

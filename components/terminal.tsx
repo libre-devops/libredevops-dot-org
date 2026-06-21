@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 
 const commands: { cmd: string; output: string }[] = [
     { cmd: 'terraform plan -out=tfplan', output: 'Plan: 12 to add, 0 to change, 0 to destroy.' },
-    { cmd: 'tfsec ./terraform', output: 'No problems detected!' },
+    { cmd: 'trivy config ./terraform', output: 'Tests: 24 (SUCCESSES: 24, FAILURES: 0)' },
     { cmd: 'uv run pytest -q', output: '47 passed in 2.91s' },
     { cmd: 'helm upgrade --install platform ./charts/platform -n platform', output: 'Release "platform" has been upgraded. Happy Helming!' },
     { cmd: 'ruff check .', output: 'All checks passed!' },

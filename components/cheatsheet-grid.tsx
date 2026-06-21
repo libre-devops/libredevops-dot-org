@@ -34,13 +34,13 @@ const AiIcon = (
 );
 
 const BicepIcon = (
-    <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none"
-        stroke="#0078d4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-        aria-hidden="true" style={{ flexShrink: 0, opacity: 0.85 }}>
-        <path d="M4 13c0-3 2-5 5-5h3a4 4 0 0 1 4 4v0"/>
-        <path d="M16 12a4 4 0 0 1 4 4v4H8v-3a4 4 0 0 0-4-4"/>
-        <path d="M12 8V5a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v3"/>
-    </svg>
+    <img
+        src="/assets/bicep-logo.svg"
+        alt="Bicep"
+        width={28}
+        height={28}
+        style={{ flexShrink: 0, opacity: 0.85 }}
+    />
 );
 
 const TerminalIcon = (

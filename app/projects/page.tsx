@@ -14,6 +14,7 @@ interface Project {
     tags: string[];
     repo: string;
     docs?: string;
+    docsLabel?: string;
 }
 
 const projects: Project[] = [
@@ -48,6 +49,23 @@ const projects: Project[] = [
         tags: ['CI/CD', 'DevSecOps', 'SDLC', 'GitHub Actions'],
         repo: 'https://github.com/libre-devops',
         docs: '/docs/documents/cicd-standards',
+    },
+    {
+        title: 'Logging Standards',
+        description:
+            'Enterprise, language-agnostic standards for application logging. Covers structured JSON over stdout, canonical log levels with OpenTelemetry severity mapping, ISO-8601 UTC timestamps, trace correlation, secret and PII hygiene, and exporting to OpenTelemetry, Azure Monitor / Application Insights, and AWS CloudWatch - with a real-world PowerShell reference implementation.',
+        tags: ['Logging', 'Observability', 'OpenTelemetry', 'Standards'],
+        repo: 'https://github.com/libre-devops',
+        docs: '/docs/documents/logging-standards',
+    },
+    {
+        title: 'PowerShell Helpers',
+        description:
+            'A PowerShell module of reusable helper functions for DevOps automation - covering Azure authentication and resource operations, Terraform orchestration, environment and secret handling, and CI/CD glue. Published to the PowerShell Gallery and importable with Install-Module LibreDevOpsHelpers.',
+        tags: ['PowerShell', 'Module', 'Azure', 'DevOps'],
+        repo: 'https://github.com/libre-devops/powershell-helpers',
+        docs: 'https://www.powershellgallery.com/packages/LibreDevOpsHelpers',
+        docsLabel: 'Gallery',
     },
     {
         title: 'PowerShell Standards',
@@ -114,10 +132,10 @@ export default function ProjectsPage() {
                                             <a
                                                 href={project.docs}
                                                 className="project-card-link project-card-link--docs"
-                                                aria-label={`${project.title} documentation`}
+                                                aria-label={`${project.title} ${project.docsLabel ?? 'documentation'}`}
                                                 {...(project.docs.startsWith('http') ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
                                             >
-                                                Docs
+                                                {project.docsLabel ?? 'Docs'}
                                             </a>
                                         )}
                                     </div>

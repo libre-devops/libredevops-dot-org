@@ -1351,7 +1351,7 @@ terraform providers lock \
 
 The pipeline already runs `tflint` and a Trivy config scan (see Pipelines). Treat those findings, and any organisational policy, as merge-blocking:
 
-- **Misconfiguration scanning** - Trivy / tfsec / Checkov for insecure defaults (public network access, unencrypted storage, permissive NSGs). Fail the build on HIGH/CRITICAL.
+- **Misconfiguration scanning** - Trivy / Checkov for insecure defaults (public network access, unencrypted storage, permissive NSGs). Fail the build on HIGH/CRITICAL.
 - **Policy-as-code** - Conftest/OPA against the plan JSON for org rules (required tags, allowed regions, naming), backed by **Azure Policy** at the platform so drift created outside Terraform is caught too.
 - **Least-privilege apply identity** - the CI workload identity authenticates with OIDC (no stored secret) and holds only the roles its stack needs, scoped to its resource group or subscription, never tenant-wide Owner.
 

@@ -150,7 +150,7 @@ Scan source for insecure patterns (injection, unsafe deserialisation, hard-coded
 Most code is third-party. Scan dependencies for known vulnerabilities and keep them current:
 
 - **Dependabot** (or Renovate) for automated update PRs - patches land continuously, not in a quarterly scramble.
-- Per-ecosystem audit in CI: `pip-audit` / `uv` for Python, `npm audit --audit-level=high` for Node, `trivy fs` for general/lockfile scanning, `tfsec`/`checkov`/`trivy config` for IaC.
+- Per-ecosystem audit in CI: `pip-audit` / `uv` for Python, `npm audit --audit-level=high` for Node, `trivy fs` for general/lockfile scanning, `trivy config`/`checkov` for IaC.
 - Fail the build on HIGH/CRITICAL with a known fix.
 
 ### Supply-chain hardening
