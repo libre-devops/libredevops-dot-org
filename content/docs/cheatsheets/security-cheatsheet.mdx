@@ -1682,6 +1682,223 @@ avml /tmp/memory.raw
 
 ---
 
+## Security as Code (Policy as Code)
+
+Encode security and compliance rules as machine-checkable policy so they run in CI and at admission, not in a reviewer's head. Two engines dominate: **OPA / Rego** (general-purpose, evaluates any JSON - Terraform plans, Dockerfiles, Kubernetes manifests) and **Kyverno** (Kubernetes-native, policies written as YAML resources). Run them shift-left in the pipeline and again as a Kubernetes admission controller for defence in depth.
+
+### OPA / Rego - deny unencrypted storage in a Terraform plan
+
+```rego
+# policy/terraform/encryption.rego
+package terraform.encryption
+
+import future.keywords.in
+
+# conftest feeds the parsed `terraform show -json` plan as input.
+deny[msg] {
+    some change in input.resource_changes
+    change.type == "azurerm_storage_account"
+    not change.change.after.enable_https_traffic_only
+    msg := sprintf("Storage account '%s' must enforce HTTPS-only traffic", [change.address])
+}
+
+deny[msg] {
+    some change in input.resource_changes
+    change.type == "aws_s3_bucket"
+    not change.change.after.server_side_encryption_configuration
+    msg := sprintf("S3 bucket '%s' must define server-side encryption", [change.address])
+}
+```
+
+### Run Rego against a Terraform plan with Conftest
+
+```bash
+terraform plan -out tfplan.binary
+terraform show -json tfplan.binary > tfplan.json
+conftest test --policy policy/terraform tfplan.json
+```
+
+### Rego - block privileged or root containers in a manifest
+
+```rego
+# policy/kubernetes/containers.rego
+package kubernetes.security
+
+import future.keywords.in
+
+deny[msg] {
+    input.kind == "Pod"
+    some c in input.spec.containers
+    c.securityContext.privileged == true
+    msg := sprintf("Container '%s' must not run privileged", [c.name])
+}
+
+deny[msg] {
+    input.kind == "Pod"
+    some c in input.spec.containers
+    not c.securityContext.runAsNonRoot
+    msg := sprintf("Container '%s' must set runAsNonRoot: true", [c.name])
+}
+```
+
+### OPA Gatekeeper - enforce the same rule at admission
+
+```yaml
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8srequiredlabels
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sRequiredLabels
+      validation:
+        openAPIV3Schema:
+          type: object
+          properties:
+            labels:
+              type: array
+              items:
+                type: string
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8srequiredlabels
+        violation[{"msg": msg}] {
+          required := input.parameters.labels
+          provided := {label | input.review.object.metadata.labels[label]}
+          missing := required - provided
+          count(missing) > 0
+          msg := sprintf("missing required labels: %v", [missing])
+        }
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequiredLabels
+metadata:
+  name: must-have-owner
+spec:
+  match:
+    kinds:
+      - apiGroups: [""]
+        kinds: ["Namespace"]
+  parameters:
+    labels: ["owner", "cost-center"]
+```
+
+### Kyverno - validate (reject `:latest` and require resource limits)
+
+```yaml
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: workload-hardening
+spec:
+  validationFailureAction: Enforce   # Audit to report-only, Enforce to block
+  background: true
+  rules:
+    - name: disallow-latest-tag
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+      validate:
+        message: "Using a mutable ':latest' tag is not allowed."
+        pattern:
+          spec:
+            containers:
+              - image: "!*:latest"
+    - name: require-resource-limits
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+      validate:
+        message: "CPU and memory limits are required."
+        pattern:
+          spec:
+            containers:
+              - resources:
+                  limits:
+                    memory: "?*"
+                    cpu: "?*"
+```
+
+### Kyverno - mutate (inject a hardened securityContext by default)
+
+```yaml
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: add-default-securitycontext
+spec:
+  rules:
+    - name: default-non-root
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+      mutate:
+        patchStrategicMerge:
+          spec:
+            securityContext:
+              runAsNonRoot: true
+              seccompProfile:
+                type: RuntimeDefault
+            containers:
+              - (name): "*"
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  readOnlyRootFilesystem: true
+                  capabilities:
+                    drop: ["ALL"]
+```
+
+### Kyverno - generate (auto-create a default-deny NetworkPolicy per namespace)
+
+```yaml
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: default-deny-netpol
+spec:
+  rules:
+    - name: add-default-deny
+      match:
+        any:
+          - resources:
+              kinds: ["Namespace"]
+      generate:
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        name: default-deny
+        namespace: "{{request.object.metadata.name}}"
+        synchronize: true
+        data:
+          spec:
+            podSelector: {}
+            policyTypes: ["Ingress", "Egress"]
+```
+
+### Test policies in CI before they ever reach the cluster
+
+```bash
+# Kyverno CLI - unit-test a policy against sample resources
+kyverno apply policy.yaml --resource workload.yaml
+
+# Kyverno declarative test suite (kyverno-test.yaml in the dir)
+kyverno test .
+
+# Conftest in a pipeline - non-zero exit fails the build
+conftest test --policy policy/ k8s/*.yaml
+```
+
+> 🔬 Run the same policy twice: once in CI (Conftest / `kyverno test`) for fast feedback on a pull request, and again as a Gatekeeper or Kyverno admission webhook so nothing that bypasses CI can reach the cluster. CI catches it early; admission control makes it mandatory.
+
+> **See also:** [Terraform](/docs/cheatsheets/terraform) for the IaC these Rego policies scan, [Containers](/docs/cheatsheets/containers-cheatsheet) for the Kubernetes manifests Kyverno governs, and [CI/CD Standards](/docs/documents/cicd-standards) for wiring policy gates into the pipeline.
+
+---
+
 ## Anti-patterns
 
 ### Offensive

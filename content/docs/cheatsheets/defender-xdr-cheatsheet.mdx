@@ -1,0 +1,1166 @@
+---
+title: Microsoft Defender XDR Cheatsheet
+description: Operational reference for Microsoft Defender XDR - Defender for Cloud (az security), Windows Defender Antivirus, Defender for Endpoint on Linux (mdatp), the Graph Security API, advanced hunting (KQL), Sentinel watchlists and incidents, with handy Azure CLI, PowerShell, Bash, and Python examples throughout.
+---
+
+# Microsoft Defender XDR Cheat Sheet
+
+Microsoft Defender XDR is not one product but a family of surfaces that share the unified `https://graph.microsoft.com/v1.0/security` API and the Defender portal. This sheet covers the four surfaces you will automate against from the command line: posture (Defender for Cloud), endpoint (Defender for Endpoint / XDR), the built-in Windows Defender Antivirus engine, and Defender for Endpoint on Linux.
+
+> **Scope:** Blue-team and platform-engineering automation - SOC tooling, incident response runbooks, and posture-as-code. Assumes PowerShell 7+ for cross-platform automation, Bash for Linux endpoints, and Python 3.12+ for service integrations.
+>
+> **Versions:** Microsoft Defender XDR (2024+) · Microsoft Sentinel · Graph Security API `v1.0` · Defender for Endpoint API (`api.securitycenter.microsoft.com`) · `mdatp` 101.x+ · Azure CLI 2.60+
+>
+> **Last reviewed:** June 2026
+
+---
+
+## The Four Surfaces
+
+| Surface | What it covers | Primary interface | Auth |
+|---|---|---|---|
+| **Defender for Cloud** | Cloud posture, secure score, regulatory compliance, plan pricing | `az security` CLI | Azure RBAC (Az context) |
+| **Defender for Endpoint / XDR** | Alerts, incidents, advanced hunting, device response actions | Graph Security API + Defender for Endpoint API | Entra app or delegated Graph token |
+| **Defender Antivirus** | The on-device AV engine on Windows | Built-in `Defender` PowerShell module (`Get-MpComputerStatus`, etc.) | Local admin on the host |
+| **Defender for Endpoint on Linux** | EDR + AV agent on Linux hosts | `mdatp` CLI | Local root/sudo on the host |
+
+> **See also:** [KQL / Microsoft Defender](/docs/cheatsheets/kql-cheatsheet) for the full advanced-hunting table reference and threat-hunting query library that this sheet links into.
+
+---
+
+# Authentication
+
+Everything else on this page assumes you have a token. The catch with Defender is that the surfaces sit behind **different token audiences** - a token for Microsoft Graph will not work against the Defender for Endpoint API, and neither works against Azure Resource Manager. Acquire a token per resource.
+
+## Token audiences
+
+| Service / API | Token audience (resource) | What it covers |
+|---|---|---|
+| Defender for Cloud, Sentinel, Log Analytics management | `https://management.azure.com` | `az security`, watchlists, incidents, workbooks |
+| Defender XDR alerts / incidents / hunting (Graph) | `https://graph.microsoft.com` | `alerts_v2`, `incidents`, `runHuntingQuery` |
+| Defender for Endpoint response actions | `https://api.securitycenter.microsoft.com` | isolate, scan, collect package, machine inventory |
+| Log Analytics direct query API | `https://api.loganalytics.io` | querying a workspace from the data plane |
+
+> 🔬 Pick your identity by where the code runs: **interactive** at a workstation, a **managed identity** on Azure compute, and **OIDC / workload identity federation** in CI/CD. Avoid long-lived client secrets entirely where you can - the only one of these that creates a credential to leak is the SPN-with-secret path.
+
+## Azure CLI
+
+```bash
+# Interactive (workstation) - browser, or device code on a headless box
+az login
+az login --use-device-code
+
+# Service principal - secret, then certificate
+az login --service-principal -u "$APP_ID" -p "$CLIENT_SECRET" --tenant "$TENANT_ID"
+az login --service-principal -u "$APP_ID" -p ./cert.pem --tenant "$TENANT_ID"
+
+# Managed identity (on an Azure VM / Container App / Function)
+az login --identity                              # system-assigned
+az login --identity --username "$UAMI_CLIENT_ID" # user-assigned
+
+# OIDC / workload identity federation (CI/CD) - exchange a federated token, no secret
+az login --service-principal -u "$APP_ID" --tenant "$TENANT_ID" --federated-token "$ID_TOKEN"
+```
+
+### Grab a token for each audience
+
+```bash
+az account get-access-token --resource https://management.azure.com           --query accessToken -o tsv
+az account get-access-token --resource https://graph.microsoft.com            --query accessToken -o tsv
+az account get-access-token --resource https://api.securitycenter.microsoft.com --query accessToken -o tsv
+az account get-access-token --resource https://api.loganalytics.io            --query accessToken -o tsv
+```
+
+## PowerShell (Az and Microsoft.Graph)
+
+```powershell
+# Az - interactive, SPN (secret / cert), managed identity, OIDC
+Connect-AzAccount
+$cred = [pscredential]::new($appId, (ConvertTo-SecureString $secret -AsPlainText -Force))
+Connect-AzAccount -ServicePrincipal -Credential $cred -Tenant $tenantId
+Connect-AzAccount -ServicePrincipal -ApplicationId $appId -CertificateThumbprint $thumb -Tenant $tenantId
+Connect-AzAccount -Identity                                   # system-assigned MI
+Connect-AzAccount -Identity -AccountId $uamiClientId          # user-assigned MI
+Connect-AzAccount -ServicePrincipal -ApplicationId $appId -Tenant $tenantId -FederatedToken $env:ID_TOKEN
+
+# Microsoft.Graph - delegated scopes, app-only cert, or managed identity
+Connect-MgGraph -Scopes 'SecurityAlert.Read.All', 'SecurityIncident.Read.All'
+Connect-MgGraph -ClientId $appId -TenantId $tenantId -CertificateThumbprint $thumb
+Connect-MgGraph -Identity
+```
+
+### Get a raw token (note the SecureString change)
+
+```powershell
+# Az.Accounts 5.x (Az 14+) returns the token as a SecureString by default.
+$secure = (Get-AzAccessToken -ResourceUrl 'https://api.securitycenter.microsoft.com' -AsSecureString).Token
+$token  = [System.Net.NetworkCredential]::new('', $secure).Password
+```
+
+## Microsoft Graph / REST (client credentials)
+
+```bash
+# Secret-based client credentials - the .default scope grants all consented app roles
+curl -s -X POST "https://login.microsoftonline.com/$TENANT_ID/oauth2/v2.0/token" \
+  -d "client_id=$APP_ID" \
+  -d "client_secret=$CLIENT_SECRET" \
+  -d "scope=https://graph.microsoft.com/.default" \
+  -d "grant_type=client_credentials" | jq -r '.access_token'
+
+# Swap the scope to target a different audience
+#   https://api.securitycenter.microsoft.com/.default   -> Defender for Endpoint
+#   https://management.azure.com/.default                -> ARM (Sentinel, Defender for Cloud)
+```
+
+## Managed identity (from inside Azure)
+
+```bash
+# IMDS - works on any Azure VM/VMSS without a credential. Add &client_id=<uami> for user-assigned.
+curl -s -H "Metadata: true" \
+  "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://graph.microsoft.com" |
+  jq -r '.access_token'
+```
+
+A managed identity has no admin-consent UI, so its Graph and Defender app roles are granted by assignment. Do it once with the Graph PowerShell SDK:
+
+```powershell
+Connect-MgGraph -Scopes 'AppRoleAssignment.ReadWrite.All', 'Application.Read.All'
+
+$mi    = Get-MgServicePrincipal -Filter "displayName eq 'my-app-identity'"
+
+# Microsoft Graph (well-known appId) - assign SecurityAlert.Read.All
+$graph = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0000-c000-000000000000'"
+$role  = $graph.AppRoles | Where-Object Value -eq 'SecurityAlert.Read.All'
+New-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $mi.Id `
+  -PrincipalId $mi.Id -ResourceId $graph.Id -AppRoleId $role.Id
+
+# Defender for Endpoint (WindowsDefenderATP appId) - assign Machine.Isolate
+$mde   = Get-MgServicePrincipal -Filter "appId eq 'fc780465-2017-40d4-a0c5-307022471b92'"
+$miso  = $mde.AppRoles | Where-Object Value -eq 'Machine.Isolate'
+New-MgServicePrincipalAppRoleAssignment -ServicePrincipalId $mi.Id `
+  -PrincipalId $mi.Id -ResourceId $mde.Id -AppRoleId $miso.Id
+```
+
+## OIDC / workload identity federation in CI/CD
+
+No secrets in the pipeline: the runner mints a short-lived OIDC token, and a **federated credential** on the app registration trusts it for a specific repo/branch/environment.
+
+### Register the federated credential (one-time)
+
+```bash
+az ad app federated-credential create --id "$APP_ID" --parameters '{
+  "name": "github-main",
+  "issuer": "https://token.actions.githubusercontent.com",
+  "subject": "repo:libre-devops/defender-runbooks:ref:refs/heads/main",
+  "audiences": ["api://AzureADTokenExchange"]
+}'
+```
+
+### GitHub Actions
+
+```yaml
+permissions:
+  id-token: write      # required for the runner to request an OIDC token
+  contents: read
+
+jobs:
+  posture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      # az is now authenticated with no secret; tokens for any audience follow
+      - run: az security secure-scores show --name ascScore --query properties.score.percentage -o tsv
+```
+
+### Azure DevOps
+
+```yaml
+# A Workload Identity Federation service connection backs AzureCLI@2 - no secret stored.
+steps:
+  - task: AzureCLI@2
+    inputs:
+      azureSubscription: 'defender-wif-connection'   # WIF service connection name
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: az security assessment list --query "[?status.code=='Unhealthy']" -o table
+```
+
+## Python (`azure-identity`)
+
+```python
+from azure.identity import (
+    DefaultAzureCredential,        # env -> workload identity -> managed identity -> az cli
+    ClientSecretCredential,
+    ManagedIdentityCredential,
+    WorkloadIdentityCredential,    # OIDC in AKS / federated CI
+)
+
+# One credential, many audiences - request the right scope per call.
+credential = DefaultAzureCredential()
+graph_token = credential.get_token("https://graph.microsoft.com/.default").token
+mde_token   = credential.get_token("https://api.securitycenter.microsoft.com/.default").token
+
+# Explicit forms when you are not relying on the default chain
+ManagedIdentityCredential(client_id="<uami-client-id>")
+ClientSecretCredential(tenant_id="<tid>", client_id="<app-id>", client_secret="<secret>")
+```
+
+`DefaultAzureCredential` is what every Python example below uses: it picks workload identity in CI (via the `AZURE_*` / federated-token-file env vars), a managed identity on Azure compute, and your `az login` session at a workstation - no code change between them.
+
+> **See also:** [Permissions you will need](#permissions-you-will-need) below for the exact app roles each operation requires, and the [AI Cheatsheet - Auth](/docs/cheatsheets/ai-cheatsheet) and [Azure Cheatsheet](/docs/cheatsheets/azure-cheatsheet) for the same identity patterns applied to other services.
+
+---
+
+# Defender for Cloud (`az security`)
+
+Posture management for Azure subscriptions. Every command below requires a signed-in Azure CLI (`az login`) with at least **Security Reader** on the subscription; changing plans needs **Security Admin**.
+
+## Secure score
+
+### Show the overall subscription secure score
+
+```bash
+az security secure-scores show --name ascScore -o json
+```
+
+### Secure score as a single percentage
+
+```bash
+az security secure-scores show --name ascScore \
+  --query "properties.score.percentage" -o tsv
+```
+
+### List per-control scores (which controls cost you the most)
+
+```bash
+az security secure-scores-controls list \
+  --query "sort_by([].{control:displayName, current:score.current, max:score.max}, &max)[?max > \`0\`]" \
+  -o table
+```
+
+## Recommendations (assessments)
+
+### List all assessments
+
+```bash
+az security assessment list -o json
+```
+
+### Only the unhealthy recommendations
+
+```bash
+az security assessment list \
+  --query "[?status.code=='Unhealthy'].{name:displayName, resource:resourceDetails.id, severity:metadata.severity}" \
+  -o table
+```
+
+## Defender plans (pricing tiers)
+
+### List every Defender plan and its tier
+
+```bash
+az security pricing list \
+  --query "value[].{plan:name, tier:pricingTier}" -o table
+```
+
+### Show a single plan
+
+```bash
+az security pricing show --name StorageAccounts -o json
+```
+
+### Enable a plan (Free -> Standard)
+
+```bash
+az security pricing create --name StorageAccounts --tier Standard
+```
+
+> ⚠️ Enabling a Standard plan starts billing immediately. Scope it deliberately and pair the change with a budget alert.
+
+## Security alerts (Azure CLI)
+
+### List active Defender for Cloud alerts
+
+```bash
+az security alert list \
+  --query "[?status=='Active'].{name:alertDisplayName, severity:severity, time:timeGeneratedUtc}" \
+  -o table
+```
+
+### Show a single alert
+
+```bash
+az security alert show --name <alert-name> --location <region> -o json
+```
+
+### Dismiss an alert
+
+```bash
+az security alert update --name <alert-name> --location <region> --status Dismiss
+```
+
+## Defender for Cloud via Az PowerShell
+
+The `Az.Security` module mirrors the CLI for engineers who live in PowerShell.
+
+```powershell
+Connect-AzAccount
+
+# Secure score and unhealthy assessments
+Get-AzSecuritySecureScore
+Get-AzSecurityAssessment | Where-Object { $_.StatusCode -eq 'Unhealthy' } |
+  Select-Object DisplayName, ResourceDetailsId
+
+# Plan tiers, and the active alerts
+Get-AzSecurityPricing | Select-Object Name, PricingTier
+Get-AzSecurityAlert | Where-Object { $_.State -eq 'Active' } |
+  Select-Object AlertDisplayName, ReportedSeverity, TimeGeneratedUtc
+```
+
+> **See also:** [Azure - Auth & Context](/docs/cheatsheets/azure-cheatsheet) for service-principal creation and role assignment used by posture-as-code pipelines.
+
+---
+
+# Windows Defender Antivirus
+
+The built-in `Defender` module ships with Windows - no install required. Run an elevated PowerShell session. These are host-local; for fleet-wide control use Intune, Group Policy, or the Defender for Endpoint API further down.
+
+### Full engine and protection status
+
+```powershell
+Get-MpComputerStatus
+```
+
+### Just the bits that matter for a health check
+
+```powershell
+Get-MpComputerStatus |
+  Select-Object AMRunningMode, RealTimeProtectionEnabled,
+                AntivirusSignatureLastUpdated, AntivirusSignatureVersion,
+                IsTamperProtected, NISEnabled
+```
+
+### Current preferences (exclusions, cloud level, sample submission)
+
+```powershell
+Get-MpPreference |
+  Select-Object MAPSReporting, SubmitSamplesConsent,
+                ExclusionPath, ExclusionProcess, CloudBlockLevel
+```
+
+### Run a scan
+
+```powershell
+Start-MpScan -ScanType QuickScan    # or FullScan
+```
+
+### Update signatures now
+
+```powershell
+Update-MpSignature
+```
+
+### Detection history (what was found and what was done)
+
+```powershell
+Get-MpThreatDetection |
+  Sort-Object InitialDetectionTime -Descending |
+  Select-Object ThreatID, InitialDetectionTime, ActionSuccess,
+                @{n='Resources';e={$_.Resources -join '; '}}
+```
+
+### Map detection IDs to names and severity
+
+```powershell
+Get-MpThreat |
+  Select-Object ThreatID, ThreatName, SeverityID, DidThreatExecute
+```
+
+### Add a path / process exclusion
+
+```powershell
+Add-MpPreference -ExclusionPath 'C:\app\data', 'C:\cache'
+Add-MpPreference -ExclusionProcess 'node.exe'
+```
+
+> 🔬 Exclusions are a common attacker persistence trick - they blind the engine to a folder. Treat the exclusion list as a security-sensitive config; review it in audits and alert on additions.
+
+### Raise the cloud protection level (aggressive)
+
+```powershell
+Set-MpPreference -CloudBlockLevel HighPlus -MAPSReporting Advanced -SubmitSamplesConsent SendAllSamples
+```
+
+### List Attack Surface Reduction (ASR) rule states
+
+```powershell
+$ids = (Get-MpPreference).AttackSurfaceReductionRules_Ids
+$acts = (Get-MpPreference).AttackSurfaceReductionRules_Actions
+for ($i = 0; $i -lt $ids.Count; $i++) {
+    [pscustomobject]@{ RuleId = $ids[$i]; Action = $acts[$i] }  # 0=Off 1=Block 2=Audit 6=Warn
+}
+```
+
+### Put an ASR rule into Block mode
+
+```powershell
+# Block credential stealing from LSASS
+Add-MpPreference -AttackSurfaceReductionRules_Ids 9e6c4e1f-7d60-472f-ba1a-a39ef669e4b2 `
+                 -AttackSurfaceReductionRules_Actions Enabled
+```
+
+> **See also:** [Windows](/docs/cheatsheets/windows-cheatsheet) for event-log and firewall context, and [Security - Defensive](/docs/cheatsheets/security-cheatsheet) for broader host hardening.
+
+---
+
+# Defender for Endpoint on Linux (`mdatp`)
+
+The Linux agent exposes everything through the `mdatp` CLI. Most read commands work unprivileged; config changes need `sudo`. Output is human-readable by default; append nothing for the pretty form, or query single fields for scripts.
+
+### Agent health (one field, script-friendly)
+
+```bash
+mdatp health --field healthy             # true / false
+mdatp health --field real_time_protection_enabled
+mdatp health --field definitions_status  # up_to_date / ...
+```
+
+### Full health dump as JSON
+
+```bash
+mdatp health --output json
+```
+
+### Run a scan
+
+```bash
+mdatp scan quick
+mdatp scan full
+mdatp scan custom --path /var/www
+```
+
+### Update definitions
+
+```bash
+sudo mdatp definitions update
+```
+
+### Threat management
+
+```bash
+mdatp threat list                         # detections on this host
+mdatp threat quarantine list              # what is quarantined
+mdatp threat get --id <threat-id>
+```
+
+### Real-time protection and EDR toggles
+
+```bash
+sudo mdatp config real-time-protection --value enabled
+mdatp health --field edr_configuration_version
+```
+
+### Folder / extension / process exclusions
+
+```bash
+sudo mdatp exclusion folder add --path /opt/app
+sudo mdatp exclusion extension add --name .log
+sudo mdatp exclusion process add --name ldconfig
+mdatp exclusion list
+```
+
+### Trigger an on-demand cloud connectivity test
+
+```bash
+mdatp connectivity test
+```
+
+### Collect a diagnostic bundle for support
+
+```bash
+sudo mdatp diagnostic create
+```
+
+> 🔬 `mdatp health --field healthy` is the single best one-liner for a fleet health check - wire it into your config-management tool (Ansible/Salt) and alert on anything that is not `true`.
+
+> **See also:** [Linux](/docs/cheatsheets/linux-cheatsheet) for the systemd and journald context to confirm the `mdatp` daemon is running and logging.
+
+---
+
+# Defender XDR - Graph Security API
+
+The unified `https://graph.microsoft.com/v1.0/security` surface returns alerts, incidents, and hunting results across every Defender product. Response actions on devices (isolate, scan, collect package) live on the older Defender for Endpoint API at `https://api.securitycenter.microsoft.com`.
+
+## Permissions you will need
+
+| Operation | Graph application permission | Defender for Endpoint permission |
+|---|---|---|
+| Read alerts / incidents | `SecurityAlert.Read.All`, `SecurityIncident.Read.All` | - |
+| Run advanced hunting | `ThreatHunting.Read.All` | `AdvancedQuery.Read.All` |
+| Isolate / release a device | - | `Machine.Isolate` |
+| Run AV scan on a device | - | `Machine.Scan` |
+| Collect investigation package | - | `Machine.CollectForensics` |
+
+## Get a token
+
+The examples below use `$TOKEN` for a Microsoft Graph token and `$MDE_TOKEN` for a Defender for Endpoint token - acquire each per the [Authentication](#authentication) section (they are different audiences). The quickest form once you have an Azure CLI session:
+
+```bash
+TOKEN=$(az account get-access-token --resource https://graph.microsoft.com --query accessToken -o tsv)
+MDE_TOKEN=$(az account get-access-token --resource https://api.securitycenter.microsoft.com --query accessToken -o tsv)
+```
+
+### List high-severity new alerts
+
+```bash
+curl -s -G "https://graph.microsoft.com/v1.0/security/alerts_v2" \
+  -H "Authorization: Bearer $TOKEN" \
+  --data-urlencode '$filter=severity eq '\''high'\'' and status eq '\''new'\''' \
+  --data-urlencode '$top=50' | jq '.value[] | {id, title, severity, status}'
+```
+
+### Get an incident with its alerts
+
+```bash
+curl -s -G "https://graph.microsoft.com/v1.0/security/incidents/<incident-id>" \
+  -H "Authorization: Bearer $TOKEN" \
+  --data-urlencode '$expand=alerts' | jq
+```
+
+### Run an advanced hunting (KQL) query over the API
+
+```bash
+curl -s -X POST "https://graph.microsoft.com/v1.0/security/runHuntingQuery" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"DeviceProcessEvents | where Timestamp > ago(1h) | take 10"}' |
+  jq '.results'
+```
+
+### Isolate a device (Defender for Endpoint API)
+
+```bash
+curl -s -X POST \
+  "https://api.securitycenter.microsoft.com/api/machines/<machine-id>/isolate" \
+  -H "Authorization: Bearer $MDE_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"Comment":"IR-1234 containment","IsolationType":"Full"}'
+```
+
+### List and act on devices (Defender for Endpoint API, Bash)
+
+```bash
+MDE="https://api.securitycenter.microsoft.com/api"
+
+# Onboarded machines, highest risk first
+curl -s -G "$MDE/machines" -H "Authorization: Bearer $MDE_TOKEN" \
+  --data-urlencode '$top=100' |
+  jq -r '.value | sort_by(.riskScore) | reverse[] | [.computerDnsName, .riskScore, .healthStatus] | @tsv'
+
+# Resolve a hostname to its machine id
+MID=$(curl -s -G "$MDE/machines" -H "Authorization: Bearer $MDE_TOKEN" \
+  --data-urlencode "\$filter=computerDnsName eq 'web01'" | jq -r '.value[0].id')
+
+# Run a full AV scan
+curl -s -X POST "$MDE/machines/$MID/runAntiVirusScan" \
+  -H "Authorization: Bearer $MDE_TOKEN" -H "Content-Type: application/json" \
+  -d '{"Comment":"IR-1234","ScanType":"Full"}'
+
+# Collect an investigation (forensics) package
+curl -s -X POST "$MDE/machines/$MID/collectInvestigationPackage" \
+  -H "Authorization: Bearer $MDE_TOKEN" -H "Content-Type: application/json" \
+  -d '{"Comment":"IR-1234 forensics"}'
+
+# Check the status of a submitted machine action
+curl -s "$MDE/machineactions/<action-id>" \
+  -H "Authorization: Bearer $MDE_TOKEN" | jq '{type, status, machineId, creationDateTimeUtc}'
+```
+
+### Page through every result (`@odata.nextLink`)
+
+```bash
+# Graph and the Defender API cap page size; follow nextLink until it is gone.
+url="$MDE/alerts?\$top=1000"
+while [ -n "$url" ] && [ "$url" != "null" ]; do
+  page=$(curl -s "$url" -H "Authorization: Bearer $MDE_TOKEN")
+  echo "$page" | jq -c '.value[]'
+  url=$(echo "$page" | jq -r '."@odata.nextLink" // ""')
+done
+```
+
+### The same calls in PowerShell (no module, just `Invoke-AzRestMethod`)
+
+```powershell
+Connect-AzAccount
+$mde = 'https://api.securitycenter.microsoft.com'
+
+# Invoke-AzRestMethod handles the bearer token for the target resource for you
+$machines = (Invoke-AzRestMethod -Method GET -Uri "$mde/api/machines?`$top=100").Content |
+  ConvertFrom-Json
+$machines.value |
+  Sort-Object riskScore -Descending |
+  Select-Object computerDnsName, riskScore, healthStatus -First 20
+
+# Submit a response action
+$id = ($machines.value | Where-Object computerDnsName -eq 'web01').id
+Invoke-AzRestMethod -Method POST -Uri "$mde/api/machines/$id/isolate" `
+  -Payload (@{ Comment = 'IR-1234 containment'; IsolationType = 'Full' } | ConvertTo-Json)
+```
+
+### Or with the Microsoft Graph PowerShell SDK
+
+```powershell
+Connect-MgGraph -Scopes 'SecurityAlert.Read.All', 'SecurityIncident.Read.All'
+
+Get-MgSecurityIncident -Filter "status eq 'active'" -Top 20 |
+  Select-Object Id, DisplayName, Severity, @{n='Alerts';e={$_.Alerts.Count}}
+
+# Run an advanced hunting query through the SDK
+$body = @{ query = 'DeviceProcessEvents | where Timestamp > ago(1h) | take 10' }
+(Invoke-MgGraphRequest -Method POST `
+  -Uri 'https://graph.microsoft.com/v1.0/security/runHuntingQuery' `
+  -Body ($body | ConvertTo-Json)).results
+```
+
+> 🚨 Device isolation and AV scans are high-impact response actions. Gate them behind an approval step in any automation, log the `Comment` with a ticket reference, and make sure your runbook documents how to **release** isolation (`/unisolate`).
+
+> **See also:** [KQL - Threat Hunting](/docs/cheatsheets/kql-cheatsheet) for the hunting queries you pass to `runHuntingQuery`, and the [AI Cheatsheet - Security Copilot](/docs/cheatsheets/ai-cheatsheet) for natural-language incident triage over the same data.
+
+---
+
+# Advanced Hunting (KQL)
+
+Defender XDR advanced hunting runs KQL over the device, identity, email, and cloud-app tables. These are Defender-response-oriented snippets; the [KQL cheatsheet](/docs/cheatsheets/kql-cheatsheet) holds the full table reference and the broader hunting library.
+
+### Devices that are candidates for isolation (active high-severity alerts)
+
+```kql
+AlertInfo
+| where Timestamp > ago(24h)
+| where Severity == "High"
+| join kind=inner AlertEvidence on AlertId
+| where EntityType == "Machine"
+| summarize Alerts = dcount(AlertId), Titles = make_set(Title) by DeviceId, DeviceName
+| sort by Alerts desc
+```
+
+### LSASS credential access (Mimikatz-style)
+
+```kql
+DeviceProcessEvents
+| where Timestamp > ago(7d)
+| where FileName in~ ("rundll32.exe", "procdump.exe", "taskmgr.exe")
+| where ProcessCommandLine has_any ("lsass", "MiniDump", "comsvcs.dll")
+| project Timestamp, DeviceName, AccountName, FileName, ProcessCommandLine
+```
+
+### New ASR exclusions or AV exclusions added on a device
+
+```kql
+DeviceRegistryEvents
+| where Timestamp > ago(7d)
+| where RegistryKey has @"Windows Defender\Exclusions"
+| where ActionType == "RegistryValueSet"
+| project Timestamp, DeviceName, RegistryKey, RegistryValueName, InitiatingProcessAccountName
+```
+
+### Map an alert to the full device timeline (pivot)
+
+```kql
+let target = "<device-id>";
+union DeviceProcessEvents, DeviceNetworkEvents, DeviceFileEvents, DeviceLogonEvents
+| where Timestamp between (ago(2h) .. now())
+| where DeviceId == target
+| sort by Timestamp asc
+| project Timestamp, $table, ActionType, FileName, RemoteIP, AccountName
+```
+
+> **See also:** [KQL - Threat Hunting](/docs/cheatsheets/kql-cheatsheet) for processes, network, identity, and email hunting plus multi-stage alert chaining.
+
+---
+
+# Running KQL from the CLI and SDKs
+
+The portal is fine for ad-hoc hunting, but runbooks, scheduled jobs, and CI need to run KQL headless against the Log Analytics / Sentinel workspace. The same query runs three ways.
+
+### Azure CLI - `az monitor log-analytics query`
+
+```bash
+# The query API wants the workspace GUID (customerId), not its resource name
+WSID=$(az monitor log-analytics workspace show -g "$RG" -n "$WS" --query customerId -o tsv)
+
+az monitor log-analytics query \
+  --workspace "$WSID" \
+  --analytics-query "SecurityAlert | where TimeGenerated > ago(24h) | summarize Count=count() by AlertSeverity" \
+  -o table
+```
+
+### PowerShell - `Invoke-AzOperationalInsightsQuery`
+
+```powershell
+$wsid = (Get-AzOperationalInsightsWorkspace -ResourceGroupName $rg -Name $ws).CustomerId
+$kql  = 'DeviceProcessEvents | where Timestamp > ago(1h) | summarize Count=count() by DeviceName'
+
+$result = Invoke-AzOperationalInsightsQuery -WorkspaceId $wsid -Query $kql
+$result.Results | Sort-Object Count -Descending | Format-Table
+```
+
+### Python - `azure-monitor-query`
+
+```python
+# pip install azure-monitor-query azure-identity
+from datetime import timedelta
+
+from azure.identity import DefaultAzureCredential
+from azure.monitor.query import LogsQueryClient, LogsQueryStatus
+
+client = LogsQueryClient(DefaultAzureCredential())
+
+response = client.query_workspace(
+    workspace_id="<workspace-guid>",
+    query="SigninLogs | where TimeGenerated > ago(1h) | summarize Count=count() by ResultType",
+    timespan=timedelta(hours=1),
+)
+
+if response.status == LogsQueryStatus.SUCCESS:
+    for table in response.tables:
+        for row in table.rows:
+            print(dict(zip(table.columns, row)))
+```
+
+> 🔬 Device tables (`DeviceProcessEvents`, etc.) are queryable through Log Analytics only when the workspace receives Defender XDR data via the connector. With raw Defender data only, hunt through Graph `runHuntingQuery` instead - the [PowerShell](#or-with-the-microsoft-graph-powershell-sdk) and [Python](#python-reference-implementation) clients above both do this.
+
+> **See also:** [KQL - Operational Monitoring](/docs/cheatsheets/kql-cheatsheet) for host-health, downtime, and request queries you can run the same way.
+
+---
+
+# Microsoft Sentinel - Watchlists & Incidents
+
+Watchlists are reference data (VIP users, terminated staff, approved IPs, asset inventories) you join against in detections. They are managed through the Sentinel REST API on Azure Resource Manager, the `Microsoft.SecurityInsights` provider.
+
+### Variables used below
+
+```bash
+SUB="<subscription-id>"
+RG="<resource-group>"
+WS="<log-analytics-workspace>"
+API="2024-03-01"
+BASE="https://management.azure.com/subscriptions/$SUB/resourceGroups/$RG/providers/Microsoft.OperationalInsights/workspaces/$WS/providers/Microsoft.SecurityInsights"
+ARM=$(az account get-access-token --resource https://management.azure.com --query accessToken -o tsv)
+```
+
+### List watchlists
+
+```bash
+curl -s -H "Authorization: Bearer $ARM" \
+  "$BASE/watchlists?api-version=$API" | jq '.value[] | {alias:.name, items:.properties.numberOfLinesToSkip}'
+```
+
+### Create a watchlist from inline CSV
+
+```bash
+curl -s -X PUT "$BASE/watchlists/HighValueAssets?api-version=$API" \
+  -H "Authorization: Bearer $ARM" -H "Content-Type: application/json" \
+  -d '{
+    "properties": {
+      "displayName": "High Value Assets",
+      "provider": "LibreDevOps",
+      "source": "Local file",
+      "itemsSearchKey": "Hostname",
+      "rawContent": "Hostname,Tier,Owner\nDC01,0,platform\nSQL01,1,data",
+      "contentType": "text/csv"
+    }
+  }'
+```
+
+### Add a single item to a watchlist
+
+```bash
+curl -s -X PUT "$BASE/watchlists/HighValueAssets/watchlistItems/$(uuidgen)?api-version=$API" \
+  -H "Authorization: Bearer $ARM" -H "Content-Type: application/json" \
+  -d '{"properties":{"itemsKeyValue":{"Hostname":"WEB01","Tier":"2","Owner":"web"}}}'
+```
+
+### Delete a watchlist
+
+```bash
+curl -s -X DELETE "$BASE/watchlists/HighValueAssets?api-version=$API" \
+  -H "Authorization: Bearer $ARM"
+```
+
+### Join a watchlist inside a detection (KQL)
+
+```kql
+let HVA = _GetWatchlist('HighValueAssets');
+DeviceLogonEvents
+| where Timestamp > ago(1h)
+| where LogonType == "RemoteInteractive"
+| join kind=inner HVA on $left.DeviceName == $right.Hostname
+| where Tier == "0"
+| project Timestamp, DeviceName, AccountName, Tier, Owner
+```
+
+## Incidents (Azure CLI via `az rest`)
+
+Sentinel has no dedicated first-class CLI for most operations, so `az rest` against the management API is the portable path. It reuses the `$BASE` and `$API` variables from above.
+
+### List active incidents
+
+```bash
+az rest --method get \
+  --url "$BASE/incidents?api-version=$API&\$filter=properties/status eq 'Active'" \
+  --query "value[].{title:properties.title, severity:properties.severity, number:properties.incidentNumber}" \
+  -o table
+```
+
+### Close an incident as a true positive
+
+```bash
+az rest --method put \
+  --url "$BASE/incidents/<incident-id>?api-version=$API" \
+  --headers "Content-Type=application/json" \
+  --body '{
+    "properties": {
+      "title": "Suspicious LSASS access on web01",
+      "status": "Closed",
+      "severity": "Medium",
+      "classification": "TruePositive",
+      "classificationReason": "SuspiciousActivity"
+    }
+  }'
+```
+
+### Add an investigation comment
+
+```bash
+az rest --method put \
+  --url "$BASE/incidents/<incident-id>/comments/$(uuidgen)?api-version=$API" \
+  --headers "Content-Type=application/json" \
+  --body '{"properties":{"message":"Triaged by automation - device isolated, escalated to tier 2."}}'
+```
+
+## Incidents and watchlists (Az PowerShell, `Az.SecurityInsights`)
+
+```powershell
+Install-Module Az.SecurityInsights -Scope CurrentUser
+
+# Triage queue - active incidents, newest first
+Get-AzSentinelIncident -ResourceGroupName $rg -WorkspaceName $ws |
+  Where-Object Status -eq 'Active' |
+  Sort-Object CreatedTimeUtc -Descending |
+  Select-Object IncidentNumber, Title, Severity, Owner
+
+# Close an incident
+Update-AzSentinelIncident -ResourceGroupName $rg -WorkspaceName $ws -Id $incidentId `
+  -Title 'Suspicious LSASS access on web01' -Status Closed -Severity Medium `
+  -Classification TruePositive -ClassificationReason SuspiciousActivity
+
+# Comment, then manage watchlists
+New-AzSentinelIncidentComment -ResourceGroupName $rg -WorkspaceName $ws `
+  -IncidentId $incidentId -Message 'Triaged by automation.'
+
+Get-AzSentinelWatchlist -ResourceGroupName $rg -WorkspaceName $ws
+New-AzSentinelWatchlist -ResourceGroupName $rg -WorkspaceName $ws -Alias HighValueAssets `
+  -DisplayName 'High Value Assets' -Provider 'LibreDevOps' -Source 'Local file' `
+  -ItemsSearchKey 'Hostname' -RawContent (Get-Content ./assets.csv -Raw)
+```
+
+> **See also:** [PowerShell - Microsoft Sentinel](/docs/cheatsheets/powershell-cheatsheet) for watchlist export helpers, and [Azure - Azure Monitor & Log Analytics](/docs/cheatsheets/azure-cheatsheet) for the workspace the watchlist lives in.
+
+---
+
+# Python Reference Implementation
+
+A small, typed client that authenticates once with `azure-identity` and reuses the token across Graph and Defender for Endpoint calls. Install: `pip install azure-identity httpx tenacity`.
+
+### Authenticated client with retry and Retry-After handling
+
+```python
+from __future__ import annotations
+
+import httpx
+from azure.identity import DefaultAzureCredential
+from tenacity import (
+    retry, retry_if_exception, stop_after_attempt,
+    wait_exponential_jitter,
+)
+
+GRAPH = "https://graph.microsoft.com/v1.0"
+MDE = "https://api.securitycenter.microsoft.com/api"
+
+_RETRYABLE = {408, 429, 500, 502, 503, 504}
+
+
+def _is_retryable(exc: BaseException) -> bool:
+    # Retry transport errors and the transient HTTP statuses; 400/401/403 fail fast.
+    if isinstance(exc, httpx.TransportError):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code in _RETRYABLE
+    return False
+
+
+class DefenderClient:
+    """Thin wrapper over the Graph Security API and Defender for Endpoint API."""
+
+    def __init__(self, credential: DefaultAzureCredential | None = None) -> None:
+        self._credential = credential or DefaultAzureCredential()
+        self._http = httpx.Client(timeout=30.0)
+
+    def _token(self, resource: str) -> str:
+        # azure-identity scopes use the "/.default" suffix on the resource.
+        return self._credential.get_token(f"{resource}/.default").token
+
+    @retry(
+        retry=retry_if_exception(_is_retryable),
+        wait=wait_exponential_jitter(initial=2, max=60),
+        stop=stop_after_attempt(5),
+        reraise=True,
+    )
+    def _request(self, method: str, url: str, resource: str, **kwargs) -> httpx.Response:
+        headers = {"Authorization": f"Bearer {self._token(resource)}"}
+        headers.update(kwargs.pop("headers", {}))
+        resp = self._http.request(method, url, headers=headers, **kwargs)
+        resp.raise_for_status()
+        return resp
+
+    def list_alerts(self, severity: str = "high", status: str = "new", top: int = 50) -> list[dict]:
+        params = {
+            "$filter": f"severity eq '{severity}' and status eq '{status}'",
+            "$top": top,
+        }
+        resp = self._request("GET", f"{GRAPH}/security/alerts_v2",
+                             "https://graph.microsoft.com", params=params)
+        return resp.json().get("value", [])
+
+    def run_hunting_query(self, query: str) -> list[dict]:
+        resp = self._request("POST", f"{GRAPH}/security/runHuntingQuery",
+                             "https://graph.microsoft.com", json={"query": query})
+        return resp.json().get("results", [])
+
+    def list_incidents(self, top: int = 50) -> list[dict]:
+        resp = self._request("GET", f"{GRAPH}/security/incidents",
+                             "https://graph.microsoft.com", params={"$top": top})
+        return resp.json().get("value", [])
+
+    def list_machines(self, odata_filter: str | None = None) -> list[dict]:
+        params = {"$filter": odata_filter} if odata_filter else None
+        resp = self._request("GET", f"{MDE}/machines",
+                             "https://api.securitycenter.microsoft.com", params=params)
+        return resp.json().get("value", [])
+
+    def run_av_scan(self, machine_id: str, comment: str, scan_type: str = "Full") -> dict:
+        body = {"Comment": comment, "ScanType": scan_type}
+        resp = self._request("POST", f"{MDE}/machines/{machine_id}/runAntiVirusScan",
+                             "https://api.securitycenter.microsoft.com", json=body)
+        return resp.json()
+
+    def isolate_device(self, machine_id: str, comment: str, full: bool = True) -> dict:
+        body = {"Comment": comment, "IsolationType": "Full" if full else "Selective"}
+        resp = self._request("POST", f"{MDE}/machines/{machine_id}/isolate",
+                             "https://api.securitycenter.microsoft.com", json=body)
+        return resp.json()
+```
+
+### Use it
+
+```python
+client = DefenderClient()
+
+for alert in client.list_alerts(severity="high"):
+    print(alert["id"], alert["title"])
+
+rows = client.run_hunting_query(
+    "DeviceProcessEvents | where Timestamp > ago(1h) "
+    "| where FileName == 'powershell.exe' | take 20"
+)
+print(f"{len(rows)} matching process events")
+
+# Find a high-risk host and kick off a full scan
+for machine in client.list_machines(odata_filter="riskScore eq 'High'"):
+    print("scanning", machine["computerDnsName"])
+    client.run_av_scan(machine["id"], comment="auto-triage", scan_type="Full")
+```
+
+### Sentinel watchlist via the management SDK
+
+```python
+# pip install azure-mgmt-securityinsight azure-identity
+from azure.identity import DefaultAzureCredential
+from azure.mgmt.securityinsight import SecurityInsights
+
+client = SecurityInsights(DefaultAzureCredential(), subscription_id="<sub-id>")
+
+for wl in client.watchlists.list(resource_group_name="<rg>", workspace_name="<ws>"):
+    print(wl.name, wl.display_name, wl.items_search_key)
+```
+
+### Incidents with the Microsoft Graph SDK (async)
+
+The official `msgraph-sdk` is the typed alternative to hand-rolled HTTP - it pages, deserialises, and refreshes tokens for you.
+
+```python
+# pip install msgraph-sdk azure-identity
+import asyncio
+
+from azure.identity.aio import DefaultAzureCredential
+from msgraph import GraphServiceClient
+
+
+async def main() -> None:
+    credential = DefaultAzureCredential()
+    graph = GraphServiceClient(credential, scopes=["https://graph.microsoft.com/.default"])
+
+    incidents = await graph.security.incidents.get()
+    for inc in incidents.value or []:
+        print(inc.id, inc.display_name, inc.severity, inc.status)
+
+
+asyncio.run(main())
+```
+
+> **See also:** [Python](/docs/cheatsheets/python-cheatsheet) for `DefaultAzureCredential` setup and async patterns, and [Logging Standards](/docs/documents/logging-standards) for emitting these calls as structured JSON with trace correlation.
+
+---
+
+# Workbooks
+
+Sentinel and Azure Monitor workbooks are KQL-backed dashboards stored as ARM resources (`Microsoft.Insights/workbooks`). Treat them as code: author in the portal, export the JSON, and deploy through your pipeline so every environment renders the same SOC view.
+
+### Deploy a workbook from a template (Bicep)
+
+```bicep
+param workbookDisplayName string = 'Defender XDR - Response Overview'
+param workspaceResourceId string
+
+resource workbook 'Microsoft.Insights/workbooks@2023-06-01' = {
+  name: guid(resourceGroup().id, workbookDisplayName)
+  location: resourceGroup().location
+  kind: 'shared'
+  properties: {
+    displayName: workbookDisplayName
+    category: 'sentinel'
+    sourceId: workspaceResourceId
+    serializedData: loadTextContent('./workbook-content.json')
+  }
+}
+```
+
+### Deploy with the Azure CLI
+
+```bash
+az deployment group create \
+  --resource-group "$RG" \
+  --template-file workbook.bicep \
+  --parameters workspaceResourceId="/subscriptions/$SUB/resourceGroups/$RG/providers/Microsoft.OperationalInsights/workspaces/$WS"
+```
+
+### Example workbook tile query (alert volume by severity)
+
+```kql
+AlertInfo
+| where Timestamp > ago(30d)
+| summarize Alerts = count() by bin(Timestamp, 1d), Severity
+| render timechart
+```
+
+> 🔬 Export the workbook JSON straight from the portal (Edit -> Advanced Editor -> Gallery Template) and check it into source control. Parameterise the `workspaceResourceId` so the same template lands in dev, test, and prod.
+
+> **See also:** [KQL](/docs/cheatsheets/kql-cheatsheet) for the queries that power workbook tiles, and [Bicep](/docs/cheatsheets/bicep-cheatsheet) for the deployment-as-code patterns above.
+
+---
+
+# PowerShell Reference - LibreDevOpsHelpers
+
+The [`LibreDevOpsHelpers`](https://www.powershellgallery.com/packages/LibreDevOpsHelpers) module wraps every surface on this page behind consistent, logged cmdlets. It handles token caching and refresh, exponential backoff with `Retry-After`, and a single 401-refresh retry through `Invoke-LdoGraphRequest`, so the Defender cmdlets stay thin.
+
+```powershell
+Install-Module LibreDevOpsHelpers -Scope CurrentUser
+Connect-AzAccount   # or a managed identity in CI
+```
+
+### Defender for Cloud posture
+
+```powershell
+(Get-LdoDefenderSecureScore).properties.score.percentage
+Get-LdoDefenderRecommendation -UnhealthyOnly
+Set-LdoDefenderPlan -Name StorageAccounts -Tier Standard
+```
+
+### Defender XDR alerts and hunting
+
+```powershell
+Get-LdoDefenderAlert -Severity high -Status new
+Invoke-LdoDefenderHuntingQuery -Query 'DeviceProcessEvents | take 10'
+```
+
+### Endpoint response actions
+
+```powershell
+Invoke-LdoDefenderDeviceIsolation -DeviceId $id -Comment 'IR-1234 containment'
+Invoke-LdoDefenderDeviceIsolation -DeviceId $id -Release        # release isolation
+Invoke-LdoDefenderAvScan -DeviceId $id -ScanType Full
+```
+
+### Windows Defender Antivirus (Windows only)
+
+```powershell
+(Get-LdoDefenderAvStatus).RealTimeProtectionEnabled
+Start-LdoDefenderAvScan -ScanType Quick
+Update-LdoDefenderAvSignature
+Add-LdoDefenderAvExclusion -Path 'C:\app', 'C:\cache'
+```
+
+### Defender for Endpoint on Linux (Linux only)
+
+```powershell
+Get-LdoMdatpHealth -Field healthy
+Start-LdoMdatpScan -ScanType Full
+Update-LdoMdatpDefinition
+Add-LdoMdatpExclusion -Path /opt/app
+```
+
+The module's request layer is reusable on its own: `Invoke-LdoGraphRequest` gives you the same retry, backoff, and 401-refresh behaviour against any Graph endpoint.
+
+```powershell
+# Read with automatic paging-friendly retries
+Invoke-LdoGraphRequest -Uri 'https://graph.microsoft.com/v1.0/security/incidents?$top=10'
+
+# Write, body is JSON-serialised for you
+Invoke-LdoGraphRequest -Method Post `
+  -Uri 'https://graph.microsoft.com/v1.0/security/runHuntingQuery' `
+  -Body @{ query = 'AlertInfo | where Severity == "High" | take 5' }
+```
+
+> **See also:** [PowerShell](/docs/cheatsheets/powershell-cheatsheet) for the broader Azure automation helpers, and [PowerShell Standards](/docs/documents/powershell-standards) for the strict-mode, structured-error, and logging conventions these cmdlets follow.
+
+---
+
+## Anti-patterns
+
+- 🚨 **Automating isolation with no human gate** - device isolation cuts a host off the network. A false positive that auto-isolates a domain controller is a self-inflicted outage. Require approval, log a ticket reference, and rehearse the release path.
+- 🚨 **Client secrets in scripts** - never embed an Entra app secret in a runbook. Use a managed identity (`DefaultAzureCredential`) in CI and on Azure-hosted runners, or a workload identity federation, so there is no secret to leak.
+- ⚠️ **Over-scoped Graph permissions** - an app with `Machine.Isolate` and `Machine.Scan` is a response weapon. Grant the narrowest set per automation, and split read-only hunting apps from response apps.
+- ⚠️ **AV exclusions as a fix** - excluding a folder to "stop the AV noise" blinds the engine and is a known persistence technique. Investigate the detection instead; if an exclusion is genuinely needed, make it as narrow as possible and review it regularly.
+- 🔬 **Polling alerts instead of streaming** - hammering `alerts_v2` on a tight loop wastes throttling budget. Stream alerts and incidents to Sentinel or an event hub and react to them, rather than polling the API.
+- 🔬 **Hunting queries with no time bound** - `runHuntingQuery` over an unscoped table is slow and can time out. Always lead with `| where Timestamp > ago(...)` exactly as you would in the portal.
+- ⚠️ **Ignoring `Retry-After`** - the Graph and Defender APIs throttle aggressively (HTTP 429). Honour the `Retry-After` header and back off; a fixed-interval retry just prolongs the throttling.
+
+---
+
+## See Also
+
+- [KQL / Microsoft Defender Cheatsheet](/docs/cheatsheets/kql-cheatsheet) - full advanced-hunting table reference and threat-hunting query library
+- [Security Cheatsheet](/docs/cheatsheets/security-cheatsheet) - host-level offensive and defensive tooling for investigation
+- [PowerShell Cheatsheet](/docs/cheatsheets/powershell-cheatsheet) - Sentinel watchlist and automation helpers
+- [Azure Cheatsheet](/docs/cheatsheets/azure-cheatsheet) - workspace, RBAC, and Az CLI context
+- [AI Cheatsheet](/docs/cheatsheets/ai-cheatsheet) - Security Copilot for natural-language incident triage
+- [Logging Standards](/docs/documents/logging-standards) - structured JSON logging and trace correlation for these integrations
+- [Microsoft Defender XDR docs](https://learn.microsoft.com/en-us/defender-xdr/) - official product documentation
+- [Graph Security API](https://learn.microsoft.com/en-us/graph/api/resources/security-api-overview) - alerts, incidents, and hunting reference
+- [Defender for Endpoint API](https://learn.microsoft.com/en-us/defender-endpoint/management-apis) - device response action reference
+- [`mdatp` command reference](https://learn.microsoft.com/en-us/defender-endpoint/linux-resources) - Defender for Endpoint on Linux

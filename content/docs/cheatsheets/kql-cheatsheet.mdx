@@ -985,6 +985,205 @@ DeviceNetworkEvents
 
 ---
 
+## Operational Monitoring
+
+KQL is not only for threat hunting - the same engine backs Azure Monitor, so it is how you answer "is the host up?", "did anything go down?", and "are requests healthy?". These run over the platform tables: `Heartbeat` and `Perf` (VMs via the Azure Monitor Agent), `Event`/`Syslog` (OS logs), and `AppRequests`/`AppExceptions`/`AppDependencies` (Application Insights).
+
+### Hosts that stopped reporting (down / disconnected)
+
+```kql
+// Anything that sent a heartbeat in the last 24h but nothing in the last 15m
+Heartbeat
+| where TimeGenerated > ago(24h)
+| summarize LastSeen = max(TimeGenerated) by Computer
+| where LastSeen < ago(15m)
+| extend DownFor = now() - LastSeen
+| sort by LastSeen asc
+```
+
+### Availability percentage per host over a window
+
+```kql
+// Heartbeats arrive ~1/min; compare observed vs expected to get uptime %
+let window = 24h;
+let expected = window / 1m;
+Heartbeat
+| where TimeGenerated > ago(window)
+| summarize Beats = count() by Computer
+| extend AvailabilityPct = round(100.0 * Beats / toreal(expected), 2)
+| sort by AvailabilityPct asc
+```
+
+### Downtime windows (gaps between heartbeats)
+
+```kql
+Heartbeat
+| where TimeGenerated > ago(7d)
+| sort by Computer asc, TimeGenerated asc
+| serialize
+| extend PrevBeat = prev(TimeGenerated), PrevComputer = prev(Computer)
+| where Computer == PrevComputer
+| extend Gap = TimeGenerated - PrevBeat
+| where Gap > 5m            // a real outage, not a missed beat
+| project Computer, OutageStart = PrevBeat, OutageEnd = TimeGenerated, Gap
+| sort by Gap desc
+```
+
+### High CPU hosts
+
+```kql
+Perf
+| where TimeGenerated > ago(1h)
+| where ObjectName == "Processor" and CounterName == "% Processor Time"
+| where InstanceName == "_Total"
+| summarize AvgCpu = avg(CounterValue), MaxCpu = max(CounterValue) by Computer
+| where AvgCpu > 80
+| sort by AvgCpu desc
+```
+
+### Low available memory
+
+```kql
+Perf
+| where TimeGenerated > ago(1h)
+| where CounterName == "Available MBytes"
+| summarize MinFreeMB = min(CounterValue) by Computer
+| where MinFreeMB < 512
+| sort by MinFreeMB asc
+```
+
+### Low free disk space
+
+```kql
+Perf
+| where TimeGenerated > ago(30m)
+| where ObjectName == "LogicalDisk" and CounterName == "% Free Space"
+| where InstanceName !in ("_Total", "HarddiskVolume1")
+| summarize FreePct = min(CounterValue) by Computer, InstanceName
+| where FreePct < 15
+| sort by FreePct asc
+```
+
+### Unexpected reboots and shutdowns (Windows)
+
+```kql
+Event
+| where TimeGenerated > ago(7d)
+| where EventLog == "System"
+| where EventID in (6008, 1074, 6005, 6006)
+| extend Meaning = case(
+    EventID == 6008, "Unexpected shutdown",
+    EventID == 1074, "Reboot/shutdown initiated",
+    EventID == 6005, "Event log started (boot)",
+    EventID == 6006, "Event log stopped (clean shutdown)",
+    "Other")
+| project TimeGenerated, Computer, EventID, Meaning, RenderedDescription
+| sort by TimeGenerated desc
+```
+
+### Windows service stopped (Service Control Manager)
+
+```kql
+Event
+| where TimeGenerated > ago(24h)
+| where Source == "Service Control Manager" and EventID == 7036
+| where RenderedDescription has "stopped"
+| project TimeGenerated, Computer, RenderedDescription
+| sort by TimeGenerated desc
+```
+
+### Linux errors and service failures (Syslog)
+
+```kql
+Syslog
+| where TimeGenerated > ago(1h)
+| where SeverityLevel in ("err", "crit", "alert", "emerg")
+| summarize Count = count(), Sample = any(SyslogMessage) by Computer, ProcessName, SeverityLevel
+| sort by Count desc
+```
+
+### Failed requests by endpoint (Application Insights)
+
+```kql
+AppRequests
+| where TimeGenerated > ago(1h)
+| summarize Total = count(), Failed = countif(Success == false) by Name, AppRoleName
+| extend FailureRate = round(100.0 * Failed / Total, 2)
+| where Failed > 0
+| sort by FailureRate desc
+```
+
+### Request latency percentiles (p50 / p95 / p99)
+
+```kql
+AppRequests
+| where TimeGenerated > ago(1h)
+| summarize
+    p50 = percentile(DurationMs, 50),
+    p95 = percentile(DurationMs, 95),
+    p99 = percentile(DurationMs, 99),
+    Count = count()
+  by Name
+| sort by p95 desc
+```
+
+### Request rate over time (throughput trend)
+
+```kql
+AppRequests
+| where TimeGenerated > ago(6h)
+| summarize Requests = count() by bin(TimeGenerated, 5m), AppRoleName
+| render timechart
+```
+
+### Top exceptions by impact
+
+```kql
+AppExceptions
+| where TimeGenerated > ago(24h)
+| summarize Count = count(), Users = dcount(UserId) by ProblemId, Type, OuterMessage
+| sort by Count desc
+| take 20
+```
+
+### Slowest and most error-prone dependencies (downstream health)
+
+```kql
+AppDependencies
+| where TimeGenerated > ago(1h)
+| summarize Calls = count(), Failures = countif(Success == false),
+            p95 = percentile(DurationMs, 95)
+  by Target, DependencyType
+| extend FailureRate = round(100.0 * Failures / Calls, 2)
+| sort by FailureRate desc, p95 desc
+```
+
+### Availability SLO - rolling success rate vs target
+
+```kql
+let slo = 99.9;
+AppRequests
+| where TimeGenerated > ago(30d)
+| summarize Total = count(), Good = countif(Success == true)
+| extend AchievedPct = round(100.0 * Good / Total, 3)
+| extend ErrorBudgetBurned = round((slo - AchievedPct) / (100 - slo) * 100, 1)
+| project AchievedPct, SloTarget = slo, ErrorBudgetBurnedPct = ErrorBudgetBurned
+```
+
+### Ingestion volume and cost by table (data hygiene)
+
+```kql
+Usage
+| where TimeGenerated > ago(30d)
+| where IsBillable == true
+| summarize BillableGB = round(sum(Quantity) / 1000, 2) by DataType
+| sort by BillableGB desc
+```
+
+> **See also:** [Azure - Azure Monitor & Log Analytics](/docs/cheatsheets/azure-cheatsheet) for agent deployment, diagnostic settings, and alert-rule creation against these queries. [Defender XDR - Workbooks](/docs/cheatsheets/defender-xdr-cheatsheet) for turning them into dashboards.
+
+---
+
 ## Sentinel Analytic Rules
 
 Analytic rules run as scheduled queries. These patterns produce low-noise, actionable alerts.

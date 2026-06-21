@@ -43,6 +43,16 @@ const BicepIcon = (
     />
 );
 
+const DefenderIcon = (
+    <img
+        src="/assets/defender-logo.svg"
+        alt="Microsoft Defender"
+        width={28}
+        height={28}
+        style={{ flexShrink: 0, opacity: 0.85 }}
+    />
+);
+
 const TerminalIcon = (
     <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none"
         stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
@@ -128,6 +138,13 @@ const CHEATSHEETS: Cheatsheet[] = [
         description: 'Docker setup scripts, Podman pod creation, Docker Compose examples, Kubernetes pod manifests, and nginx reverse proxy configs.',
         tags: ['Docker', 'Podman', 'Kubernetes'],
         icon: <DevIcon name="docker/docker-original.svg" alt="Docker" />,
+    },
+    {
+        title: 'Defender XDR',
+        href: '/docs/cheatsheets/defender-xdr-cheatsheet',
+        description: 'Microsoft Defender XDR automation - Defender for Cloud (az security), Windows Defender Antivirus, Defender for Endpoint on Linux (mdatp), the Graph Security API, advanced hunting KQL, Sentinel and Graph watchlists, plus PowerShell and Python reference clients.',
+        tags: ['Defender', 'XDR', 'Sentinel', 'Security'],
+        icon: DefenderIcon,
     },
     {
         title: 'Developer Environment',

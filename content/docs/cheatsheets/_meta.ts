@@ -8,6 +8,7 @@ export default {
     'bicep-cheatsheet':    'Bicep',
     'cli-utilities-cheatsheet': 'CLI Utilities',
     'containers-cheatsheet': 'Containers',
+    'defender-xdr-cheatsheet': 'Defender XDR',
     'developer-environment-cheatsheet': 'Developer Environment',
     'dotnet-cheatsheet':   '.NET',
     'git-cheatsheet':      'Git',
