@@ -53,7 +53,7 @@ const projects: Project[] = [
     {
         title: 'Logging Standards',
         description:
-            'Enterprise, language-agnostic standards for application logging. Covers structured JSON over stdout, canonical log levels with OpenTelemetry severity mapping, ISO-8601 UTC timestamps, trace correlation, secret and PII hygiene, and exporting to OpenTelemetry, Azure Monitor / Application Insights, and AWS CloudWatch - with a real-world PowerShell reference implementation.',
+            'Enterprise, language-agnostic standards for application logging. Covers structured JSON over stdout, canonical log levels with OpenTelemetry severity mapping, ISO-8601 UTC timestamps, trace correlation, secret and PII hygiene, and exporting to OpenTelemetry, Azure Monitor / Application Insights, and AWS CloudWatch - with reference implementations in PowerShell, Bash, Python, C#, Go, and TypeScript.',
         tags: ['Logging', 'Observability', 'OpenTelemetry', 'Standards'],
         repo: 'https://github.com/libre-devops',
         docs: '/docs/documents/logging-standards',

@@ -22,7 +22,8 @@
     "react-dom": "19.2.7"
   },
   "overrides": {
-    "postcss": ">=8.5.10"
+    "postcss": ">=8.5.10",
+    "dompurify": ">=3.4.11"
   },
   "devDependencies": {
     "@types/node": "25.9.2",

@@ -1,6 +1,6 @@
 ---
 title: Logging Standards
-description: Enterprise, language-agnostic standards for application logging - structured JSON over stdout, canonical log levels and severity mapping, ISO-8601 UTC timestamps, trace correlation, secret and PII hygiene, and exporting to OpenTelemetry, Azure Monitor / Application Insights, and AWS CloudWatch. With a real-world PowerShell reference implementation.
+description: Enterprise, language-agnostic standards for application logging - structured JSON over stdout, canonical log levels and severity mapping, ISO-8601 UTC timestamps, trace correlation, secret and PII hygiene, and exporting to OpenTelemetry, Azure Monitor / Application Insights, and AWS CloudWatch. With reference implementations in PowerShell, Bash, Python, C#, Go, and TypeScript.
 ---
 
 # Logging Standards
@@ -32,7 +32,7 @@ The cost of getting this wrong compounds: unstructured logs are re-parsed at ing
 These are non-negotiable. Everything else in this document elaborates on them.
 
 1. **Structured, not stringly-typed.** Every log record is a structured object (a map of fields), serialised as JSON. Never log a pre-formatted human sentence as the only artifact.
-2. **One JSON object per line.** Emit newline-delimited JSON (NDJSON / `jsonl`) to `stdout`. One event = one line = one parse.
+2. **One JSON object per line.** Emit newline-delimited JSON (NDJSON / `jsonl`) to a dedicated log stream - `stdout` for long-running services, `stderr` for CLIs and tools whose `stdout` carries real output. One event = one line = one parse.
 3. **Machines first, humans second.** The default format is machine-parseable JSON. A human-readable coloured format is a developer-experience opt-in for interactive terminals, never the production default.
 4. **UTC, ISO-8601, always.** Timestamps are RFC 3339 / ISO-8601 with millisecond (or finer) precision, in UTC, with an explicit offset.
 5. **A fixed level vocabulary.** Use the canonical levels below and nothing else. Levels map deterministically to OpenTelemetry `SeverityNumber`.
@@ -205,7 +205,22 @@ service:
 
 ---
 
-## Reference implementation - `Write-LdoLog` (PowerShell)
+## Reference implementations
+
+Every implementation below emits the **same canonical NDJSON record** - identical field names, the same level vocabulary, UTC ISO-8601 timestamps, and trace correlation. What differs is idiomatic plumbing, not the contract: a log line from the Go service and a log line from the Bash script land in the backend with the same shape and answer the same query. Each example uses the de-facto structured logger for its ecosystem rather than a bespoke one - the discipline is in *configuring* the standard logger correctly, not writing your own.
+
+| Language | Recommended logger | Output stream |
+|:--|:--|:--|
+| PowerShell | LibreDevOpsHelpers `Write-LdoLog` (or [PSFramework](https://psframework.org/)) | information / error streams |
+| Bash | `jq`-based helper (below) | stderr |
+| Python | [structlog](https://www.structlog.org/) or stdlib `logging` + JSON formatter | stderr |
+| C# / .NET | `Microsoft.Extensions.Logging` + OpenTelemetry (or [Serilog](https://serilog.net/) CLEF) | OTLP / stdout |
+| Go | stdlib [`log/slog`](https://pkg.go.dev/log/slog) JSON handler | stderr |
+| TypeScript / Node | [pino](https://getpino.io/) | stdout |
+
+> **stdout or stderr?** Long-running **services** write their event stream to **stdout** (twelve-factor); **CLIs and tools** whose stdout carries real output write logs to **stderr** so diagnostics never collide with program output. Container runtimes and orchestrators capture both streams identically, so the backend sees no difference - the choice is purely about not corrupting a tool's data path. The examples reflect each tool's typical role.
+
+### PowerShell - `Write-LdoLog` (canonical worked example)
 
 The [LibreDevOpsHelpers](https://www.powershellgallery.com/packages/LibreDevOpsHelpers) module is a real-world implementation of this standard. Its `Write-LdoLog` is the single logging entry point for every function in the module. It is worth reading as a concrete, production application of every rule above - in a language (PowerShell) that has no built-in structured logger.
 
@@ -346,6 +361,246 @@ A `Json`-mode record from the second call is ready for any backend:
 
 > **Bridging to the canonical schema:** the module keeps field names lean (`invocation` rather than `service.name`) for ergonomics. When shipping to a shared backend, add `service.name`/`service.version`/`trace_id` either via `-Data` at the entry point or with a Collector `transform` operator that renames `invocation` and injects resource attributes - the application stays simple and the standard schema is satisfied at the edge.
 
+### Bash
+
+Bash has no JSON type, so the one rule that matters is: **never hand-build JSON** - delegate encoding to `jq` so every value is escaped correctly. The helper seeds its level and service identity from the environment, drops anything below the threshold, and folds trailing `key value` pairs into the record. It writes to stderr because a shell script's stdout usually carries real output.
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Canonical level -> OTel SeverityNumber. Used for filtering and the severity_number field.
+declare -A _LDO_LEVELS=( [TRACE]=1 [DEBUG]=5 [INFO]=9 [WARN]=13 [ERROR]=17 [FATAL]=21 )
+
+# Operator-controlled, seeded from the environment - no code change to retune.
+LDO_LOG_LEVEL="${LDO_LOG_LEVEL:-INFO}"
+LDO_SERVICE_NAME="${LDO_SERVICE_NAME:-$(basename "${0}")}"
+
+# log LEVEL MESSAGE [key value]...  -> one compact JSON object on stderr.
+log() {
+  local level="${1:?level required}"; local message="${2:?message required}"; shift 2
+
+  # Drop anything below the configured threshold.
+  (( ${_LDO_LEVELS[$level]:-9} < ${_LDO_LEVELS[$LDO_LOG_LEVEL]:-9} )) && return 0
+
+  # %3N (GNU date) gives millisecond precision; jq encodes every value safely.
+  jq -cn \
+     --arg ts  "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" \
+     --arg lvl "$level" \
+     --arg sev "${_LDO_LEVELS[$level]}" \
+     --arg msg "$message" \
+     --arg svc "$LDO_SERVICE_NAME" \
+     --args '
+       {
+         timestamp:       $ts,
+         level:           $lvl,
+         severity_number: ($sev | tonumber),
+         message:         $msg,
+         "service.name":  $svc
+       }
+       + reduce range(0; ($ARGS.positional | length); 2) as $i
+           ({}; .[$ARGS.positional[$i]] = $ARGS.positional[$i + 1])
+     ' "$@" >&2
+}
+
+# Usage - trailing pairs become structured fields.
+log INFO  "Starting deployment"
+log INFO  "Created resource group" resourceGroup rg-prod correlationId "${CID:-}"
+log ERROR "terraform apply failed"  exitCode "$?"
+```
+
+```json
+{"timestamp":"2026-06-21T14:32:08.123Z","level":"INFO","severity_number":9,"message":"Created resource group","service.name":"deploy.sh","resourceGroup":"rg-prod","correlationId":"e2c4..."}
+```
+
+### Python
+
+Use [structlog](https://www.structlog.org/) in new services; where you must stay on the standard library, attach a JSON formatter to the root logger. Configure it **once at the entry point** - library modules just call `logging.getLogger(__name__)` and inherit it. The formatter stamps UTC ISO-8601, maps stdlib level names onto the canonical vocabulary (`WARNING`->`WARN`, `CRITICAL`->`FATAL`), and pulls `trace_id`/`span_id` from the active OpenTelemetry span automatically.
+
+```python
+import datetime as dt
+import json
+import logging
+import sys
+
+from opentelemetry import trace
+
+_SEVERITY = {"DEBUG": 5, "INFO": 9, "WARNING": 13, "ERROR": 17, "CRITICAL": 21}
+_CANONICAL = {"WARNING": "WARN", "CRITICAL": "FATAL"}  # stdlib name -> canonical
+
+
+class JsonFormatter(logging.Formatter):
+    """Render each LogRecord as one canonical NDJSON object."""
+
+    def __init__(self, service: str, version: str = "") -> None:
+        super().__init__()
+        self._base = {"service.name": service}
+        if version:
+            self._base["service.version"] = version
+
+    def format(self, record: logging.LogRecord) -> str:
+        ts = dt.datetime.fromtimestamp(record.created, dt.timezone.utc)
+        out = {
+            "timestamp": ts.isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+            "level": _CANONICAL.get(record.levelname, record.levelname),
+            "severity_number": _SEVERITY.get(record.levelname, 9),
+            "message": record.getMessage(),
+            **self._base,
+        }
+        span = trace.get_current_span().get_span_context()
+        if span.is_valid:
+            out["trace_id"] = format(span.trace_id, "032x")
+            out["span_id"] = format(span.span_id, "016x")
+        out.update(getattr(record, "attributes", {}))  # structured fields via extra=
+        if record.exc_info:
+            out["error.type"] = record.exc_info[0].__name__
+            out["error.stack"] = self.formatException(record.exc_info)
+        return json.dumps(out, default=str)
+
+
+def configure_logging(service: str, level: str = "INFO") -> None:
+    """Call once, at the process entry point - never inside library code."""
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(JsonFormatter(service))
+    root = logging.getLogger()
+    root.handlers[:] = [handler]
+    root.setLevel(level)
+
+
+# Usage
+configure_logging("payments-api", level="INFO")
+log = logging.getLogger(__name__)
+log.info("Created resource group", extra={"attributes": {"resourceGroup": "rg-prod"}})
+log.error("apply failed", exc_info=True, extra={"attributes": {"exitCode": 1}})
+```
+
+### C# / .NET
+
+The most correct .NET route is `Microsoft.Extensions.Logging` with the **OpenTelemetry logger provider**: it maps every `ILogger` record onto the OTel log data model (`Timestamp`, `SeverityNumber`/`SeverityText`, `Body`, `Attributes`, `TraceId`/`SpanId`) and exports over OTLP - no hand-rolled JSON, and trace correlation is automatic from `Activity.Current`. Message-template placeholders become attributes; they are never string-interpolated into the message.
+
+```csharp
+using Microsoft.Extensions.Logging;
+using OpenTelemetry.Logs;
+using OpenTelemetry.Resources;
+
+// Configure once at startup. TraceId/SpanId attach automatically from Activity.Current.
+using var loggerFactory = LoggerFactory.Create(builder =>
+{
+    builder.AddOpenTelemetry(o =>
+    {
+        o.SetResourceBuilder(ResourceBuilder.CreateDefault()
+            .AddService(serviceName: "payments-api", serviceVersion: "2.1.0"));
+        o.IncludeScopes = true;
+        o.AddOtlpExporter();                       // -> OTel Collector (4317) -> any backend
+    });
+    builder.SetMinimumLevel(LogLevel.Information); // operator-controlled floor
+});
+
+ILogger log = loggerFactory.CreateLogger("Deploy");
+
+// Structured: {resourceGroup} becomes a field, not interpolated text.
+log.LogInformation("Created resource group {resourceGroup}", "rg-prod");
+try { /* ... */ }
+catch (Exception ex) { log.LogError(ex, "apply failed with exit code {exitCode}", 1); }
+```
+
+> **When you need JSON on the console** instead of OTLP - e.g. a container whose stdout a Collector tails - add [Serilog](https://serilog.net/) with `Serilog.Formatting.Compact.CompactJsonFormatter` (CLEF) or the built-in `AddJsonConsole()`, and rename their native fields (`@t`/`@l`/`@m` or `Timestamp`/`LogLevel`) to the canonical schema with a Collector `transform` - the same edge-bridging pattern as PowerShell above.
+
+### Go
+
+The standard library's [`log/slog`](https://pkg.go.dev/log/slog) (Go 1.21+) is a structured, levelled JSON logger out of the box - no third-party dependency. A `ReplaceAttr` hook renames slog's default keys (`time`/`level`/`msg`) to the canonical names and forces UTC ISO-8601; `slog.LevelWarn` already serialises as `WARN`. Attach the trace context per-request with `With`.
+
+```go
+package main
+
+import (
+	"context"
+	"log/slog"
+	"os"
+
+	"go.opentelemetry.io/otel/trace"
+)
+
+// newLogger configures a JSON slog logger once, at startup.
+func newLogger(service, version string, level slog.Level) *slog.Logger {
+	h := slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+		Level: level, // operator-controlled floor
+		ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
+			switch a.Key {
+			case slog.TimeKey:
+				a.Key = "timestamp"
+				a.Value = slog.StringValue(a.Value.Time().UTC().Format("2006-01-02T15:04:05.000Z07:00"))
+			case slog.LevelKey:
+				a.Key = "level" // INFO/WARN/ERROR already match the canonical vocabulary
+			case slog.MessageKey:
+				a.Key = "message"
+			}
+			return a
+		},
+	})
+	return slog.New(h).With(
+		slog.String("service.name", service),
+		slog.String("service.version", version),
+	)
+}
+
+// withTrace stamps the active trace context onto every record from the returned logger.
+func withTrace(ctx context.Context, l *slog.Logger) *slog.Logger {
+	sc := trace.SpanContextFromContext(ctx)
+	if !sc.IsValid() {
+		return l
+	}
+	return l.With(
+		slog.String("trace_id", sc.TraceID().String()),
+		slog.String("span_id", sc.SpanID().String()),
+	)
+}
+
+func main() {
+	log := newLogger("payments-api", "2.1.0", slog.LevelInfo)
+
+	// Structured: key/value attributes, never interpolated into the message.
+	log.Info("Created resource group", slog.String("resourceGroup", "rg-prod"))
+	log.Error("apply failed", slog.Int("exitCode", 1))
+}
+```
+
+### TypeScript / Node.js
+
+[pino](https://getpino.io/) is the de-facto high-performance JSON logger for Node. It emits NDJSON to stdout (the service case), and its `formatters`, `timestamp`, `mixin`, and `redact` options shape records to the canonical schema, inject the active trace context into every line, and strip secrets *before* serialisation.
+
+```typescript
+import { context, trace } from "@opentelemetry/api";
+import pino from "pino";
+
+// Configure once at startup. pino's level numbers (10..60) map linearly to OTel
+// SeverityNumber via 0.4 * n - 3  (info 30 -> 9, error 50 -> 17, fatal 60 -> 21).
+export const log = pino({
+  level: process.env.LDO_LOG_LEVEL ?? "info",
+  base: { "service.name": "payments-api", "service.version": "2.1.0" },
+  messageKey: "message",
+  timestamp: () => `,"timestamp":"${new Date().toISOString()}"`, // RFC 3339 UTC, ms precision
+  formatters: {
+    level: (label, number) => ({
+      level: label.toUpperCase(),                 // INFO/WARN/ERROR -> canonical vocabulary
+      severity_number: Math.round(0.4 * number - 3),
+    }),
+  },
+  // Strip secrets before they are ever written.
+  redact: { paths: ["req.headers.authorization", "password", "token"], censor: "[REDACTED]" },
+  mixin() {
+    const span = trace.getSpan(context.active());
+    if (!span) return {};
+    const { traceId, spanId } = span.spanContext();
+    return { trace_id: traceId, span_id: spanId };
+  },
+});
+
+// Structured: data object first, constant message second.
+log.info({ resourceGroup: "rg-prod" }, "Created resource group");
+log.error({ exitCode: 1 }, "apply failed");
+```
+
 ---
 
 ## Operational guidance
@@ -405,6 +660,7 @@ A service meets this standard when:
 - [Azure Monitor Logs Ingestion API](https://learn.microsoft.com/en-us/azure/azure-monitor/logs/logs-ingestion-api-overview) - custom structured logs into Log Analytics
 - [Azure Monitor OpenTelemetry](https://learn.microsoft.com/en-us/azure/azure-monitor/app/opentelemetry-enable) - correlated logs/traces in Application Insights
 - [AWS Distro for OpenTelemetry](https://aws-otel.github.io/) - exporting to CloudWatch Logs and X-Ray
-- [LibreDevOpsHelpers on the PowerShell Gallery](https://www.powershellgallery.com/packages/LibreDevOpsHelpers) - the reference implementation
-- [PowerShell Standards](/docs/documents/powershell-standards) - native streams, PSFramework, OTel tracing, Azure telemetry sync
-- [Python Standards](/docs/documents/python-standards) · [Bash Standards](/docs/documents/bash-standards) · [CI/CD Standards](/docs/documents/cicd-standards) - logging in context
+- **Per-language loggers:** [structlog](https://www.structlog.org/) (Python) · [Serilog](https://serilog.net/) / [.NET OpenTelemetry](https://learn.microsoft.com/en-us/dotnet/core/diagnostics/distributed-tracing) (C#) · [`log/slog`](https://pkg.go.dev/log/slog) (Go) · [pino](https://getpino.io/) (Node) · [PSFramework](https://psframework.org/) (PowerShell)
+- [LibreDevOpsHelpers on the PowerShell Gallery](https://www.powershellgallery.com/packages/LibreDevOpsHelpers) - the canonical reference implementation
+- **Language standards & cheatsheets:** [PowerShell Standards](/docs/documents/powershell-standards) · [Python Standards](/docs/documents/python-standards) · [Bash Standards](/docs/documents/bash-standards) · [CI/CD Standards](/docs/documents/cicd-standards)
+- **Cheatsheets:** [Bash](/docs/cheatsheets/bash-cheatsheet) · [Python](/docs/cheatsheets/python-cheatsheet) · [.NET](/docs/cheatsheets/dotnet-cheatsheet) · [Go](/docs/cheatsheets/go-cheatsheet) · [TypeScript](/docs/cheatsheets/typescript-cheatsheet) · [PowerShell](/docs/cheatsheets/powershell-cheatsheet)
