@@ -376,6 +376,21 @@ declare -A _LDO_LEVELS=( [TRACE]=1 [DEBUG]=5 [INFO]=9 [WARN]=13 [ERROR]=17 [FATA
 LDO_LOG_LEVEL="${LDO_LOG_LEVEL:-INFO}"
 LDO_SERVICE_NAME="${LDO_SERVICE_NAME:-$(basename "${0}")}"
 
+# Portable UTC ISO-8601 timestamp. %3N (millisecond precision) is GNU-only; BSD/macOS
+# date leaves a literal "N" instead of expanding it. Prefer gdate, then detect whether
+# the system date expanded %3N, and degrade to second precision when it did not.
+_ldo_iso8601_utc_now() {
+  if command -v gdate >/dev/null 2>&1; then
+    gdate -u +%Y-%m-%dT%H:%M:%S.%3NZ
+    return
+  fi
+  local ts; ts=$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)
+  case $ts in
+    *N*) date -u +%Y-%m-%dT%H:%M:%SZ ;;  # BSD/macOS - no millisecond support
+    *)   printf '%s\n' "$ts" ;;          # GNU - %3N expanded to digits
+  esac
+}
+
 # log LEVEL MESSAGE [key value]...  -> one compact JSON object on stderr.
 log() {
   local level="${1:?level required}"; local message="${2:?message required}"; shift 2
@@ -383,9 +398,9 @@ log() {
   # Drop anything below the configured threshold.
   (( ${_LDO_LEVELS[$level]:-9} < ${_LDO_LEVELS[$LDO_LOG_LEVEL]:-9} )) && return 0
 
-  # %3N (GNU date) gives millisecond precision; jq encodes every value safely.
+  # jq encodes every value safely - never hand-build JSON in shell.
   jq -cn \
-     --arg ts  "$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)" \
+     --arg ts  "$(_ldo_iso8601_utc_now)" \
      --arg lvl "$level" \
      --arg sev "${_LDO_LEVELS[$level]}" \
      --arg msg "$message" \
@@ -448,7 +463,7 @@ class JsonFormatter(logging.Formatter):
             **self._base,
         }
         span = trace.get_current_span().get_span_context()
-        if span.is_valid:
+        if span.is_valid:  # SpanContext.is_valid is a @property - no parentheses
             out["trace_id"] = format(span.trace_id, "032x")
             out["span_id"] = format(span.span_id, "016x")
         out.update(getattr(record, "attributes", {}))  # structured fields via extra=
@@ -529,6 +544,8 @@ func newLogger(service, version string, level slog.Level) *slog.Logger {
 			switch a.Key {
 			case slog.TimeKey:
 				a.Key = "timestamp"
+				// Z07:00 is the RFC3339 layout token: it emits "Z" for a zero (UTC)
+				// offset and "±hh:mm" otherwise. .UTC() forces the former.
 				a.Value = slog.StringValue(a.Value.Time().UTC().Format("2006-01-02T15:04:05.000Z07:00"))
 			case slog.LevelKey:
 				a.Key = "level" // INFO/WARN/ERROR already match the canonical vocabulary
