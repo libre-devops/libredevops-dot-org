@@ -467,7 +467,9 @@ class JsonFormatter(logging.Formatter):
             out["trace_id"] = format(span.trace_id, "032x")
             out["span_id"] = format(span.span_id, "016x")
         out.update(getattr(record, "attributes", {}))  # structured fields via extra=
-        if record.exc_info:
+        # exc_info=True with no active exception yields (None, None, None) - truthy,
+        # but exc_info[0] is None, so guard the type before reading __name__.
+        if record.exc_info and record.exc_info[0]:
             out["error.type"] = record.exc_info[0].__name__
             out["error.stack"] = self.formatException(record.exc_info)
         return json.dumps(out, default=str)

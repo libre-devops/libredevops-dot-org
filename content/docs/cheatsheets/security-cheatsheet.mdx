@@ -906,6 +906,7 @@ sqlmap -r request.txt --level 5 --risk 3 --dbs --batch
 ### Attempt OS shell (if DB user has FILE privilege)
 
 ```bash
+# WARNING: Destructive capability. Use only with explicit written authorisation and approved scope.
 sqlmap -u "https://<target>/page?id=1" --os-shell --batch
 ```
 
@@ -1024,7 +1025,7 @@ auditpol /set /subcategory:"User Account Management" /success:enable /failure:en
 auditpol /get /category:*
 ```
 
-### Enable Credential Guard ✅ Current preferred LSASS protection (as of 2026, requires UEFI + Secure Boot)
+### Enable Credential Guard ✅ Current preferred LSASS protection (as of May 2026, requires UEFI + Secure Boot)
 
 ```powershell
 # Enable via registry (reboot required)
@@ -1333,7 +1334,7 @@ ausearch -k root_commands -ts today | aureport -f -i
 ausearch -k sudoers -ts today
 ```
 
-### Install and configure fail2ban ✅ Current preferred brute-force mitigation (as of 2026)
+### Install and configure fail2ban ✅ Current preferred brute-force mitigation (as of May 2026)
 
 ```bash
 apt install fail2ban -y

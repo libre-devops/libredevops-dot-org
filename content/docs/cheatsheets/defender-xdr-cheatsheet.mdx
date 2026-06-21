@@ -491,6 +491,111 @@ sudo mdatp diagnostic create
 
 ---
 
+# Client Analyzer (sensor health triage)
+
+When a device shows as **Inactive**, **No sensor data**, or **Impaired communications** in the portal, the Microsoft Defender for Endpoint Client Analyzer (MDECA) is the first tool to reach for. It bundles onboarding state, cloud-connectivity results, configuration, and logs into one package you read locally or hand to Microsoft support. It runs on Windows, Linux, and macOS, before or after onboarding - so it doubles as a pre-flight prerequisites check.
+
+> 🔬 Nothing is sent to Microsoft automatically. The output zip stays on the device and can contain PII (hostnames, usernames, IPs); share it with Microsoft CSS only through Secure File Exchange.
+
+## Windows
+
+### Download and run
+
+```powershell
+# Download from https://aka.ms/mdatpanalyzer, extract MDEClientAnalyzer.zip, then from an
+# elevated Command Prompt or PowerShell in the extracted folder:
+.\MDEClientAnalyzer.cmd
+```
+
+On the modern unified solution the script calls `MDEClientAnalyzer.exe` for the cloud-connectivity tests and uses Sysinternals `PsExec.exe` to run them as `Local System` (emulating the SENSE service). Results land in `MDEClientAnalyzerResult.zip`.
+
+### What is in the result package
+
+| Item | Why you care |
+|---|---|
+| `MDEClientAnalyzer.htm` | The main report - findings and remediation guidance, read this first |
+| `SystemInfoLogs/RegOnboardedInfoCurrent.Json` | Onboarding state and org ID pulled from the registry |
+| `SystemInfoLogs/CertValidate.log` | Certificate revocation / TLS-inspection problems |
+| `EventLogs/sense.evtx`, `senseIR.evtx`, `utc.evtx` | EDR sensor, automated investigation, and DiagTrack logs |
+| `MdeConfigMgrLogs/*.json` | Security-management (Intune) policy and enforcement results |
+
+### What to look out for (Windows)
+
+- ⚠️ **ASR blocking the analyzer** - the ASR rule *Block process creations originating from PSExec and WMI commands* blocks the connectivity test. Temporarily set it to Audit, add a folder exclusion, or disable it for the run.
+- ⚠️ **PsExec must be allowed** - WDAC / app-control or AV blocking `PsExec.exe` stops the cloud checks. Allow it at least while the analyzer runs.
+- 🚨 **Signature errors mean tampering** - every script in the package is Microsoft-signed. If it exits with a signature error, read `issuerInfo.txt`; do not "fix" it by unblocking a modified file - re-download from the official link.
+- 🔬 **`Sense` stopped is normal pre-onboarding** - on a device that is not onboarded yet the EDR sensor is stopped and the report reflects that. Run the analyzer anyway to validate connectivity before you onboard.
+
+## Linux
+
+Since agent version `101.25082.0000` the analyzer ships **inside** the product, so on a modern install there is nothing to download.
+
+### Built-in (shipped with the agent)
+
+```bash
+# Self-contained binary - no Python required
+cd /opt/microsoft/mdatp/tools/client_analyzer/binary
+sudo ./MDESupportTool -d            # -d = full diagnostic bundle, written to /tmp/*.zip
+
+# Or the Python build, same directory tree
+cd /opt/microsoft/mdatp/tools/client_analyzer/python
+sudo ./mde_support_tool.sh -d
+```
+
+### Standalone (older agents, or running before install)
+
+```bash
+# Binary build - no Python dependency, prefer this on servers
+wget --quiet -O XMDEClientAnalyzerBinary.zip https://aka.ms/XMDEClientAnalyzerBinary
+unzip -q XMDEClientAnalyzerBinary.zip -d XMDEClientAnalyzerBinary
+cd XMDEClientAnalyzerBinary
+unzip -q SupportToolLinuxamd64Binary.zip      # or SupportToolLinuxarm64Binary.zip on ARM
+sudo ./MDESupportTool -d
+
+# Python build - needs Python 3 plus pip packages (decorator, sh, distro, lxml, psutil)
+wget --quiet -O XMDEClientAnalyzer.zip https://aka.ms/XMDEClientAnalyzer
+unzip -q XMDEClientAnalyzer.zip -d XMDEClientAnalyzer && cd XMDEClientAnalyzer
+chmod a+x mde_support_tool.sh
+./mde_support_tool.sh                # run once as a normal user to install deps
+sudo ./mde_support_tool.sh -d        # then collect with root
+```
+
+> 🔬 The `unzip` package is required to install and `acl` to run. Behind a proxy, pass it through: `https_proxy=https://proxy:8080 sudo ./mde_support_tool.sh -d`.
+
+### Targeted checks (the useful subcommands)
+
+```bash
+# Are the MDE cloud URLs reachable? Pass the onboarding blob to test the real geo
+sudo ./MDESupportTool connectivitytest -o ~/MicrosoftDefenderATPOnboardingLinuxServer.py
+
+# Prerequisite / onboarding report -> installation_report.json
+# (distro support, min requirements, connectivity, mde_health, folder_perm)
+sudo ./MDESupportTool installation --all
+
+# Reproduce and capture a performance problem -> perf_benchmark.tar.gz
+sudo ./MDESupportTool performance --frequency 500
+
+# auditd pegging the CPU? cap it to 2500 events/sec (affects every auditd consumer)
+sudo ./mde_support_tool.sh ratelimit -e true
+```
+
+### What to look out for (Linux)
+
+- 🚨 **auditd CPU storms** - on the auditd backend MDE adds rules that can spike CPU. Capture it with `performance`, then tame it with `ratelimit` or `exclude` - but remember `ratelimit` drops events for *all* auditd consumers, not just MDE.
+- ⚠️ **eBPF vs auditd backend** - the bundle records which provider is active (`ebpf_*` vs `auditd_*` files). Modern distros should be on eBPF; a silent fall back to auditd is a common root cause of performance tickets.
+- ⚠️ **CRLF line endings** - editing the wrapper scripts on Windows leaves CRLF endings that break them on Linux. Run `dos2unix` on anything you touched.
+- 🔬 **Read `installation_report.json` first** - `support_status`, `distro`, `connectivitytest`, and `folder_perm` tell you in one file whether the host is even a supported, reachable configuration.
+
+## Common triage across both
+
+- 🔬 **Connectivity is the usual culprit** - most *Inactive* / *Impaired communications* sensors are a proxy or firewall blocking the MDE service URLs. Run the analyzer's connectivity test before any deeper digging, and allow the documented MDE service URLs through the proxy.
+- 🔬 **Run it before onboarding too** - as a prerequisites checker it catches unsupported distros / OS builds, missing dependencies, and blocked URLs before a rollout.
+- ⚠️ **Treat the output as sensitive** - the result zip contains PII; share it with Microsoft only via Secure File Exchange, and store it like any other host forensic artifact.
+
+> **See also:** the [`mdatp`](#defender-for-endpoint-on-linux-mdatp) commands above for day-to-day Linux agent control, [Windows Defender Antivirus](#windows-defender-antivirus) for the on-device engine cmdlets, and Microsoft's [client analyzer overview](https://learn.microsoft.com/en-us/defender-endpoint/overview-client-analyzer) for the full file-by-file reference.
+
+---
+
 # Defender XDR - Graph Security API
 
 The unified `https://graph.microsoft.com/v1.0/security` surface returns alerts, incidents, and hunting results across every Defender product. Response actions on devices (isolate, scan, collect package) live on the older Defender for Endpoint API at `https://api.securitycenter.microsoft.com`.
