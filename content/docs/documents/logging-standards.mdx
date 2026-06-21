@@ -49,7 +49,7 @@ A log record is a flat (or shallowly-nested) JSON object. The following fields a
 
 | Field | Required | Type | Description |
 |:--|:--|:--|:--|
-| `timestamp` | **Yes** | string | Event time, RFC 3339 / ISO-8601, UTC, ≥ millisecond precision (e.g. `2026-06-21T14:32:08.123Z`). Maps to OTel `Timestamp`. |
+| `timestamp` | **Yes** | string | Event time, RFC 3339 / ISO-8601, UTC, ≥ millisecond precision (e.g. `YYYY-MM-DDTHH:mm:ss.sssZ`). Maps to OTel `Timestamp`. |
 | `level` | **Yes** | string | Canonical severity text: `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`, `FATAL`. Maps to OTel `SeverityText`. |
 | `severity_number` | Recommended | int | OTel `SeverityNumber` (see mapping). Lets backends sort/filter by severity without parsing text. |
 | `message` | **Yes** | string | Human-readable event description. The constant part; variable data goes in fields, not interpolated here. Maps to OTel `Body`. |
@@ -66,7 +66,7 @@ A log record is a flat (or shallowly-nested) JSON object. The following fields a
 A canonical record:
 
 ```json
-{"timestamp":"2026-06-21T14:32:08.123Z","level":"ERROR","severity_number":17,"message":"Failed to create resource group","service.name":"LibreDevOpsHelpers","service.version":"2.1.0","deployment.environment":"prod","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","span_id":"00f067aa0ba902b7","resource_group":"rg-prod-uks","error.type":"Azure.RequestFailedException"}
+{"timestamp":"YYYY-MM-DDTHH:mm:ss.sssZ","level":"ERROR","severity_number":17,"message":"Failed to create resource group","service.name":"LibreDevOpsHelpers","service.version":"2.1.0","deployment.environment":"prod","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","span_id":"00f067aa0ba902b7","resource_group":"rg-prod-uks","error.type":"Azure.RequestFailedException"}
 ```
 
 > **Rule:** `message` is the *constant* description of an event; identifying and variable data are separate fields. Log `{"message":"order rejected","order_id":4412,"reason":"insufficient_funds"}`, never `{"message":"order 4412 rejected: insufficient funds"}`. Constant messages are groupable, alertable, and translatable; interpolated ones are not.
@@ -94,11 +94,11 @@ A canonical record:
 ## Timestamps
 
 ```
-2026-06-21T14:32:08.123Z          ✅ ISO-8601 / RFC 3339, UTC, millisecond precision
-2026-06-21T14:32:08.123+00:00     ✅ explicit zero offset is equally valid
-2026-06-21 14:32:08               ❌ no timezone - ambiguous and unjoinable
-21/06/2026 2:32 PM                 ❌ locale-dependent, unsortable, lossy
-1750516328                         ❌ bare epoch - human-opaque, precision unclear
+YYYY-MM-DDTHH:mm:ss.sssZ          ✅ ISO-8601 / RFC 3339, UTC, millisecond precision
+YYYY-MM-DDTHH:mm:ss.sss+00:00     ✅ explicit zero offset is equally valid
+YYYY-MM-DD HH:mm:ss               ❌ no timezone - ambiguous and unjoinable
+DD/MM/YYYY h:mm A                 ❌ locale-dependent, unsortable, lossy
+1750516328                        ❌ bare epoch - human-opaque, precision unclear
 ```
 
 - **UTC, always.** Local time with DST shifts makes logs from different regions impossible to order and creates a duplicated/missing hour twice a year. Convert to local at display time only.
@@ -356,7 +356,7 @@ Write-LdoLog -Level ERROR -Message "Failed: $($_.Exception.Message)" -Data @{ ex
 A `Json`-mode record from the second call is ready for any backend:
 
 ```json
-{"timestamp":"2026-06-21T14:32:08.123Z","level":"INFO","invocation":"New-LdoResourceGroup","message":"Created resource group","resourceGroup":"rg-prod","correlationId":"e2c4..."}
+{"timestamp":"YYYY-MM-DDTHH:mm:ss.sssZ","level":"INFO","invocation":"New-LdoResourceGroup","message":"Created resource group","resourceGroup":"rg-prod","correlationId":"e2c4..."}
 ```
 
 > **Bridging to the canonical schema:** the module keeps field names lean (`invocation` rather than `service.name`) for ergonomics. When shipping to a shared backend, add `service.name`/`service.version`/`trace_id` either via `-Data` at the entry point or with a Collector `transform` operator that renames `invocation` and injects resource attributes - the application stays simple and the standard schema is satisfied at the edge.
@@ -410,7 +410,7 @@ log ERROR "terraform apply failed"  exitCode "$?"
 ```
 
 ```json
-{"timestamp":"2026-06-21T14:32:08.123Z","level":"INFO","severity_number":9,"message":"Created resource group","service.name":"deploy.sh","resourceGroup":"rg-prod","correlationId":"e2c4..."}
+{"timestamp":"YYYY-MM-DDTHH:mm:ss.sssZ","level":"INFO","severity_number":9,"message":"Created resource group","service.name":"deploy.sh","resourceGroup":"rg-prod","correlationId":"e2c4..."}
 ```
 
 ### Python
