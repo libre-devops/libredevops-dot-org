@@ -562,6 +562,110 @@ sudo ./mde_support_tool.sh -d        # then collect with root
 
 > 🔬 The `unzip` package is required to install and `acl` to run. Behind a proxy, pass it through: `https_proxy=https://proxy:8080 sudo ./mde_support_tool.sh -d`.
 
+### One-shot collection wrapper
+
+For ticket-driven collection it helps to turn the log level up to `debug` first (so the bundle captures verbose logs), run the analyzer, restore the level, then hand back the path with copy-paste transfer and cleanup advice. The quick one-liner:
+
+```bash
+sudo mdatp log level set --level debug \
+  && sudo /opt/microsoft/mdatp/tools/client_analyzer/binary/MDESupportTool --bypass-disclaimer -d \
+  && sudo mdatp log level set --level info \
+  && ZIP=$(ls -t /tmp/*.zip 2>/dev/null | head -1) \
+  && sudo chown "$(whoami)" "$ZIP" \
+  && echo "OUTPUT_FILE:$ZIP" \
+  && echo "Off-host (by hostname): scp $(whoami)@$(hostname -f):$ZIP ./" \
+  && echo "Off-host (by IP):       scp $(whoami)@$(hostname -I | awk '{print $1}'):$ZIP ./" \
+  && echo "Remove when done:       rm -f $ZIP"
+```
+
+Or the same flow as a reusable script - structured logging on `stderr`, machine-parseable data lines on `stdout`, and a fallback if `--bypass-disclaimer` is not supported on the installed agent:
+
+```bash
+#!/usr/bin/env bash
+#
+# collect-mde-diag.sh
+# Collects an MDE on Linux client analyzer bundle, restores log level,
+# and prints the output path, transfer advice, and cleanup advice.
+
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# Logger (plain text, no jq required). Logs go to stderr so stdout stays
+# reserved for machine-parseable data lines (OUTPUT_FILE, transfer, cleanup).
+# LOG_LEVEL: DEBUG < INFO < WARN < ERROR (default INFO).
+# ---------------------------------------------------------------------------
+LOG_LEVEL="${LOG_LEVEL:-INFO}"
+
+declare -A _LOG_WEIGHTS=( [DEBUG]=10 [INFO]=20 [WARN]=30 [ERROR]=40 )
+
+_log() {
+  local level="$1"; shift
+  local msg="$*"
+  local want="${_LOG_WEIGHTS[$LOG_LEVEL]:-20}"
+  local have="${_LOG_WEIGHTS[$level]:-20}"
+  (( have < want )) && return 0
+  printf '%s  %-5s  %s\n' \
+    "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$level" "$msg" >&2
+}
+
+log_debug() { _log DEBUG "$@"; }
+log_info()  { _log INFO  "$@"; }
+log_warn()  { _log WARN  "$@"; }
+log_error() { _log ERROR "$@"; }
+
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
+TOOL="/opt/microsoft/mdatp/tools/client_analyzer/binary/MDESupportTool"
+TMPDIR_OUT="/tmp"
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+if [[ ! -x "$TOOL" ]]; then
+  log_error "MDESupportTool not found or not executable at $TOOL"
+  exit 1
+fi
+
+log_info "Setting mdatp log level to debug"
+sudo mdatp log level set --level debug
+
+log_info "Running client analyzer (diagnostic collection)"
+if ! sudo "$TOOL" --bypass-disclaimer -d; then
+  log_warn "--bypass-disclaimer not accepted, retrying with prompt auto-answer"
+  echo "y" | sudo "$TOOL" -d
+fi
+
+log_info "Restoring mdatp log level to info"
+sudo mdatp log level set --level info
+
+log_debug "Searching for newest zip in $TMPDIR_OUT"
+ZIP="$(ls -t "$TMPDIR_OUT"/*.zip 2>/dev/null | head -1 || true)"
+
+if [[ -z "$ZIP" || ! -f "$ZIP" ]]; then
+  log_error "No output zip found in $TMPDIR_OUT"
+  exit 1
+fi
+
+log_info "Found bundle: $ZIP"
+log_debug "Chowning $ZIP to $(whoami) for transfer"
+sudo chown "$(whoami)" "$ZIP"
+
+USER_NAME="$(whoami)"
+HOST_FQDN="$(hostname -f)"
+HOST_IP="$(hostname -I | awk '{print $1}')"
+
+# Data lines on stdout, deliberately separate from the log stream above.
+echo "OUTPUT_FILE:$ZIP"
+echo "To get this off the host, run (by hostname): scp ${USER_NAME}@${HOST_FQDN}:${ZIP} ./"
+echo "To get this off the host, run (by IP): scp ${USER_NAME}@${HOST_IP}:${ZIP} ./"
+echo "It is highly advised you remove this log file when done: rm -f $ZIP"
+
+log_info "Done"
+```
+
+> ⚠️ Restore the log level to `info` afterwards (the script does this even on the fallback path) - leaving `mdatp` on `debug` writes verbose logs continuously and will fill the disk over time. The output zip holds PII, so apply the same Secure File Exchange and cleanup discipline noted below.
+
 ### Targeted checks (the useful subcommands)
 
 ```bash
