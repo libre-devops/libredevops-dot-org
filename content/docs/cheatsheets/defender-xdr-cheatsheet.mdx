@@ -593,9 +593,9 @@ set -euo pipefail
 # Logger (no jq required). Logs go to stderr so stdout stays reserved for
 # machine-parseable data lines (OUTPUT_FILE, transfer, cleanup).
 # LOG_LEVEL: DEBUG < INFO < WARN < ERROR (default INFO).
-# Level word is colourised (like PowerShell colours its Write-* streams), but
-# only when it will actually render - so piped into a ticket or a file the
-# output stays plain, with no raw ANSI escapes.
+# Level and message are colourised by severity (like PowerShell colours its
+# Write-* streams), but only when it will actually render - so piped into a
+# ticket or a file the output stays plain, with no raw ANSI escapes.
 # ---------------------------------------------------------------------------
 LOG_LEVEL="${LOG_LEVEL:-INFO}"
 
@@ -623,10 +623,11 @@ _log() {
   local want="${_LOG_WEIGHTS[$LOG_LEVEL]:-20}"
   local have="${_LOG_WEIGHTS[$level]:-20}"
   (( have < want )) && return 0
-  printf '%s  %s%-5s%s  %s\n' \
+  # Colour spans the level and the message (like PowerShell's Write-* streams);
+  # timestamp stays neutral, reset closes the line.
+  printf '%s  %s%-5s  %s%s\n' \
     "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
-    "${_LOG_COLOURS[$level]:-}" "$level" "$_LOG_RESET" \
-    "$msg" >&2
+    "${_LOG_COLOURS[$level]:-}" "$level" "$msg" "$_LOG_RESET" >&2
 }
 
 log_debug() { _log DEBUG "$@"; }

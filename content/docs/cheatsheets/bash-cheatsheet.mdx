@@ -101,7 +101,7 @@ LOG_LEVEL=DEBUG ./deploy.sh   # turn on verbose logging
 
 ### Adding colour (like PowerShell's streams)
 
-PowerShell colours its `Write-Warning` / `Write-Error` / `Write-Verbose` streams by default; Bash doesn't, but you can. The trick is to emit ANSI **only when it'll be rendered**: drop a colour map and a guard in alongside the weights, then wrap the level word in the `printf`.
+PowerShell colours its `Write-Warning` / `Write-Error` / `Write-Verbose` streams by default - and it colours the **whole** line, not just a label. We do the same: the severity colour runs across the level *and* the message, leaving the timestamp neutral so it stays easy to scan. The trick is to emit ANSI **only when it'll be rendered**: drop a colour map and a guard in alongside the weights, then wrap level-through-message in the `printf`.
 
 ```bash
 # ...after the _LOG_WEIGHTS line, add a colour map and a guard:
@@ -122,11 +122,11 @@ elif [[ -z ${FORCE_COLOR:-} && -z ${CLICOLOR_FORCE:-} && ! -t 2 ]]; then
   _LOG_COLOURS=(); _LOG_RESET=''                       # not a TTY, not forced
 fi
 
-# ...then swap the printf in _log to wrap the level in colour/reset:
-printf '%s  %s%-5s%s  %s\n' \
+# ...then swap the printf in _log so colour spans the level AND the message
+# (timestamp stays neutral), closing with the reset at the end of the line:
+printf '%s  %s%-5s  %s%s\n' \
   "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
-  "${_LOG_COLOURS[$level]:-}" "$level" "$_LOG_RESET" \
-  "$msg" >&2
+  "${_LOG_COLOURS[$level]:-}" "$level" "$msg" "$_LOG_RESET" >&2
 ```
 
 `NO_COLOR` is checked with `-n` (non-empty) so a bare `NO_COLOR=` doesn't accidentally disable colour - that's what [the spec](https://no-color.org) asks for. Because the colour map is emptied (not unset), `${_LOG_COLOURS[$level]:-}` still expands cleanly under `set -u`.
