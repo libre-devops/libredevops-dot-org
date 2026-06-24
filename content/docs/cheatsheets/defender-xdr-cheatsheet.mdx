@@ -590,13 +590,32 @@ Or the same flow as a reusable script - structured logging on `stderr`, machine-
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
-# Logger (plain text, no jq required). Logs go to stderr so stdout stays
-# reserved for machine-parseable data lines (OUTPUT_FILE, transfer, cleanup).
+# Logger (no jq required). Logs go to stderr so stdout stays reserved for
+# machine-parseable data lines (OUTPUT_FILE, transfer, cleanup).
 # LOG_LEVEL: DEBUG < INFO < WARN < ERROR (default INFO).
+# Level word is colourised (like PowerShell colours its Write-* streams), but
+# only when it will actually render - so piped into a ticket or a file the
+# output stays plain, with no raw ANSI escapes.
 # ---------------------------------------------------------------------------
 LOG_LEVEL="${LOG_LEVEL:-INFO}"
 
 declare -A _LOG_WEIGHTS=( [DEBUG]=10 [INFO]=20 [WARN]=30 [ERROR]=40 )
+
+declare -A _LOG_COLOURS=(
+  [DEBUG]=$'\033[2;37m'   # dim grey
+  [INFO]=$'\033[1;36m'    # cyan
+  [WARN]=$'\033[1;33m'    # yellow
+  [ERROR]=$'\033[1;31m'   # red
+)
+_LOG_RESET=$'\033[0m'
+# Priority: NO_COLOR always wins; otherwise FORCE_COLOR / CLICOLOR_FORCE let you
+# opt colour back in for CI log viewers that render ANSI but aren't real TTYs;
+# otherwise fall back to "colour only when stderr is a terminal".
+if [[ -n ${NO_COLOR:-} ]]; then
+  _LOG_COLOURS=(); _LOG_RESET=''                       # https://no-color.org
+elif [[ -z ${FORCE_COLOR:-} && -z ${CLICOLOR_FORCE:-} && ! -t 2 ]]; then
+  _LOG_COLOURS=(); _LOG_RESET=''                       # not a TTY, not forced
+fi
 
 _log() {
   local level="$1"; shift
@@ -604,8 +623,10 @@ _log() {
   local want="${_LOG_WEIGHTS[$LOG_LEVEL]:-20}"
   local have="${_LOG_WEIGHTS[$level]:-20}"
   (( have < want )) && return 0
-  printf '%s  %-5s  %s\n' \
-    "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$level" "$msg" >&2
+  printf '%s  %s%-5s%s  %s\n' \
+    "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+    "${_LOG_COLOURS[$level]:-}" "$level" "$_LOG_RESET" \
+    "$msg" >&2
 }
 
 log_debug() { _log DEBUG "$@"; }
