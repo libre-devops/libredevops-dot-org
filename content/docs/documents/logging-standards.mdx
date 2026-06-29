@@ -231,28 +231,35 @@ The [LibreDevOpsHelpers](https://www.powershellgallery.com/packages/LibreDevOpsH
 | Structured JSON, one object per line | Default format is compact JSON via `ConvertTo-Json -Compress` - one NDJSON object per call. |
 | Machines first, humans opt-in | `Json` is the default; `Text` (coloured) and `JsonIndented` are explicit opt-ins for local debugging only. |
 | UTC ISO-8601 timestamps | `(Get-Date).ToUniversalTime().ToString('o')` - round-trip `o` format is RFC 3339 UTC. |
-| Fixed level vocabulary | `DEBUG, INFO, SUCCESS, WARN, ERROR`, validated by `[ValidateSet]`. |
-| Semantic alias collapses to canonical | `SUCCESS` is gated at the same threshold as `INFO` and routed to the information stream - presentation sugar over `INFO` severity. |
-| Configure at the edge | Level and format seed from `LDO_LOG_LEVEL` / `LDO_LOG_FORMAT` env vars, with `Set-LdoLogLevel` / `Set-LdoLogFormat` overrides - no code change to retune. |
-| Logging never corrupts output | Each level routes to a non-success stream (`Write-Debug`/`Write-Information`/`Write-Warning`/`Write-Error`); nothing touches stdout/stream 1. |
-| Logging never throws | `ERROR` is emitted with `-ErrorAction Continue` (explicitly non-terminating) even under `$ErrorActionPreference = 'Stop'`; the caller decides whether to throw. |
-| Extensible attributes | `-Data` merges arbitrary structured properties (correlation ids, resource names) into the JSON record. |
+| Fixed level vocabulary | `TRACE, DEBUG, INFO, SUCCESS, WARN, ERROR, FATAL`, validated by `[ValidateSet]`. |
+| `severity_number` emitted | Each level maps to its OTel `SeverityNumber` (`TRACE` 1 ... `FATAL` 21) so backends sort and filter without parsing text. |
+| Semantic alias collapses to canonical | `SUCCESS` is gated at the same threshold as `INFO`, emits `severity_number` 9, and routes to the information stream - presentation sugar over `INFO` severity. |
+| `service.name` / `service.version` / `deployment.environment` | `service.name` seeds from `LDO_SERVICE_NAME` (falling back to the invocation name); `service.version` and `deployment.environment` are added from their env vars when set. |
+| Correlate by default | `trace_id` / `span_id` / `correlation_id` are stamped from an ambient trace context (`Set-LdoTraceContext`, seeded from `LDO_TRACE_ID` / `LDO_SPAN_ID` / `LDO_CORRELATION_ID`) whenever set. |
+| Configure at the edge | Level and format seed from `LDO_LOG_LEVEL` / `LDO_LOG_FORMAT` env vars, with `Set-LdoLogLevel` / `Set-LdoLogFormat` overrides - no code change to retune. `INFO` is the default floor. |
+| Logging never corrupts output | Each level routes to a non-success stream (`Write-Verbose`/`Write-Debug`/`Write-Information`/`Write-Warning`/`Write-Error`); nothing touches stdout/stream 1. |
+| Logging never throws | `ERROR` and `FATAL` are emitted with `-ErrorAction Continue` (explicitly non-terminating) even under `$ErrorActionPreference = 'Stop'`; the caller decides whether to throw or exit. |
+| Extensible attributes | `-Data` merges arbitrary structured properties (resource names, durations) into the JSON record. |
 
 ```powershell
 Set-StrictMode -Version Latest
 
-# Module-scoped minimum level. Messages below this are suppressed. DEBUG also
-# respects $DebugPreference, so it stays hidden unless the caller opts in.
-$script:LdoLogLevels = @{ DEBUG = 0; INFO = 1; SUCCESS = 1; WARN = 2; ERROR = 3 }
+# Canonical level vocabulary, ordered for threshold comparison. TRACE and DEBUG are developer
+# diagnostics; SUCCESS is a presentation alias that collapses to INFO severity.
+$script:LdoLogLevels = @{ TRACE = 0; DEBUG = 1; INFO = 2; SUCCESS = 2; WARN = 3; ERROR = 4; FATAL = 5 }
+
+# OpenTelemetry SeverityNumber for each level (SUCCESS collapses to INFO = 9). Emitted as
+# severity_number so backends can sort and filter by severity without parsing text.
+$script:LdoSeverityNumbers = @{ TRACE = 1; DEBUG = 5; INFO = 9; SUCCESS = 9; WARN = 13; ERROR = 17; FATAL = 21 }
 
 # Minimum level and output format. Both can be seeded from the environment so that
 # operators can control logging in CI/CD without touching code, and both fall back to
-# sensible defaults (show everything; structured JSON) when unset or invalid.
+# sensible defaults (INFO floor; structured JSON) when unset or invalid.
 $script:LdoMinLogLevel = if ($env:LDO_LOG_LEVEL -and $script:LdoLogLevels.ContainsKey($env:LDO_LOG_LEVEL.ToUpperInvariant())) {
     $env:LDO_LOG_LEVEL.ToUpperInvariant()
 }
 else {
-    'DEBUG'
+    'INFO'
 }
 
 $script:LdoLogFormat = switch -Regex ($env:LDO_LOG_FORMAT) {
@@ -261,22 +268,32 @@ $script:LdoLogFormat = switch -Regex ($env:LDO_LOG_FORMAT) {
     default              { 'Json' }   # covers 'json', unset, and any unrecognised value
 }
 
+# Ambient trace context stamped onto every record when set. Seeded from the environment so a
+# parent process or CI step can propagate a trace across process boundaries (W3C-style), and
+# refreshable at runtime via Set-LdoTraceContext. Empty values are omitted from the record.
+$script:LdoTraceContext = @{
+    trace_id = if ($env:LDO_TRACE_ID) { $env:LDO_TRACE_ID } else { '' }
+    span_id = if ($env:LDO_SPAN_ID) { $env:LDO_SPAN_ID } else { '' }
+    correlation_id = if ($env:LDO_CORRELATION_ID) { $env:LDO_CORRELATION_ID } else { '' }
+}
+
 function Write-LdoLog {
     <#
     .SYNOPSIS
         Writes a levelled, timestamped log message to the correct PowerShell stream.
     .DESCRIPTION
-        The single logging entry point for all LibreDevOpsHelpers modules. By default
-        each message is rendered as one compact JSON object (newline-delimited JSON)
-        carrying a UTC ISO-8601 timestamp, level, invocation and message, plus any extra
-        properties supplied via -Data. Each level is routed to a stream that never
-        touches the success (output) pipeline, so the function is safe to call from
-        inside other functions without corrupting their return values.
+        The single logging entry point for all LibreDevOpsHelpers modules. By default each
+        message is rendered as one compact JSON object (newline-delimited JSON) aligned to the
+        OpenTelemetry log data model: a UTC ISO-8601 timestamp, level, severity_number, message,
+        service.name, and the trace_id / span_id / correlation_id from the ambient trace context
+        when set. Each level routes to a stream that never touches the success (output) pipeline,
+        so the function is safe to call from inside other functions without corrupting their
+        return values.
     #>
     [CmdletBinding()]
     [OutputType([void])]
     param(
-        [Parameter(Mandatory)][ValidateSet('DEBUG', 'INFO', 'SUCCESS', 'WARN', 'ERROR')]
+        [Parameter(Mandatory)][ValidateSet('TRACE', 'DEBUG', 'INFO', 'SUCCESS', 'WARN', 'ERROR', 'FATAL')]
         [string]$Level,
 
         [Parameter(Mandatory)][AllowEmptyString()]
@@ -310,14 +327,27 @@ function Write-LdoLog {
         $line = '{0} [{1}] [{2}] {3}' -f $timestamp, $Level, $InvocationName, $Message
     }
     else {
-        # ISO-8601 in UTC ("o" round-trip format) so downstream log systems can parse
-        # an unambiguous, timezone-correct timestamp.
+        # ISO-8601 in UTC ("o" round-trip format) so downstream log systems can parse an
+        # unambiguous, timezone-correct timestamp. service.name falls back to the invocation
+        # name when LDO_SERVICE_NAME is unset, since the calling command is often the service.
+        $serviceName = if ($env:LDO_SERVICE_NAME) { $env:LDO_SERVICE_NAME } else { $InvocationName }
+
         $record = [ordered]@{
-            timestamp  = $now.ToUniversalTime().ToString('o')
-            level      = $Level
+            timestamp = $now.ToUniversalTime().ToString('o')
+            level = $Level
+            severity_number = $script:LdoSeverityNumbers[$Level]
+            message = $Message
+            'service.name' = $serviceName
             invocation = $InvocationName
-            message    = $Message
         }
+        if ($env:LDO_SERVICE_VERSION) { $record['service.version'] = $env:LDO_SERVICE_VERSION }
+        if ($env:LDO_DEPLOYMENT_ENVIRONMENT) { $record['deployment.environment'] = $env:LDO_DEPLOYMENT_ENVIRONMENT }
+
+        # Stamp the ambient trace context when set, so logs join to a trace. Omitted when empty.
+        if ($script:LdoTraceContext.trace_id) { $record['trace_id'] = $script:LdoTraceContext.trace_id }
+        if ($script:LdoTraceContext.span_id) { $record['span_id'] = $script:LdoTraceContext.span_id }
+        if ($script:LdoTraceContext.correlation_id) { $record['correlation_id'] = $script:LdoTraceContext.correlation_id }
+
         if ($Data) {
             foreach ($key in $Data.Keys) { $record[[string]$key] = $Data[$key] }
         }
@@ -334,32 +364,44 @@ function Write-LdoLog {
     # Route every level to a stream that never touches stdout (stream 1), so logging
     # cannot corrupt the return value of a function that called us.
     switch ($Level) {
+        'TRACE'   { Write-Verbose $line }
         'DEBUG'   { Write-Debug $line }
         'INFO'    { Write-LdoInfoLine -Line $line -Level $Level -Format $Format -Color Cyan }
         'SUCCESS' { Write-LdoInfoLine -Line $line -Level $Level -Format $Format -Color Green }
         'WARN'    { Write-Warning $line }
-        # Explicitly non-terminating: logging an error must never throw on its own,
+        # Explicitly non-terminating: logging an error or fatal must never throw on its own,
         # even when the caller has $ErrorActionPreference = 'Stop'. The caller decides.
         'ERROR'   { Write-Error $line -ErrorAction Continue }
+        'FATAL'   { Write-Error $line -ErrorAction Continue }
     }
 }
+```
+
+The trace context is set once at a process entry point and a fresh span is started per unit of work, so every record joins one trace:
+
+```powershell
+# At startup: begin a trace (generates trace_id, span_id and correlation_id).
+Set-LdoTraceContext -Generate
+
+# Per unit of work (for example, per Terraform stack): rotate the span under the same trace.
+Set-LdoTraceContext -SpanId (New-LdoSpanId)
 ```
 
 Usage - the same call works in interactive (`Text`) and CI (`Json`) contexts; only `LDO_LOG_FORMAT` changes:
 
 ```powershell
 Write-LdoLog -Level INFO  -Message 'Starting deployment'
-Write-LdoLog -Level INFO  -Message 'Created resource group' -Data @{ resourceGroup = 'rg-prod'; correlationId = $cid }
-Write-LdoLog -Level ERROR -Message "Failed: $($_.Exception.Message)" -Data @{ exitCode = $LASTEXITCODE }
+Write-LdoLog -Level INFO  -Message 'Created resource group' -Data @{ resource_group = 'rg-prod' }
+Write-LdoLog -Level ERROR -Message "Failed: $($_.Exception.Message)" -Data @{ exit_code = $LASTEXITCODE }
 ```
 
-A `Json`-mode record from the second call is ready for any backend:
+A `Json`-mode record from the second call (with `LDO_SERVICE_NAME=terraform-azure` and a trace context set) is ready for any backend:
 
 ```json
-{"timestamp":"YYYY-MM-DDTHH:mm:ss.sssZ","level":"INFO","invocation":"New-LdoResourceGroup","message":"Created resource group","resourceGroup":"rg-prod","correlationId":"e2c4..."}
+{"timestamp":"YYYY-MM-DDTHH:mm:ss.sssZ","level":"INFO","severity_number":9,"message":"Created resource group","service.name":"terraform-azure","invocation":"New-LdoResourceGroup","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","span_id":"00f067aa0ba902b7","correlation_id":"e2c4...","resource_group":"rg-prod"}
 ```
 
-> **Bridging to the canonical schema:** the module keeps field names lean (`invocation` rather than `service.name`) for ergonomics. When shipping to a shared backend, add `service.name`/`service.version`/`trace_id` either via `-Data` at the entry point or with a Collector `transform` operator that renames `invocation` and injects resource attributes - the application stays simple and the standard schema is satisfied at the edge.
+> **Field naming note:** the module emits the canonical `service.name` (falling back to the leaner `invocation` value when `LDO_SERVICE_NAME` is unset) and keeps `invocation` as an extra attribute for ergonomics. `trace_id`/`span_id` come from the ambient trace context; for a shared backend, a Collector `transform` operator can add or rename any further resource attributes at the edge.
 
 ### Bash
 
