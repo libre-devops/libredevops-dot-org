@@ -54,8 +54,8 @@ Names follow a structured pattern. Prefer alphanumeric characters and hyphens on
 | `Outfix` | Right of the infix. A 2-3 letter Azure region code. Lower case. Global resources use the owning resource group's region. | `uks` (UK South), `euw` (West Europe) |
 | `Suffix` | A 2-3 letter environment stage code. Lower case. | `poc`, `dev`, `tst`, `uat`, `ppd`, `prd` |
 | `Optional outfix` | Right of the suffix. A short functional qualifier, used only where it adds meaningful context. Lower case. | `mgt`, `sec`, `net` |
-| `Numbering` | Zero-padded ordinal appended at the end when multiple instances of the same resource exist. | `01`, `02`, `10` |
-| `Full construct` | Dashed: `${prefix}-${infix}-${outfix}-${suffix}[-${optional}][-${numbering}]`. No-dash (storage accounts, VMs, etc.): `${prefix}${infix}${outfix}${suffix}[${optional}][${numbering}]`. | `rg-ldo-uks-prd`, `rg-crg-ukw-ppd-mgt`, `saldouksprd01` |
+| `Numbering` | Zero-padded three-digit ordinal appended at the end when multiple instances of the same resource exist (per current CAF guidance). | `001`, `002`, `010` |
+| `Full construct` | Dashed: `${prefix}-${infix}-${outfix}-${suffix}[-${optional}][-${numbering}]`. No-dash (storage accounts, VMs, etc.): `${prefix}${infix}${outfix}${suffix}[${optional}][${numbering}]`. | `rg-ldo-uks-prd`, `rg-crg-ukw-ppd-mgt`, `saldouksprd001` |
 
 ---
 
@@ -63,8 +63,8 @@ Names follow a structured pattern. Prefer alphanumeric characters and hyphens on
 
 | Category | Values | Example |
 |:-:|:--|:-:|
-| VM purpose prefixes | `app`, `dbs`, `web`, `dc`, `vm` | `webldouksprd01` |
-| VM OS type codes | `lnx`, `win`, `rh8`, `deb`, `ubu`, `sus` | `lnxldouksprd01` |
+| VM purpose prefixes | `app`, `dbs`, `web`, `dc`, `vm` | `webldouksprd001` |
+| VM OS type codes | `lnx`, `win`, `rh8`, `deb`, `ubu`, `sus` | `lnxldouksprd001` |
 | Environment stages | `poc`, `mvp`, `dev`, `tst`, `stg`, `uat`, `ppd`, `prd` | `prd` |
 | Management outfix | `mgt` - resource belongs to tenant or platform admins | `rg-crg-ukw-ppd-mgt` |
 
