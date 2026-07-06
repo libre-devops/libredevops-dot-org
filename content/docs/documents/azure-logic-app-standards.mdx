@@ -137,24 +137,24 @@ Follow the [Azure Naming Convention](/docs/documents/azure-naming-convention). B
 ```
 # Consumption (Microsoft.Logic/workflows) and Standard (Microsoft.Web/sites)
 logic-{infix}-{outfix}-{suffix}-{numbering}
-logic-ldo-uks-prd-01
-logic-ldo-uks-dev-01
-logic-ldo-uks-prd-02
+logic-ldo-uks-prd-001
+logic-ldo-uks-dev-001
+logic-ldo-uks-prd-002
 ```
 
 Supporting resources follow their own conventions:
 
 | Resource | Prefix | Example |
 |:--|:--|:--|
-| Logic App (Consumption + Standard) | `logic-` | `logic-ldo-uks-prd-01` |
-| App Service Plan | `plan-` | `plan-ldo-uks-prd-01` |
-| Storage Account | `sa` (no hyphen) | `saldouksprd01` |
-| User-assigned Identity | `id-` | `id-sentinel-playbooks-ldo-uks-prd-01` |
-| API Connection (`Microsoft.Web/connections`) | `conn-` | `conn-sentinel-ldo-uks-prd-01` |
-| Private Endpoint | `pep-` | `pep-logic-ldo-uks-prd-01` |
-| Application Insights | `appi-` | `appi-ldo-uks-prd-01` |
-| Log Analytics Workspace | `log-` | `log-ldo-uks-prd-01` |
-| Key Vault | `kv-` | `kv-ldo-uks-prd-01` |
+| Logic App (Consumption + Standard) | `logic-` | `logic-ldo-uks-prd-001` |
+| App Service Plan | `plan-` | `plan-ldo-uks-prd-001` |
+| Storage Account | `sa` (no hyphen) | `saldouksprd001` |
+| User-assigned Identity | `id-` | `id-sentinel-playbooks-ldo-uks-prd-001` |
+| API Connection (`Microsoft.Web/connections`) | `conn-` | `conn-sentinel-ldo-uks-prd-001` |
+| Private Endpoint | `pep-` | `pep-logic-ldo-uks-prd-001` |
+| Application Insights | `appi-` | `appi-ldo-uks-prd-001` |
+| Log Analytics Workspace | `log-` | `log-ldo-uks-prd-001` |
+| Key Vault | `kv-` | `kv-ldo-uks-prd-001` |
 
 The resource name is short and machine-readable. It identifies **what it is and where** - not what it does. The name never changes after creation without destroying the resource.
 
@@ -168,11 +168,13 @@ tags = {
   hidden-title = "Sentinel Incident - Enrich and notify Teams on High severity"
   environment  = "prd"
   managed-by   = "terraform"
-  module       = "terraform-azurerm-logic-app"
+  module       = "terraform-azurerm-logic-app-workflow"
 }
 ```
 
 The `hidden-title` convention is an Azure platform feature - the portal reads this tag and surfaces it in the resource overview blade. No other tag key achieves this.
+
+The [`libre-devops/logic-app-workflow/azurerm`](https://registry.terraform.io/modules/libre-devops/logic-app-workflow/azurerm) module makes this structural: every workflow takes a required `title` input and the module stamps the `hidden-title` tag itself (validated non-empty at plan time), so an untitled workflow cannot be deployed through it.
 
 **Format for `hidden-title`:** `{Trigger type} - {What it does in plain language}`
 
@@ -381,7 +383,7 @@ System-assigned managed identity is the default. The identity lifecycle is tied 
 
 ```hcl
 resource "azurerm_logic_app_standard" "this" {
-  name                = "logic-ldo-uks-prd-01"
+  name                = "logic-ldo-uks-prd-001"
   resource_group_name = var.rg_name
   location            = var.location
   # ...
@@ -408,7 +410,7 @@ Use a User-assigned managed identity when multiple Logic Apps need the same set 
 ```hcl
 # Shared identity - created once, attached to all playbooks in the suite
 resource "azurerm_user_assigned_identity" "sentinel_playbooks" {
-  name                = "id-sentinel-playbooks-ldo-uks-prd-01"
+  name                = "id-sentinel-playbooks-ldo-uks-prd-001"
   resource_group_name = var.rg_name
   location            = var.location
   tags                = var.tags
@@ -431,8 +433,8 @@ resource "azurerm_role_assignment" "law_reader" {
 # Use "this" as the resource label - for_each provides the per-instance key.
 locals {
   sentinel_playbook_names = toset([
-    "logic-ldo-uks-prd-01",
-    "logic-ldo-uks-prd-02",
+    "logic-ldo-uks-prd-001",
+    "logic-ldo-uks-prd-002",
   ])
 }
 
@@ -451,7 +453,7 @@ resource "azurerm_logic_app_standard" "this" {
 }
 
 # Access individual instances via the for_each key:
-# azurerm_logic_app_standard.this["logic-ldo-uks-prd-01"]
+# azurerm_logic_app_standard.this["logic-ldo-uks-prd-001"]
 ```
 
 **When to use each:**
@@ -492,7 +494,14 @@ app_settings = {
 
 ### API connections in Terraform (azapi)
 
-Managed connector actions (Microsoft Sentinel, Microsoft Teams, Outlook 365) require a `Microsoft.Web/connections` ARM resource, plus an access policy that authorises the Logic App's managed identity to use the connection. The `azurerm` provider has no native resource for this - use the `azapi` provider instead of `azurerm_resource_group_template_deployment`, which is harder to read and does not surface connection state in the Terraform plan.
+Managed connector actions (Microsoft Sentinel, Microsoft Teams, Outlook 365) require a `Microsoft.Web/connections` ARM resource. The `azurerm` provider has no native resource for this - use the `azapi` provider instead of `azurerm_resource_group_template_deployment`, which is harder to read and does not surface connection state in the Terraform plan.
+
+> **Connections come in two flavours and the hosting model dictates which one you may use (proven live, both directions):**
+>
+> - **Consumption** workflows accept only **V1** connections (no `kind` property). A V1 connection **rejects access policies** - creating one fails with `InvalidApiConnectionAccessPolicy` ("Access policy cannot be created for connection ... V1"). Managed identity auth on Consumption is carried entirely by `parameterValueType = "Alternative"` on the connection plus `connectionProperties.authentication.type = "ManagedServiceIdentity"` in the workflow's `$connections` parameter - there is no access policy to create.
+> - **Standard** workflows require **V2** connections (`kind = "V2"`) - referencing a V1 connection fails with `WorkflowInvalidApiConnectionV2`. V2 connections DO need an access policy authorising the Logic App's managed identity, and the access policy's `name` must be the identity's **object id** (not the Logic App name).
+>
+> Get this wrong in either direction and the failure only appears at apply or first run, so match the flavour to the hosting model up front.
 
 ```hcl
 # terraform.tf - add azapi alongside azurerm
@@ -512,19 +521,28 @@ terraform {
 
 ```hcl
 # Create the managed API connection
-# parameterValueType = "Alternative" enables managed identity auth on the connection
+# parameterValueType = "Alternative" enables managed identity auth on the connection.
+# Look the managed API id up rather than hand-assembling it.
+data "azurerm_managed_api" "sentinel" {
+  name     = "azuresentinel"
+  location = var.location
+}
+
 resource "azapi_resource" "sentinel_connection" {
   type      = "Microsoft.Web/connections@2016-06-01"
-  name      = "conn-sentinel-ldo-uks-prd-01"
+  name      = "conn-sentinel-ldo-uks-prd-001"
   location  = var.location
-  parent_id = "/subscriptions/${var.subscription_id}/resourceGroups/${var.rg_name}"
+  parent_id = var.resource_group_id
+
+  # For a STANDARD Logic App add kind = "V2" here; leave it off (V1) for Consumption.
+  # kind = "V2"
 
   body = {
     properties = {
       displayName        = "Microsoft Sentinel - Managed Identity"
       parameterValueType = "Alternative"
       api = {
-        id = "/subscriptions/${var.subscription_id}/providers/Microsoft.Web/locations/${var.location}/managedApis/azuresentinel"
+        id = data.azurerm_managed_api.sentinel.id
       }
     }
   }
@@ -535,7 +553,7 @@ resource "azapi_resource" "sentinel_connection" {
 # Create the Microsoft Teams connection
 resource "azapi_resource" "teams_connection" {
   type      = "Microsoft.Web/connections@2016-06-01"
-  name      = "conn-teams-ldo-uks-prd-01"
+  name      = "conn-teams-ldo-uks-prd-001"
   location  = var.location
   parent_id = "/subscriptions/${var.subscription_id}/resourceGroups/${var.rg_name}"
 
@@ -552,11 +570,14 @@ resource "azapi_resource" "teams_connection" {
   response_export_values = ["*"]
 }
 
-# Grant the Logic App's managed identity access to the Sentinel connection
-# This access policy is what allows the Logic App to use the connection at runtime
+# STANDARD ONLY: grant the Logic App's managed identity access to the (V2) connection.
+# This access policy is what allows a Standard Logic App to use the connection at runtime.
+# Consumption workflows use V1 connections, which REJECT access policies - skip this
+# resource entirely for Consumption; the $connections connectionProperties carry the auth.
 resource "azapi_resource" "sentinel_connection_access_policy" {
-  type      = "Microsoft.Web/connections/accessPolicies@2016-06-01"
-  name      = azurerm_logic_app_standard.this.name
+  type = "Microsoft.Web/connections/accessPolicies@2016-06-01"
+  # The policy name must be the identity's object id, not the Logic App name.
+  name      = azurerm_logic_app_standard.this.identity[0].principal_id
   parent_id = azapi_resource.sentinel_connection.id
   location  = var.location
 
@@ -581,7 +602,7 @@ resource "azapi_resource" "sentinel_connection_access_policy" {
 
 resource "azapi_resource" "teams_connection_access_policy" {
   type      = "Microsoft.Web/connections/accessPolicies@2016-06-01"
-  name      = azurerm_logic_app_standard.this.name
+  name      = azurerm_logic_app_standard.this.identity[0].principal_id
   parent_id = azapi_resource.teams_connection.id
   location  = var.location
 
@@ -614,8 +635,8 @@ The workflow definition JSON (stored as `workflow.json` for Standard, or embedde
     "$connections": {
       "value": {
         "azuresentinel": {
-          "connectionId": "/subscriptions/.../resourceGroups/.../providers/Microsoft.Web/connections/conn-sentinel-ldo-uks-prd-01",
-          "connectionName": "conn-sentinel-ldo-uks-prd-01",
+          "connectionId": "/subscriptions/.../resourceGroups/.../providers/Microsoft.Web/connections/conn-sentinel-ldo-uks-prd-001",
+          "connectionName": "conn-sentinel-ldo-uks-prd-001",
           "connectionProperties": {
             "authentication": {
               "type": "ManagedServiceIdentity"
@@ -629,9 +650,9 @@ The workflow definition JSON (stored as `workflow.json` for Standard, or embedde
 }
 ```
 
-Pass the connection ID from Terraform using `azapi_resource.sentinel_connection.id` rather than hardcoding it.
+Pass the connection ID from Terraform using `azapi_resource.sentinel_connection.id` rather than hardcoding it. The `libre-devops/logic-app-workflow/azurerm` module generates this whole `$connections` block (including the `ManagedServiceIdentity` connectionProperties) from its `connections` / `shared_connections` inputs, so hand-written JSON like the above is only needed outside the module.
 
-> **Rule:** The access policy must be created after both the connection resource and the Logic App identity exist, and after the role assignment granting the identity access to Sentinel has been applied. Chain these with explicit `depends_on` - Terraform cannot infer these relationships from attribute references alone because the access policy body references an `objectId` string rather than a Terraform resource attribute.
+> **Rule (Standard/V2 only):** The access policy must be created after both the connection resource and the Logic App identity exist, and after the role assignment granting the identity access to Sentinel has been applied. Chain these with explicit `depends_on` - Terraform cannot infer these relationships from attribute references alone because the access policy body references an `objectId` string rather than a Terraform resource attribute. On Consumption there is no access policy: stop at the connection resource and the `$connections` parameter.
 
 ---
 
@@ -656,7 +677,7 @@ The topology below shows a Standard Logic App with outbound VNet integration int
 
 <figure className="doc-diagram">
 
-![Standard Logic App reached over a Private Endpoint. A subscription (sub-ldo-prd) contains a resource group (rg-ldo-uks-prd-01) with a virtual network. The Logic App integrates outbound into a delegated /26 subnet (snet-integration, delegated to Microsoft.Web/serverFarms) and is reached inbound through a Private Endpoint in a /27 subnet (snet-private-endpoints) targeting the "sites" subresource.](/assets/diagrams/logic-app-private-endpoint.svg)
+![Standard Logic App reached over a Private Endpoint. A subscription (sub-ldo-prd) contains a resource group (rg-ldo-uks-prd-001) with a virtual network. The Logic App integrates outbound into a delegated /26 subnet (snet-integration, delegated to Microsoft.Web/serverFarms) and is reached inbound through a Private Endpoint in a /27 subnet (snet-private-endpoints) targeting the "sites" subresource.](/assets/diagrams/logic-app-private-endpoint.svg)
 
 </figure>
 
@@ -706,8 +727,8 @@ The outbound IPs of a Standard Logic App are the outbound IPs of its underlying 
 ```bash
 # Get outbound IPs via CLI
 az webapp show \
-  --name logic-ldo-uks-prd-01 \
-  --resource-group rg-ldo-uks-prd-01 \
+  --name logic-ldo-uks-prd-001 \
+  --resource-group rg-ldo-uks-prd-001 \
   --query outboundIpAddresses -o tsv
 ```
 
@@ -858,7 +879,14 @@ Before choosing whether to use a module or write raw resources, decide whether t
 - No resource-level `lifecycle` overrides beyond `ignore_changes` on `app_settings["WEBSITE_RUN_FROM_PACKAGE"]`
 - No cross-resource dependencies that require orchestrating creates/destroys outside of Terraform's normal graph
 
-If all of the above apply, use the module. The module's `list(object)` input means you can declare several cookie-cutter Logic Apps in a single call without duplicating configuration.
+If all of the above apply, use the module. The module's `map(object)` input (keyed by resource name) means you can declare several cookie-cutter Logic Apps in a single call without duplicating configuration.
+
+The v-next module split follows the hosting models:
+
+| Hosting model | Module | What it manages |
+|:--|:--|:--|
+| Consumption | [`libre-devops/logic-app-workflow/azurerm`](https://registry.terraform.io/modules/libre-devops/logic-app-workflow/azurerm) | The workflow shell: identity, typed parameters, `$connections` generation, diagnostics, access control, `hidden-title`. Triggers and actions stay raw (see below). |
+| Standard | [`libre-devops/logic-app-standard/azurerm`](https://registry.terraform.io/modules/libre-devops/logic-app-standard/azurerm) | The Functions-host app: plan, storage, site config, identity, VNet surface. Workflow definitions deploy as `workflow.json` files, not Terraform resources. |
 
 **A custom Logic App has any of the following:**
 
@@ -891,51 +919,77 @@ terraform {
   }
 }
 
-# main.tf
-module "logic_apps" {
-  source = "github.com/libre-devops/terraform-azurerm-logic-app"
+# main.tf - Consumption: the workflow shell comes from the module; triggers and
+# actions stay raw (see "Workflow trigger standards" below). The module builds
+# hidden-title from the required title, splits typed parameters into definitions
+# and values, generates the $connections parameter (with ManagedServiceIdentity
+# auth where asked), and wires the diagnostic setting.
+module "logic_app_workflows" {
+  source  = "libre-devops/logic-app-workflow/azurerm"
+  version = "~> 4.0"
 
-  location = var.location
-  rg_name  = azurerm_resource_group.this.name
+  resource_group_id = module.rg.ids["rg-ldo-uks-prd-001"]
+  location          = var.location
+  tags              = module.tags.tags
 
-  logic_apps = [
-    {
-      name                       = "logic-ldo-uks-prd-01"
-      app_service_plan_name      = "plan-ldo-uks-prd-01"
-      os_type                    = "Linux"
-      sku_name                   = "WS1"
-      storage_account_name       = azurerm_storage_account.logic_app.name
-      storage_account_access_key = azurerm_storage_account.logic_app.primary_access_key
-      https_only                 = true
-      enabled                    = true
-      identity_type              = "SystemAssigned"
-      public_network_access      = "Disabled"
-      virtual_network_subnet_id  = azurerm_subnet.integration.id
+  # Connections every workflow in the call gets (opt out per workflow with
+  # use_shared_connections = false). Most playbook estates share the same few.
+  shared_connections = {
+    azuresentinel = {
+      connection_id         = azapi_resource.sentinel_connection.id
+      managed_api_id        = data.azurerm_managed_api.sentinel.id
+      managed_identity_auth = true
+    }
+  }
 
-      app_settings = {
-        "APPINSIGHTS_INSTRUMENTATIONKEY"        = azurerm_application_insights.this.instrumentation_key
-        "APPLICATIONINSIGHTS_CONNECTION_STRING" = azurerm_application_insights.this.connection_string
-        "WEBSITE_RUN_FROM_PACKAGE"              = "1"
+  # One diagnostics default for the whole call, overridable per workflow.
+  diagnostics = {
+    log_analytics_workspace_id = module.law.workspace_ids["log-ldo-uks-prd-001"]
+  }
+
+  workflows = {
+    "logic-ldo-uks-prd-001" = {
+      title = "Sentinel Incident - Enrich and notify Teams on High severity"
+
+      # Typed workflow parameters: the module renders the definitions (with
+      # defaults, descriptions, and allowed values) and the value map, so the
+      # workflow body references @parameters('...') and nothing is hardcoded.
+      parameters = {
+        severity_floor = {
+          type          = "String"
+          value         = var.severity_floor
+          allowed_values = ["High", "Critical"]
+          description   = "Lowest incident severity the playbook acts on."
+        }
+        notify_retry_count = {
+          type  = "Int"
+          value = "3"
+          description = "Explicit retry budget for the notification HTTP call."
+        }
       }
 
-      site_config = {
-        always_on       = true
-        min_tls_version = "1.2"
-        ftps_state      = "Disabled"
-        http2_enabled   = true
-      }
-
-      tags = {
-        hidden-title = "Sentinel Incident - Enrich and notify Teams on High severity"
-        environment  = var.environment
-        managed-by   = "terraform"
-        owner        = "platform-team"
-        cost-centre  = "sec-ops"
+      access_control = {
+        trigger = { allowed_ips = var.trusted_caller_cidrs }
       }
     }
-  ]
+  }
+}
 
-  tags = var.tags
+# main.tf - Standard: the app host comes from the logic-app-standard module;
+# workflow definitions deploy as workflow.json, not Terraform resources.
+module "logic_apps_standard" {
+  source  = "libre-devops/logic-app-standard/azurerm"
+  version = "~> 4.0"
+
+  resource_group_id = module.rg.ids["rg-ldo-uks-prd-001"]
+  location          = var.location
+  tags              = module.tags.tags
+
+  logic_apps = {
+    "logic-ldo-uks-prd-002" = {
+      virtual_network_subnet_id = module.network.subnets_ids["snet-integration"]
+    }
+  }
 }
 ```
 
@@ -946,7 +1000,7 @@ When the Logic App is non-standard, write the resources explicitly. This is more
 ```hcl
 # App Service Plan - written directly when the module's plan configuration is insufficient
 resource "azurerm_service_plan" "this" {
-  name                = "plan-ldo-uks-prd-01"
+  name                = "plan-ldo-uks-prd-001"
   resource_group_name = azurerm_resource_group.this.name
   location            = var.location
   os_type             = "Linux"
@@ -960,7 +1014,7 @@ resource "azurerm_service_plan" "this" {
 
 # Logic App - written directly
 resource "azurerm_logic_app_standard" "this" {
-  name                       = "logic-ldo-uks-prd-01"
+  name                       = "logic-ldo-uks-prd-001"
   resource_group_name        = azurerm_resource_group.this.name
   location                   = var.location
   app_service_plan_id        = azurerm_service_plan.this.id
@@ -1010,7 +1064,15 @@ resource "azurerm_logic_app_standard" "this" {
 
 ### Workflow trigger standards (azurerm provider)
 
-Triggers are the entry point for Logic App workflows. They define how and when a workflow executes - whether by external HTTP request, scheduled timer, or incoming message/event. Define triggers as separate Terraform resources using `azurerm_logic_app_trigger_*`. 
+Triggers are the entry point for Logic App workflows. They define how and when a workflow executes - whether by external HTTP request, scheduled timer, or incoming message/event. Define triggers as separate Terraform resources using `azurerm_logic_app_trigger_*`.
+
+> **Consumption only:** the `azurerm_logic_app_trigger_*` and `azurerm_logic_app_action_*` resources attach to a `Microsoft.Logic/workflows` resource (Consumption). They cannot target a Standard Logic App - a Standard app's workflows are `workflow.json` files deployed to the site, not ARM children. The examples below take the workflow id from the module:
+
+```hcl
+locals {
+  playbook_workflow_id = module.logic_app_workflows.ids["logic-ldo-uks-prd-001"]
+}
+```
 
 **Trigger positioning:** Triggers do not have `depends_on` - they are root-level entry points that actions depend on. A workflow has exactly one active trigger. If you need multiple trigger types, create separate Logic Apps or use conditional branching after a single trigger.
 
@@ -1040,7 +1102,7 @@ Triggers are the entry point for Logic App workflows. They define how and when a
 ```hcl
 resource "azurerm_logic_app_trigger_http_request" "http_trigger" {
   name         = "When_HTTP_request_is_received"
-  logic_app_id = azurerm_logic_app_standard.this.id
+  logic_app_id = local.playbook_workflow_id
   
   # Schema validates incoming request body - required
   schema = jsonencode({
@@ -1086,7 +1148,7 @@ resource "azurerm_logic_app_trigger_http_request" "http_trigger" {
 ```hcl
 resource "azurerm_logic_app_trigger_recurrence" "schedule_trigger" {
   name         = "Recurrence_daily_enrichment"
-  logic_app_id = azurerm_logic_app_standard.this.id
+  logic_app_id = local.playbook_workflow_id
   
   frequency  = "Day"
   interval   = 1
@@ -1105,8 +1167,8 @@ resource "azurerm_logic_app_trigger_recurrence" "schedule_trigger" {
 **Use when:** Responding to Sentinel incident creation or updates. Automatically enriches, correlates, or escalates high-severity incidents without manual intervention.
 
 **Considerations:**
-- Requires Sentinel connection (configured separately in Azure portal or via `azurerm_api_connection`)
-- Only available in Standard Logic Apps (Consumption requires manual trigger configuration)
+- Requires a Sentinel API connection (a V1 `Microsoft.Web/connections` for Consumption - see the connections section for the V1/V2 hosting split)
+- On Consumption this is the default playbook pattern: the `azurerm_logic_app_trigger_custom` below IS the "When a Microsoft Sentinel incident is created" trigger, with auth carried by the module-generated `$connections` parameter
 - Incident data is passed directly; no schema validation needed (Sentinel defines the structure)
 - Supports filtering by severity, product, or custom analytics rules
 - Fires synchronously; if workflow exceeds 1 hour, incident may be locked or escalated
@@ -1115,54 +1177,51 @@ resource "azurerm_logic_app_trigger_recurrence" "schedule_trigger" {
 **Avoid:** Logic Apps that take > 1 hour per incident (design for parallel execution); blocking on external API calls without timeout; hardcoding watchlist IDs or DCE immutable IDs (use Terraform variables instead)
 
 ```hcl
-# First, ensure the Sentinel connection exists (managed separately).
-# Look up the managed API by name instead of hand-assembling its resource ID.
-data "azurerm_managed_api" "sentinel" {
-  name     = "azuresentinel"
-  location = var.location
-}
+# The V1 Sentinel connection comes from the connections section (azapi, no access
+# policy on Consumption); the module's shared_connections input generates the
+# $connections parameter the trigger references below.
 
-resource "azurerm_api_connection" "sentinel" {
-  name                = "sentinel-${var.environment}"
-  resource_group_name = azurerm_resource_group.this.name
-  managed_api_id      = data.azurerm_managed_api.sentinel.id
-}
-
-# Sentinel trigger definition
+# Sentinel incident trigger: an ApiConnectionWebhook on the azuresentinel connector.
+# The connection is referenced through @parameters('$connections'), never by raw id,
+# so the module-generated parameter carries the managed identity auth.
 resource "azurerm_logic_app_trigger_custom" "sentinel_incident" {
-  name         = "When_Azure_Sentinel_incident_is_created_or_updated"
-  logic_app_id = azurerm_logic_app_standard.this.id
-  
+  name         = "When_a_Sentinel_incident_is_created"
+  logic_app_id = local.playbook_workflow_id
+
   body = jsonencode({
+    description = "Fires when Microsoft Sentinel creates an incident; wired to Sentinel via an automation rule."
+    type        = "ApiConnectionWebhook"
     inputs = {
       host = {
         connection = {
-          name = azurerm_api_connection.sentinel.id
+          name = "@parameters('$connections')['azuresentinel']['connectionId']"
         }
       }
-      path = "/incident"
-      queries = {
-        # Filter by severity - do not hardcode
-        "triggerBody()?['object']?['properties']?['severity']" = "High,Critical"
+      body = {
+        callback_url = "@{listCallbackUrl()}"
       }
+      path = "/incident-creation"
     }
   })
 }
 
-# Example: Later action referencing the trigger
-resource "azurerm_logic_app_action_custom" "enrich_incident" {
-  name         = "Enrich_from_watchlist"
-  logic_app_id = azurerm_logic_app_standard.this.id
-  
-  # Use Terraform-evaluated watchlist ID, not hardcoded string
+# Example: later action referencing the trigger. Terraform-evaluated values (the
+# watchlist alias here) are interpolated by reference, never hardcoded strings.
+resource "azurerm_logic_app_action_custom" "compose_enrichment_context" {
+  name         = "Compose_-_Assemble_the_enrichment_context_for_the_incident"
+  logic_app_id = local.playbook_workflow_id
+
   body = jsonencode({
+    description = "Distils the incident and the threat actor watchlist alias into one enrichment payload."
+    type        = "Compose"
     inputs = {
-      watchlist_id = azurerm_sentinel_watchlist.threat_actors.immutable_id
-      incident_id  = "@{triggerBody()?['object']?['id']}"
-      severity     = "@{triggerBody()?['object']?['properties']?['severity']}"
+      watchlist_alias = azurerm_sentinel_watchlist.threat_actors.name
+      incident_id     = "@{triggerBody()?['object']?['id']}"
+      severity        = "@{triggerBody()?['object']?['properties']?['severity']}"
     }
+    runAfter = {}
   })
-  
+
   depends_on = [azurerm_logic_app_trigger_custom.sentinel_incident]
 }
 ```
@@ -1181,35 +1240,32 @@ resource "azurerm_logic_app_action_custom" "enrich_incident" {
 **Avoid:** Polling very frequently (< 30s causes unnecessary scaling); processing without error handling (unprocessed messages stay in queue); hardcoding queue names
 
 ```hcl
-# Service Bus connection
-data "azurerm_managed_api" "service_bus" {
-  name     = "servicebus"
-  location = var.location
-}
+# The servicebus V1 connection is created with azapi like the Sentinel one (see the
+# connections section) and declared in the module's connections input, which generates
+# the $connections parameter the trigger references.
 
-resource "azurerm_api_connection" "service_bus" {
-  name                = "servicebus-${var.environment}"
-  resource_group_name = azurerm_resource_group.this.name
-  managed_api_id      = data.azurerm_managed_api.service_bus.id
-}
-
-# Queue trigger - references queue name from Terraform variable
+# Queue trigger - polls on a recurrence; the queue name comes from a Terraform variable
 resource "azurerm_logic_app_trigger_custom" "service_bus_trigger" {
-  name         = "Service_Bus_message_incident_queue"
-  logic_app_id = azurerm_logic_app_standard.this.id
-  
+  name         = "When_a_message_arrives_on_the_incident_queue"
+  logic_app_id = local.playbook_workflow_id
+
   body = jsonencode({
+    description = "Polls the incident queue once a minute and starts a run per message."
+    type        = "ApiConnection"
+    recurrence = {
+      frequency = "Minute"
+      interval  = 1
+    }
     inputs = {
       host = {
         connection = {
-          name = azurerm_api_connection.service_bus.id
+          name = "@parameters('$connections')['servicebus']['connectionId']"
         }
       }
-      method = "GET"
-      path   = "/queue/@{encodeURIComponent('${var.incident_queue_name}')}/messages"
+      method = "get"
+      path   = "/@{encodeURIComponent('${var.incident_queue_name}')}/messages/head"
       queries = {
-        "maxMessagesToReturn" = 1
-        "isSessionEnabled"    = false
+        queueType = "Main"
       }
     }
   })
@@ -1230,48 +1286,39 @@ resource "azurerm_logic_app_trigger_custom" "service_bus_trigger" {
 **Avoid:** Using Event Grid for internal app state changes (use Service Bus instead); not setting event filters (can overwhelm workflow)
 
 ```hcl
-# Event Grid connection
-data "azurerm_managed_api" "event_grid" {
-  name     = "azureeventgrid"
-  location = var.location
-}
+# The azureeventgrid V1 connection is created with azapi like the Sentinel one (see the
+# connections section) and declared in the module's connections input.
 
-resource "azurerm_api_connection" "event_grid" {
-  name                = "eventgrid-${var.environment}"
-  resource_group_name = azurerm_resource_group.this.name
-  managed_api_id      = data.azurerm_managed_api.event_grid.id
-}
-
-# Event Grid trigger - blob storage events
+# Event Grid trigger - blob storage events, push-based (ApiConnectionWebhook)
 resource "azurerm_logic_app_trigger_custom" "event_grid_trigger" {
-  name         = "Event_Grid_blob_created"
-  logic_app_id = azurerm_logic_app_standard.this.id
-  
+  name         = "When_a_blob_is_created_in_the_evidence_container"
+  logic_app_id = local.playbook_workflow_id
+
   body = jsonencode({
+    description = "Push notification from Event Grid when the storage account writes a blob."
+    type        = "ApiConnectionWebhook"
     inputs = {
       host = {
         connection = {
-          name = azurerm_api_connection.event_grid.id
+          name = "@parameters('$connections')['azureeventgrid']['connectionId']"
         }
       }
-      # Reference storage account from Terraform - do not hardcode
-      path = "/subscriptions/@{encodeURIComponent('${data.azurerm_client_config.current.subscription_id}')}/resourceGroups/@{encodeURIComponent('${azurerm_resource_group.this.name}')}/providers/Microsoft.Storage/storageAccounts/@{encodeURIComponent('${azurerm_storage_account.logs.name}')}/events"
+      # Reference the storage account from Terraform - do not hardcode
+      path = "/subscriptions/@{encodeURIComponent('${data.azurerm_client_config.current.subscription_id}')}/providers/@{encodeURIComponent('Microsoft.Storage.StorageAccounts')}/resource/eventSubscriptions"
       queries = {
-        # Filter to blob created events only
-        "api-version" = "2017-09-15-preview"
+        "x-ms-api-version" = "2017-06-15-preview"
       }
-    }
-    schema = {
-      type       = "object"
-      properties = {
-        eventType = {
-          type = "string"
-          enum = ["Microsoft.Storage.BlobCreated"]
-        }
-        data = {
-          type = "object"
-          properties = {
-            url = { type = "string" }
+      body = {
+        properties = {
+          topic = azurerm_storage_account.logs.id
+          destination = {
+            endpointType = "webhook"
+            properties = {
+              endpointUrl = "@{listCallbackUrl()}"
+            }
+          }
+          filter = {
+            includedEventTypes = ["Microsoft.Storage.BlobCreated"]
           }
         }
       }
@@ -1282,23 +1329,24 @@ resource "azurerm_logic_app_trigger_custom" "event_grid_trigger" {
 
 **Trigger naming standards:**
 
+Trigger and action names are the workflow's display surface: run history, error messages, and `runAfter` edges all show them. Be verbose - a name should read as a sentence describing the event, with underscores for spaces (the designer renders them as spaces).
+
 | Trigger Type | Naming Pattern | Example |
 |:--|:--|:--|
-| HTTP Request | `[verb]_http_request` | `when_http_request_is_received` |
-| Recurrence | `recurrence_[frequency]_[purpose]` | `recurrence_daily_enrichment`, `recurrence_hourly_scan` |
-| Sentinel Incident | `sentinel_incident_[filter]` | `sentinel_incident_high_critical`, `sentinel_incident_created` |
-| Service Bus | `service_bus_[queue/topic]_message` | `service_bus_incident_queue_message` |
-| Event Grid | `event_grid_[resource_type]` | `event_grid_blob_created`, `event_grid_key_vault_secret` |
-| Custom Connector | `[service]_[event_type]` | `teams_message_received`, `slack_event_posted` |
+| HTTP Request | `When_[caller/event in plain words]` | `When_the_alert_storm_rule_fires_via_the_action_group` |
+| Recurrence | `Recurrence_-_[schedule in plain words]` | `Recurrence_-_Once_a_day_at_08_00_UTC` |
+| Sentinel Incident | `When_a_Sentinel_incident_[filter]` | `When_a_Sentinel_incident_is_created_High_or_Critical` |
+| Service Bus | `When_a_message_arrives_on_[queue/topic]` | `When_a_message_arrives_on_the_incident_queue` |
+| Event Grid | `When_[resource event in plain words]` | `When_a_blob_is_created_in_the_evidence_container` |
+| Custom Connector | `When_[service]_[event in plain words]` | `When_a_Teams_message_is_posted_to_the_soc_channel` |
 
 **Trigger best practices (Terraform):**
 
 1. **No `depends_on` on triggers** - Triggers are root entry points; actions depend on triggers via implicit trigger body references
-2. **Sentinel triggers in Standard Logic Apps** - Allows direct Sentinel role assignment and private resource access
-3. **Recurrence triggers - always use UTC** - Avoid timezone confusion; use `time_zone = "UTC"` with fixed `start_time` (ISO 8601 format)
-4. **HTTP triggers - require schema** - Document expected body structure; clients must validate against schema
-5. **Custom triggers - use connection references** - Never hardcode credentials; reference `azurerm_api_connection` resources
-6. **Polling intervals** - Service Bus (30s), Event Grid (push), Recurrence (configurable)
+2. **Recurrence triggers - always use UTC** - Avoid timezone confusion; use `time_zone = "UTC"` with fixed `start_time` (ISO 8601 format)
+3. **HTTP triggers - require schema** - Document expected body structure; clients must validate against schema
+4. **Connector triggers - reference `$connections`** - Never hardcode connection ids in trigger bodies; reference `@parameters('$connections')['<connector>']['connectionId']` and let the module's `connections` input generate the parameter
+5. **Polling intervals** - Service Bus (30s), Event Grid (push), Recurrence (configurable)
 
 **Example: Complete trigger + action dependency chain:**
 
@@ -1306,7 +1354,7 @@ resource "azurerm_logic_app_trigger_custom" "event_grid_trigger" {
 # Trigger - entry point, no depends_on
 resource "azurerm_logic_app_trigger_recurrence" "daily_scan" {
   name         = "Recurrence_daily_threat_hunt"
-  logic_app_id = azurerm_logic_app_standard.this.id
+  logic_app_id = local.playbook_workflow_id
   frequency    = "Day"
   interval     = 1
   start_time   = "2024-01-01T09:00:00Z"
@@ -1315,8 +1363,8 @@ resource "azurerm_logic_app_trigger_recurrence" "daily_scan" {
 
 # Action - depends on trigger via trigger body
 resource "azurerm_logic_app_action_http" "kql_query" {
-  name         = "HTTP_execute_kql_query"
-  logic_app_id = azurerm_logic_app_standard.this.id
+  name         = "HTTP_-_Run_the_daily_threat_hunt_KQL_query"
+  logic_app_id = local.playbook_workflow_id
   method       = "POST"
   # Host is the shared api.loganalytics.io endpoint; the path takes the workspace
   # GUID (customer ID) from .workspace_id, NOT the full ARM resource .id.
@@ -1327,8 +1375,8 @@ resource "azurerm_logic_app_action_http" "kql_query" {
 
 # Action - depends on previous action
 resource "azurerm_logic_app_action_custom" "parse_results" {
-  name         = "Parse_KQL_results"
-  logic_app_id = azurerm_logic_app_standard.this.id
+  name         = "Parse_-_KQL_results_into_typed_rows"
+  logic_app_id = local.playbook_workflow_id
   # ...
   depends_on = [azurerm_logic_app_action_http.kql_query]
 }
@@ -1382,15 +1430,19 @@ Workflow actions are defined as separate Terraform resources using `azurerm_logi
    path = "/queue/@{encodeURIComponent('${var.incident_queue_name}')}/messages"
    ```
 
-4. **Connection references** - Always reference `azurerm_api_connection` resources, never hardcode connection IDs:
+4. **Connection references** - Reference connections through the `$connections` parameter (generated by the workflow module's `connections` input), never as hardcoded ids:
 
    ```hcl
    host = {
      connection = {
-       name = azurerm_api_connection.sentinel.id
+       name = "@parameters('$connections')['azuresentinel']['connectionId']"
      }
    }
    ```
+
+5. **`depends_on` orders Terraform, `runAfter` orders the workflow** - these are two different graphs and BOTH are required (proven live). `depends_on` only controls the order Terraform creates the action resources; the Logic Apps engine executes from the `runAfter` edges in the JSON. An action whose expressions reference another action (`@outputs('X')`) without a `runAfter` edge to it fails deployment with `InvalidTemplate` ("must be defined in run after graph"), and a missing `depends_on` can make Terraform PUT actions in an order the engine validator rejects. Every non-root action gets a `runAfter` in its body AND a `depends_on` on its Terraform predecessor.
+
+6. **Descriptive names and `description` fields, always** - the action name is what run history, error messages, and `runAfter` edges display. `"For_Each_Incident"` tells an operator nothing at 3am; `"HTTP_-_POST_storm_summary_to_the_on_call_webhook"` does. Set the `description` property in the action body too - the designer surfaces it as inline documentation.
 
 **Initialize Variable (root action - no depends_on)**
 
@@ -1400,8 +1452,8 @@ Workflow actions are defined as separate Terraform resources using `azurerm_logi
 
 ```hcl
 resource "azurerm_logic_app_action_custom" "initialize_variables" {
-  name                    = "Initialize_variables"
-  logic_app_id            = azurerm_logic_app_standard.this.id
+  name                    = "Initialize_-_Incident_context_variables"
+  logic_app_id            = local.playbook_workflow_id
   
   # type = "InitializeVariable" makes this a variable-init action, not an HTTP call.
   body = jsonencode({
@@ -1451,8 +1503,8 @@ variable "enrichment_api_endpoint" {
 }
 
 resource "azurerm_logic_app_action_http" "webhook_call" {
-  name                    = "HTTP_webhook_enrichment"
-  logic_app_id            = azurerm_logic_app_standard.this.id
+  name                    = "HTTP_-_POST_incident_to_the_enrichment_api"
+  logic_app_id            = local.playbook_workflow_id
   method                  = "POST"
   uri                     = var.enrichment_api_endpoint  # From Terraform variable
   headers = {
@@ -1477,7 +1529,7 @@ resource "azurerm_logic_app_action_http" "webhook_call" {
 **Use when:** Using Jira, Teams, Service Bus, Log Analytics, or other managed connectors. Avoid reimplementing connector logic with HTTP.
 
 **Considerations:**
-- Connector must be pre-registered as `azurerm_api_connection`
+- Connector must be pre-registered as a `Microsoft.Web/connections` resource (azapi, see the connections section) and declared in the module's `connections` input
 - Each connector has specific operation IDs (e.g., `CreateIssue`, `SendMessage`, `QueryLogs`)
 - Retry: Managed by connector (usually 2 attempts); HTTP actions retry separately
 - Output: Connector action output is available to subsequent actions
@@ -1485,37 +1537,28 @@ resource "azurerm_logic_app_action_http" "webhook_call" {
 **Avoid:** Using HTTP for operations that have managed connectors available (maintainability nightmare); hardcoding project keys or queue names
 
 ```hcl
-# First, register the connector (manages authentication)
-data "azurerm_managed_api" "jira" {
-  name     = "jira"
-  location = var.location
-}
-
-resource "azurerm_api_connection" "jira" {
-  name                = "jira-${var.environment}"
-  resource_group_name = azurerm_resource_group.this.name
-  managed_api_id      = data.azurerm_managed_api.jira.id
-}
-
-# Then use in custom action - reference connector and store project key as variable
+# The jira V1 connection is created with azapi (see the connections section) and
+# declared in the module's connections input. Store reusable values as variables.
 variable "jira_security_project_key" {
   type    = string
   default = "SEC"
 }
 
 resource "azurerm_logic_app_action_custom" "create_jira_ticket" {
-  name             = "JIRA_create_issue"
-  logic_app_id     = azurerm_logic_app_standard.this.id
-  
+  name         = "JIRA_-_Create_a_security_incident_ticket"
+  logic_app_id = local.playbook_workflow_id
+
   body = jsonencode({
+    description = "Raises the JIRA ticket for the enriched incident; severity maps to issue type."
+    type        = "ApiConnection"
     inputs = {
       host = {
         connection = {
-          name = azurerm_api_connection.jira.id
+          name = "@parameters('$connections')['jira']['connectionId']"
         }
       }
-      method   = "post"
-      path     = "/rest/api/3/issues"
+      method = "post"
+      path   = "/rest/api/3/issues"
       queries = {
         # Project key from Terraform variable
         projectKey = var.jira_security_project_key
@@ -1523,7 +1566,7 @@ resource "azurerm_logic_app_action_custom" "create_jira_ticket" {
       body = {
         fields = {
           summary     = "@{variables('incident_id')} - @{variables('severity')}"
-          description = "@{body('HTTP_webhook_enrichment')?['description']}"
+          description = "@{body('HTTP_-_POST_incident_to_the_enrichment_api')?['description']}"
           issuetype = {
             # Map severity to issue type
             name = "@{if(equals(variables('severity'), 'Critical'), 'Security Incident', 'Task')}"
@@ -1534,10 +1577,10 @@ resource "azurerm_logic_app_action_custom" "create_jira_ticket" {
       }
     }
     runAfter = {
-      "HTTP_webhook_enrichment" = ["Succeeded"]
+      "HTTP_-_POST_incident_to_the_enrichment_api" = ["Succeeded"]
     }
   })
-  
+
   depends_on = [azurerm_logic_app_action_http.webhook_call]
 }
 ```
@@ -1557,18 +1600,18 @@ resource "azurerm_logic_app_action_custom" "create_jira_ticket" {
 ```hcl
 # Try block - enrichment operations
 resource "azurerm_logic_app_action_custom" "scope_enrichment" {
-  name         = "Scope_enrichment"
-  logic_app_id = azurerm_logic_app_standard.this.id
+  name         = "Try_-_Enrich_and_update_the_incident"
+  logic_app_id = local.playbook_workflow_id
 
   # A Scope is a single custom action whose body nests its child actions
   # under "actions". type = "Scope" is what makes it a scope, not an HTTP call.
   body = jsonencode({
     type = "Scope"
     actions = {
-      "Parse_enrichment_response" = {
+      "Parse_-_Enrichment_response_into_typed_fields" = {
         type = "ParseJson"
         inputs = {
-          content = "@body('HTTP_webhook_enrichment')"
+          content = "@body('HTTP_-_POST_incident_to_the_enrichment_api')"
           schema = {
             type = "object"
             properties = {
@@ -1579,21 +1622,21 @@ resource "azurerm_logic_app_action_custom" "scope_enrichment" {
         }
         runAfter = {}
       }
-      "Update_incident_tags" = {
+      "Sentinel_-_Update_the_incident_tags_with_enriched_assets" = {
         type = "ApiConnection"
         inputs = {
           host = {
-            connection = { name = azurerm_api_connection.sentinel.id }
+            connection = { name = "@parameters('$connections')['azuresentinel']['connectionId']" }
           }
           method = "patch"
           path   = "/incidents/@{variables('incident_id')}"
           body = {
             # Pass enriched assets from webhook response
-            tags = "@{body('Parse_enrichment_response')?['assets']}"
+            tags = "@{body('Parse_-_Enrichment_response_into_typed_fields')?['assets']}"
           }
         }
         runAfter = {
-          "Parse_enrichment_response" = ["Succeeded"]
+          "Parse_-_Enrichment_response_into_typed_fields" = ["Succeeded"]
         }
       }
     }
@@ -1605,17 +1648,17 @@ resource "azurerm_logic_app_action_custom" "scope_enrichment" {
 
 # Catch block - runs only if scope_enrichment fails
 resource "azurerm_logic_app_action_custom" "scope_error_handler" {
-  name         = "Scope_error_handler"
-  logic_app_id = azurerm_logic_app_standard.this.id
+  name         = "Catch_-_Record_and_alert_the_enrichment_failure"
+  logic_app_id = local.playbook_workflow_id
 
   body = jsonencode({
     type = "Scope"
     actions = {
-      "Log_error_to_law" = {
+      "Log_Analytics_-_Record_the_enrichment_failure" = {
         type = "ApiConnection"
         inputs = {
           host = {
-            connection = { name = azurerm_api_connection.log_analytics.id }
+            connection = { name = "@parameters('$connections')['azureloganalyticsdatacollector']['connectionId']" }
           }
           method = "post"
           # Reference DCE immutable ID from Terraform - not hardcoded
@@ -1623,18 +1666,18 @@ resource "azurerm_logic_app_action_custom" "scope_error_handler" {
           body = {
             TimeGenerated = "@utcNow()"
             SourceSystem  = "LogicApp"
-            Message       = "@{string(outputs('Scope_enrichment'))}"
+            Message       = "@{string(outputs('Try_-_Enrich_and_update_the_incident'))}"
             IncidentId    = "@{variables('incident_id')}"
             Severity      = "@{variables('severity')}"
           }
         }
         runAfter = {}
       }
-      "Alert_team_enrichment_failure" = {
+      "Teams_-_Alert_the_channel_that_enrichment_failed" = {
         type = "ApiConnection"
         inputs = {
           host = {
-            connection = { name = azurerm_api_connection.teams.id }
+            connection = { name = "@parameters('$connections')['teams']['connectionId']" }
           }
           method = "post"
           path   = "/webhooks"
@@ -1643,13 +1686,13 @@ resource "azurerm_logic_app_action_custom" "scope_error_handler" {
           }
         }
         runAfter = {
-          "Log_error_to_law" = ["Succeeded"]
+          "Log_Analytics_-_Record_the_enrichment_failure" = ["Succeeded"]
         }
       }
     }
     # This scope runs only when the enrichment scope fails or times out.
     runAfter = {
-      "Scope_enrichment" = ["Failed", "TimedOut"]
+      "Try_-_Enrich_and_update_the_incident" = ["Failed", "TimedOut"]
     }
   })
 
@@ -1661,14 +1704,15 @@ resource "azurerm_logic_app_action_custom" "scope_error_handler" {
 **Action dependency chain example:**
 
 ```hcl
-# Dependency flow:
-# Initialize_variables
-#   ├─ HTTP_webhook_enrichment
-#   │   ├─ JIRA_create_issue
-#   │   └─ Scope_enrichment
-#   │       └─ Scope_error_handler (on failure)
-#   └─ Condition_severity_check
-#       └─ For_each_recipients
+# Dependency flow (the runAfter graph the engine executes; each edge is ALSO a
+# Terraform depends_on so the actions deploy in a valid order):
+# Initialize_-_Incident_context_variables
+#   ├─ HTTP_-_POST_incident_to_the_enrichment_api
+#   │   ├─ JIRA_-_Create_a_security_incident_ticket
+#   │   └─ Try_-_Enrich_and_update_the_incident
+#   │       └─ Catch_-_Record_and_alert_the_enrichment_failure (on failure)
+#   └─ Condition_-_Is_the_incident_High_severity_or_above
+#       └─ For_each_recipient_-_Send_the_notification
 
 resource "azurerm_logic_app_action_custom" "initialize_variables" {
   # ... (see above, no depends_on)
@@ -1707,26 +1751,28 @@ resource "azurerm_logic_app_action_custom" "notify_recipients" {
 
 **Action naming standards:**
 
+Same rule as triggers: the name is what an operator reads in run history at 3am, so lead with the action type and follow with what it does in plain words. `For_Each_Incident` is banned; say what is iterated and why. Pair every name with a `description` in the body.
+
 | Resource Type | Naming Pattern | Example |
 |:--|:--|:--|
-| HTTP | `http_[verb]_[service]` | `http_post_webhook`, `http_get_sentinel` |
-| Custom | `[service]_[operation]` | `jira_create_issue`, `service_bus_send_message` |
-| Scope | `scope_[operation]` | `scope_enrichment`, `scope_error_handler` |
-| Condition | `condition_[check]` | `condition_severity_check` |
-| For Each | `for_each_[items]` | `for_each_recipients`, `for_each_alerts` |
-| Initialize | `initialize_[variable_name]` | `initialize_variables`, `initialize_counter` |
-| Parse | `parse_[format]_[source]` | `parse_json_response`, `parse_xml_body` |
+| HTTP | `HTTP_-_[verb + target in plain words]` | `HTTP_-_POST_storm_summary_to_the_on_call_webhook` |
+| Custom (connector) | `[Service]_-_[operation in plain words]` | `JIRA_-_Create_a_security_incident_ticket` |
+| Scope | `[Try/Catch]_-_[what it wraps]` | `Try_-_Notify_the_on_call_channel`, `Catch_-_Record_the_notification_failure` |
+| Condition | `Condition_-_[question it answers]` | `Condition_-_Is_the_incident_High_severity_or_above` |
+| For Each | `For_each_[item]_-_[what happens to it]` | `For_each_affected_host_-_Tag_and_isolate` |
+| Initialize | `Initialize_-_[variable and purpose]` | `Initialize_-_Incident_summary_accumulator` |
+| Parse / Compose | `[Parse/Compose]_-_[what into what]` | `Compose_-_Distil_the_common_alert_schema_into_a_storm_summary` |
 
 ### Role assignments (always in Terraform, never manual)
 
 **Cookie-cutter path - referencing the module output:**
 
 ```hcl
-# The map key matches the name value in the logic_apps input list.
+# The map key is the workflow name key from the module's workflows input.
 resource "azurerm_role_assignment" "sentinel_responder" {
   scope                = data.azurerm_resource_group.sentinel.id
   role_definition_name = "Microsoft Sentinel Responder"
-  principal_id         = module.logic_apps.logic_app_identities["logic-ldo-uks-prd-01"][0].principal_id
+  principal_id         = module.logic_app_workflows.identities["logic-ldo-uks-prd-001"].principal_id
 }
 ```
 
@@ -1765,7 +1811,7 @@ Standard Logic Apps require a dedicated storage account for stateful workflow st
 
 ```hcl
 resource "azurerm_storage_account" "logic_app" {
-  name                     = "saldouksprd01"   # no hyphens, max 24 chars
+  name                     = "saldouksprd001"   # no hyphens, max 24 chars
   resource_group_name      = azurerm_resource_group.this.name
   location                 = var.location
   account_tier             = "Standard"
@@ -1787,15 +1833,17 @@ resource "azurerm_storage_account" "logic_app" {
 
 ### Diagnostic settings
 
+The workflow module wires these itself: set the module-level `diagnostics` object (or a per-workflow override) and every workflow gets a `diag-<name>` setting with all logs and metrics. Only write the raw resource when the workflow is managed outside the module:
+
 ```hcl
 resource "azurerm_monitor_diagnostic_setting" "logic_app" {
-  for_each = module.logic_apps.logic_app_ids
+  for_each = module.logic_app_workflows.ids
 
   name                       = "diag-${each.key}"
   target_resource_id         = each.value
-  log_analytics_workspace_id = azurerm_log_analytics_workspace.this.id
+  log_analytics_workspace_id = module.law.workspace_ids["log-ldo-uks-prd-001"]
 
-  enabled_log { category = "WorkflowRuntime" }
+  enabled_log { category_group = "allLogs" }
   metric { category = "AllMetrics" }
 }
 ```
@@ -1826,7 +1874,7 @@ When Logic Apps, API connections, role assignments, access policies, storage acc
 ```hcl
 # ── 1. Storage (Standard Logic App prerequisite) ───────────────────────────
 resource "azurerm_storage_account" "logic_app" {
-  name                     = "saldouksprd01"
+  name                     = "saldouksprd001"
   resource_group_name      = azurerm_resource_group.this.name
   location                 = var.location
   account_tier             = "Standard"
@@ -1845,7 +1893,7 @@ resource "azurerm_storage_account" "logic_app" {
 
 # ── 2. App Service Plan ─────────────────────────────────────────────────────
 resource "azurerm_service_plan" "this" {
-  name                = "plan-ldo-uks-prd-01"
+  name                = "plan-ldo-uks-prd-001"
   resource_group_name = azurerm_resource_group.this.name
   location            = var.location
   os_type             = "Linux"
@@ -1872,7 +1920,7 @@ resource "azurerm_role_assignment" "kv_secrets_user" {
 
 # ── 4. Logic App ────────────────────────────────────────────────────────────
 resource "azurerm_logic_app_standard" "this" {
-  name                       = "logic-ldo-uks-prd-01"
+  name                       = "logic-ldo-uks-prd-001"
   resource_group_name        = azurerm_resource_group.this.name
   location                   = var.location
   app_service_plan_id        = azurerm_service_plan.this.id
@@ -1922,7 +1970,7 @@ resource "azurerm_role_assignment" "law_reader" {
 # ── 6. API connections (azapi) ──────────────────────────────────────────────
 resource "azapi_resource" "sentinel_connection" {
   type      = "Microsoft.Web/connections@2016-06-01"
-  name      = "conn-sentinel-ldo-uks-prd-01"
+  name      = "conn-sentinel-ldo-uks-prd-001"
   location  = var.location
   parent_id = "/subscriptions/${var.subscription_id}/resourceGroups/${var.rg_name}"
 
@@ -1941,13 +1989,14 @@ resource "azapi_resource" "sentinel_connection" {
   # Connection can be created in parallel with the Logic App - no dependency needed here
 }
 
-# ── 7. Access policy ────────────────────────────────────────────────────────
+# ── 7. Access policy (Standard/V2 only - Consumption V1 connections reject these) ──
 # Must wait for: the connection, the Logic App identity, AND the Sentinel role assignment.
 # Terraform cannot infer the role assignment dependency - the access policy body
 # contains the principal_id as a plain string, not a resource attribute reference.
 resource "azapi_resource" "sentinel_connection_access_policy" {
-  type      = "Microsoft.Web/connections/accessPolicies@2016-06-01"
-  name      = azurerm_logic_app_standard.this.name
+  type = "Microsoft.Web/connections/accessPolicies@2016-06-01"
+  # The policy name must be the identity's object id, not the Logic App name.
+  name      = azurerm_logic_app_standard.this.identity[0].principal_id
   parent_id = azapi_resource.sentinel_connection.id
   location  = var.location
 
@@ -1975,7 +2024,7 @@ resource "azapi_resource" "sentinel_connection_access_policy" {
 
 # ── 8. Diagnostic settings ──────────────────────────────────────────────────
 resource "azurerm_monitor_diagnostic_setting" "logic_app" {
-  name                       = "diag-logic-ldo-uks-prd-01"
+  name                       = "diag-logic-ldo-uks-prd-001"
   target_resource_id         = azurerm_logic_app_standard.this.id
   log_analytics_workspace_id = azurerm_log_analytics_workspace.this.id
 
@@ -2000,7 +2049,7 @@ resource "azurerm_sentinel_automation_rule" "high_severity_playbook" {
   }
 
   action_playbook {
-    logic_app_id            = azurerm_logic_app_standard.this.id
+    logic_app_id            = local.playbook_workflow_id
     tenant_id               = var.tenant_id
     order                   = 1
   }
@@ -2076,27 +2125,34 @@ AzureDiagnostics
 
 ### Alerting on failed runs
 
+Use the [`libre-devops/monitor-alerts/azurerm`](https://registry.terraform.io/modules/libre-devops/monitor-alerts/azurerm) module (alert rule names are descriptive on purpose - they are the alerts experience's display surface):
+
 ```hcl
-resource "azurerm_monitor_metric_alert" "logic_app_failures" {
-  for_each = module.logic_apps.logic_app_ids
+module "monitor_alerts" {
+  source  = "libre-devops/monitor-alerts/azurerm"
+  version = "~> 4.0"
 
-  name                = "alert-${each.key}-failures"
-  resource_group_name = var.rg_name
-  scopes              = [each.value]
-  severity            = 1   # Critical
-  frequency           = "PT5M"
-  window_size         = "PT15M"
+  resource_group_id = module.rg.ids["rg-ldo-uks-prd-001"]
+  location          = var.location
+  tags              = module.tags.tags
 
-  criteria {
-    metric_namespace = "Microsoft.Logic/workflows"
-    metric_name      = "RunsFailed"
-    aggregation      = "Total"
-    operator         = "GreaterThan"
-    threshold        = 0
-  }
+  metric_alerts = {
+    for name, id in module.logic_app_workflows.ids :
+    "Playbook_failures_-_${name}_runs_failing" => {
+      scopes           = [id]
+      description      = "Fires when any run of ${name} fails: response automation must not fail silently."
+      severity         = 1
+      window_size      = "PT15M"
+      action_group_ids = [module.action_group.ids["ag-ldo-uks-prd-001"]]
 
-  action {
-    action_group_id = azurerm_monitor_action_group.ops.id
+      criteria = [{
+        metric_namespace = "Microsoft.Logic/workflows"
+        metric_name      = "RunsFailed"
+        aggregation      = "Total"
+        operator         = "GreaterThan"
+        threshold        = 0
+      }]
+    }
   }
 }
 ```
@@ -2148,7 +2204,7 @@ Logic Apps are often the automation that *responds* to incidents (Sentinel playb
 
 - **User account API connections in production** - user connections break on password changes, MFA prompts, and when the account is disabled or leaves the organisation. Always use Managed Identity for Microsoft services and Service Principals with Key Vault-stored secrets for external services.
 - **Using `azurerm_resource_group_template_deployment` for API connections** - ARM deployments wrapped in Terraform are opaque: they don't surface the connection state in `terraform plan`, errors are buried in ARM deployment logs, and the deployment JSON is hard to read and review. Use `azapi_resource` instead - it is first-class Terraform, shows in the plan, and can be referenced as a resource.
-- **Not creating connection access policies** - creating the `Microsoft.Web/connections` resource is not sufficient. Without an access policy that maps the Logic App's managed identity to the connection, the connection will fail at runtime with a 403 even though the connection resource exists.
+- **Not creating connection access policies (Standard/V2)** - for a Standard Logic App, creating the V2 `Microsoft.Web/connections` resource is not sufficient. Without an access policy that maps the Logic App's managed identity to the connection (named by the identity's object id), the connection will fail at runtime with a 403 even though the connection resource exists. The inverse trap on Consumption: V1 connections REJECT access policies (`InvalidApiConnectionAccessPolicy`), so do not cargo-cult the policy across hosting models - Consumption auth lives in the `$connections` connectionProperties.
 - **Not filtering the Sentinel Incident trigger** - the trigger fires on both creation and every update. Without a condition immediately after the trigger, your playbook fires repeatedly on every enrichment, comment, or status change, creating duplicate notifications and potentially closing incidents prematurely.
 - **Using a module for non-cookie-cutter Logic Apps** - if the Logic App has custom lifecycle rules, unusual networking, per-resource storage, or complex cross-resource dependencies, a module abstraction forces you to work around it. Write the raw resources explicitly - the verbosity is the documentation.
 - **Relying on Consumption Logic App outbound IPs for allowlisting** - the shared IP ranges are large, rotate without notice, and allowlisting them permits all Consumption Logic Apps in the region, not just yours. Use identity-based auth, or switch to Standard with a dedicated IP.
@@ -2164,6 +2220,9 @@ Logic Apps are often the automation that *responds* to incidents (Sentinel playb
 
 ## See Also
 
+- [terraform-azurerm-logic-app-workflow](https://github.com/libre-devops/terraform-azurerm-logic-app-workflow) - the Consumption workflow shell module; its `examples/complete` is the runnable alert-storm playbook this standard describes (typed parameters, shared V1 Sentinel connection, try/catch with explicit retries, storm detection chain)
+- [terraform-azurerm-logic-app-standard](https://github.com/libre-devops/terraform-azurerm-logic-app-standard) - the Standard (single-tenant) app host module
+- [terraform-azurerm-monitor-action-group](https://github.com/libre-devops/terraform-azurerm-monitor-action-group) and [terraform-azurerm-monitor-alerts](https://github.com/libre-devops/terraform-azurerm-monitor-alerts) - the alerting estate that fans into playbooks
 - [Microsoft - Standard vs Consumption comparison](https://learn.microsoft.com/en-us/azure/logic-apps/single-tenant-overview-compare)
 - [Microsoft - Organizational templates](https://learn.microsoft.com/en-us/azure/logic-apps/create-workflows-from-templates?tabs=consumption) - create and share reusable workflow templates
 - [Azure/LogicAppsTemplates](https://github.com/Azure/LogicAppsTemplates) - official Microsoft repository with pre-built Logic Apps templates for common scenarios
