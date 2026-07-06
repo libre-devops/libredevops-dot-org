@@ -1329,7 +1329,7 @@ resource "azurerm_logic_app_trigger_custom" "event_grid_trigger" {
 
 **Trigger naming standards:**
 
-Trigger and action names are the workflow's display surface: run history, error messages, and `runAfter` edges all show them. Be verbose - a name should read as a sentence describing the event, with underscores for spaces (the designer renders them as spaces).
+Trigger and action names are the workflow's display surface: run history, error messages, and `runAfter` edges all show them. Be verbose - a name should read as a sentence describing the event. The underscores are a Logic Apps constraint, not a style choice: these names are engine identifiers (`runAfter`, `@outputs('...')`) and spaces are invalid, so underscores stand in and the designer renders them as spaces. Do NOT carry the underscores to resources that accept real spaces - Azure Monitor alert rule names, for example, take spaces and read better with them.
 
 | Trigger Type | Naming Pattern | Example |
 |:--|:--|:--|
@@ -2138,7 +2138,7 @@ module "monitor_alerts" {
 
   metric_alerts = {
     for name, id in module.logic_app_workflows.ids :
-    "Playbook_failures_-_${name}_runs_failing" => {
+    "Playbook failures - ${name} runs failing" => {
       scopes           = [id]
       description      = "Fires when any run of ${name} fails: response automation must not fail silently."
       severity         = 1
