@@ -1415,7 +1415,16 @@ Workflow actions are defined as separate Terraform resources using `azurerm_logi
    })
    ```
 
-2. **jsonencode() for all JSON** - Always use `jsonencode()` to prevent quote escaping issues and ensure valid JSON syntax.
+2. **jsonencode() for inline bodies, templatefile() for large or repeated ones** - Use
+   `jsonencode()` for action/trigger bodies authored inline in HCL (it prevents quote escaping and
+   guarantees valid JSON). Once a body is large, or the same body is rendered per item (one create
+   handler per product), lift it into a `templates/<name>.json.tftpl` file and load it with
+   `templatefile(path, vars)`, then `jsonencode(merge(jsondecode(templatefile(...)), { runAfter = {} }))`.
+   The template keeps the workflow's `@{...}` runtime expressions readable as JSON and injects only
+   the Terraform-known values (`${snow_url}`, `${msi_identity_id}`, and so on) that authentication
+   blocks cannot take as workflow parameters. Only `${` and `%{` trigger template substitution, so
+   Logic App `@{...}` and OData `$select` / `$connections` pass through untouched. Prefer this over a
+   chain of `replace()` calls stamping placeholder tokens.
 
 3. **Variables for reusable values** - Store queue names, API endpoints, watchlist names as Terraform variables:
 
