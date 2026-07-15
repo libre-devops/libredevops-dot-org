@@ -2209,6 +2209,77 @@ Logic Apps are often the automation that *responds* to incidents (Sentinel playb
 
 ---
 
+## Workflow Definition Language (WDL) pitfalls
+
+The `@{...}` runtime expression layer is not the language `terraform validate` checks, and several of its
+built-in functions behave differently from their equivalents in an ordinary programming language. These
+are the ones that pass validation and then fail (or silently misbehave) at runtime. Every one was learned
+building a real Sentinel SOAR suite in Terraform.
+
+### Built-in function traps
+
+- **`and()` and `or()` do NOT short-circuit** - both operands are evaluated eagerly, so
+  `and(greater(length(x), 0), equals(first(x)?['id'], y))` still evaluates `first(x)` when `x` is empty
+  and throws. Guard the risky operand with a nested `if()`, or lean on `coalesce()`, which DOES
+  short-circuit (it returns the first non-null and stops evaluating). The behaviour is not configurable,
+  so test against the exact Terraform and engine versions CI uses.
+- **`guid()` takes a FORMAT, not a seed** - `guid('N')` returns a random guid in the given format; there
+  is no way to derive a deterministic, stable-per-key GUID inside WDL. When you need an idempotent id (one
+  canonical incident that reopens rather than duplicating, a stable resource name), mint it at plan time
+  with Terraform `uuidv5(namespace, name)` and pass it in as a workflow parameter.
+- **`createArray()` with no arguments is invalid** - it is a schema error, not an empty array. The empty
+  array literal is `json('[]')`. Use it for every default-to-empty fallback, for example
+  `coalesce(body('Find')?['result'], json('[]'))`, so a missing result reads as length zero rather than
+  crashing the expression.
+- **`item()` only binds inside `Foreach`, `Query` and `Select`** - referencing it in any other action is
+  null. Compute per-item values inside the loop or filter, not in a sibling action.
+- **`if()` branches must type-unify** - both arms of a ternary must return the same shape, or the
+  definition is rejected. Make them agree (a comprehension filter, a `try(merge(...))`, or a
+  double-wrapped list) rather than returning an object on one arm and a string on the other.
+- **`formatDateTime(utcNow(), ...)` literals compare in the session time zone** - a formatted datetime
+  string is interpreted in the runtime's local zone, so rolling-window comparisons drift. Prefer the
+  backend's own relative operators (for example ServiceNow `sys_updated_onRELATIVEGT@minute@ago@N`) over a
+  formatted literal.
+
+### Control-flow and idempotency traps
+
+- **`runAfter` accepting `Skipped` can misclassify a failure** - an action Skipped because its sole
+  upstream failed is not a clean success. Accepting `["Skipped"]` on a disposition step can turn a failed
+  dependency into a false all-clear: a failed ticket lookup read as "no ticket exists", opening a
+  duplicate. Accept `Skipped` only where you genuinely mean it; default to `["Succeeded"]` or the explicit
+  `["Succeeded","Failed","TimedOut"]`.
+- **A REST `POST` is never idempotent** - it always inserts. A correlation field alone does not dedup, so
+  a retried or re-fired workflow opens a second record. Dedup is find-then-create: query for the record
+  first, create only when the query comes back empty. The same pattern gives one open parent per storm
+  episode and one open ticket per subject.
+
+### templatefile and IaC traps
+
+- **A full-scope template must be the whole body, not the `actions` value** - when a
+  `templates/<name>.json.tftpl` renders a complete scope object (`type`, `description`, `actions`), set it
+  as the body with `jsonencode(merge(jsondecode(templatefile(...)), { runAfter = {} }))`. Assigning it to
+  `actions = jsondecode(templatefile(...))` double-nests `actions.actions` and Azure rejects the
+  definition with `InvalidRequestContent`. A template that is JUST the actions map is the opposite case: it
+  IS the `actions` value.
+- **Array and Object workflow-parameter values may need to be strings** - a shell module that validates
+  every `parameters.<x>.value` as a string rejects a raw HCL list ("string required, but have tuple"). Pass
+  `value = jsonencode(local.the_array)`; the workflow still receives the array (the module jsondecodes
+  Object and Array values). A number coerces, a list does not.
+
+### `terraform validate` is not the gate
+
+`terraform validate` checks HCL and JSON validity. It does NOT check Logic App scope structure, WDL
+expression correctness, or `count` and `for_each` values that depend on computed attributes. It routinely
+passes a body the ARM PUT then rejects, and passes a `count` that only errors at `terraform plan`
+("Invalid count argument") once it touches a not-yet-known id. The real gates, in order, are: `terraform
+plan` (computed-value and count errors), the ARM PUT on `apply` (scope structure and WDL schema), and a
+live run (expression evaluation). Keep `count` and `for_each` keyed on plan-known values (a variable or a
+literal, never another resource's id), and for a large scope body a quick local simulation, asserting the
+merged JSON has the checks directly under `actions` with no nested `actions` or `type`, catches the
+double-nest before a ten-minute apply does.
+
+---
+
 ## Anti-patterns
 
 - **User account API connections in production** - user connections break on password changes, MFA prompts, and when the account is disabled or leaves the organisation. Always use Managed Identity for Microsoft services and Service Principals with Key Vault-stored secrets for external services.
