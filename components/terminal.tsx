@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 
+import { useMounted, usePrefersReducedMotion } from '@/lib/hooks';
+
 const commands: { cmd: string; output: string }[] = [
     { cmd: 'terraform plan -out=tfplan', output: 'Plan: 12 to add, 0 to change, 0 to destroy.' },
     { cmd: 'trivy config ./terraform', output: 'Tests: 24 (SUCCESSES: 24, FAILURES: 0)' },
@@ -27,23 +29,19 @@ type Phase = 'typing' | 'output' | 'pause';
 
 export function Terminal() {
     const ref = useRef<HTMLDivElement>(null);
+    const mounted = useMounted();
+    const reducedMotion = usePrefersReducedMotion();
+    const animate = mounted && !reducedMotion;
+    // Reduced motion gets a single fully-typed frame. Before hydration we still
+    // render the empty prompt the animation starts from, so nothing flashes.
+    const staticFrame = mounted && reducedMotion;
+
     const [cmdIdx, setCmdIdx] = useState(0);
     const [typed, setTyped] = useState('');
     const [showOutput, setShowOutput] = useState(false);
     const [phase, setPhase] = useState<Phase>('typing');
     const [cursorOn, setCursorOn] = useState(true);
-    const [animate, setAnimate] = useState(false);   // motion allowed
     const [visible, setVisible] = useState(true);     // intersecting viewport
-
-    // Respect reduced motion: show one static frame instead of animating.
-    useEffect(() => {
-        if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-            setTyped(commands[0].cmd);
-            setShowOutput(true);
-            return;
-        }
-        setAnimate(true);
-    }, []);
 
     // Pause all work while the terminal is scrolled out of view.
     useEffect(() => {
@@ -107,16 +105,16 @@ export function Terminal() {
                 <div className="hero-terminal-line">
                     <span className="hero-terminal-prompt">$</span>
                     <span className="hero-terminal-cmd">
-                        {typed}
+                        {staticFrame ? commands[0].cmd : typed}
                         <span
                             className="hero-terminal-cursor"
                             style={{ opacity: cursorOn ? 1 : 0 }}
                         />
                     </span>
                 </div>
-                {showOutput && (
+                {(staticFrame || showOutput) && (
                     <div className="hero-terminal-output">
-                        {commands[cmdIdx].output}
+                        {commands[staticFrame ? 0 : cmdIdx].output}
                     </div>
                 )}
             </div>

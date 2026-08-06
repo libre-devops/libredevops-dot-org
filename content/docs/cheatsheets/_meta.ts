@@ -1,4 +1,4 @@
-export default {
+const cheatsheets = {
     'ai-cheatsheet':       'AI',
     'ansible-cheatsheet':  'Ansible',
     'aws-cheatsheet':      'AWS',
@@ -25,3 +25,5 @@ export default {
     'typescript-cheatsheet': 'TypeScript',
     'windows-cheatsheet':  'Windows',
 }
+
+export default cheatsheets

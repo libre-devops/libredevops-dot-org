@@ -2,13 +2,12 @@
 
 import Image from 'next/image';
 import { useTheme } from 'next-themes';
-import { useEffect, useState } from 'react';
+
+import { useMounted } from '@/lib/hooks';
 
 export function DocsLogo() {
     const { resolvedTheme } = useTheme();
-    const [mounted, setMounted] = useState(false);
-
-    useEffect(() => { setMounted(true); }, []);
+    const mounted = useMounted();
 
     const wrapperStyle: React.CSSProperties = {
         display: 'flex',

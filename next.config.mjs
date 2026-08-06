@@ -13,7 +13,12 @@ export default withNextra({
   output: 'export',
   trailingSlash: true,
   images: {
-    unoptimized: true
+    // Static export cannot run the optimizer, so images pass through as-is.
+    unoptimized: true,
+    remotePatterns: [
+      // devicon logos used by the cheatsheet grid
+      { protocol: 'https', hostname: 'cdn.jsdelivr.net', pathname: '/gh/devicons/devicon@latest/**' }
+    ]
   },
   reactStrictMode: true,
   poweredByHeader: false

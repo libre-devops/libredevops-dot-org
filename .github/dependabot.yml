@@ -13,6 +13,12 @@ updates:
       minor-and-patch:
         patterns: ["*"]
         update-types: [minor, patch]
+    ignore:
+      # eslint-config-next depends on eslint-plugin-react, which caps its eslint
+      # peer at ^9. Under eslint 10 the plugin throws at rule-load time and
+      # linting cannot run. Drop this once the plugin supports eslint 10.
+      - dependency-name: eslint
+        update-types: [version-update:semver-major]
     open-pull-requests-limit: 5
     labels:
       - dependencies

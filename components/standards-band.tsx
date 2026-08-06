@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import Link from 'next/link';
+
 import { ArrowRight } from 'lucide-react';
 
 interface Standard {
@@ -68,27 +70,27 @@ export function StandardsBand() {
 
                 <div className="standards-band-pills">
                     {standards.map((s) => (
-                        <a key={s.href} href={s.href} className="standards-band-pill">
+                        <Link key={s.href} href={s.href} className="standards-band-pill">
                             {s.label}
-                        </a>
+                        </Link>
                     ))}
                 </div>
 
-                <a href="/docs/documents" className="standards-band-cta">
+                <Link href="/docs/documents" className="standards-band-cta">
                     Explore documents
                     <ArrowRight size={16} />
-                </a>
+                </Link>
             </div>
         </div>
         <p className="standards-band-seealso">
             See also the{' '}
-            <a
+            <Link
                 href="/docs/documents/azure-naming-convention"
                 className="standards-band-seealso-link"
             >
                 Azure Naming Convention
                 <ArrowRight size={14} />
-            </a>
+            </Link>
         </p>
         </>
     );

@@ -2,13 +2,12 @@
 
 import Image from 'next/image';
 import { useTheme } from 'next-themes';
-import { useEffect, useState } from 'react';
+
+import { useMounted } from '@/lib/hooks';
 
 export function HeroLogo() {
     const { resolvedTheme } = useTheme();
-    const [mounted, setMounted] = useState(false);
-
-    useEffect(() => { setMounted(true); }, []);
+    const mounted = useMounted();
 
     if (!mounted) {
         // Placeholder matches rendered size to avoid layout shift

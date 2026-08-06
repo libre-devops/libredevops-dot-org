@@ -2,13 +2,12 @@
 
 import { Moon, Sun } from 'lucide-react';
 import { useTheme } from 'next-themes';
-import { useEffect, useState } from 'react';
+
+import { useMounted } from '@/lib/hooks';
 
 export function ThemeToggle() {
     const { resolvedTheme, setTheme } = useTheme();
-    const [mounted, setMounted] = useState(false);
-
-    useEffect(() => setMounted(true), []);
+    const mounted = useMounted();
 
     if (!mounted) {
         return <button type="button" aria-label="Toggle theme" className="theme-toggle" />;

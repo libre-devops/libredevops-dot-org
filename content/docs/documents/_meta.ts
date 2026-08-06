@@ -1,4 +1,4 @@
-export default {
+const documents = {
     'azure-logic-app-standards': 'Azure Logic App Standards',
     'azure-naming-convention':   'Azure Naming Convention',
     'bash-standards':            'Bash Standards',
@@ -8,3 +8,5 @@ export default {
     'python-standards':          'Python Standards',
     'terraform-standards':       'Terraform Standards',
 }
+
+export default documents

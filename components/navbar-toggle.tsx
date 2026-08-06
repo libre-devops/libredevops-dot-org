@@ -1,17 +1,25 @@
 'use client';
 
 import { Eye, EyeOff } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 
-const STORAGE_KEY = 'docs-banner-hidden';
+import {
+    getBannerHidden,
+    getBannerHiddenOnServer,
+    setBannerHidden,
+    subscribeBannerHidden,
+} from '@/lib/banner';
 
 export function NavbarToggle() {
-    const [hidden, setHidden] = useState(false);
+    const hidden = useSyncExternalStore(
+        subscribeBannerHidden,
+        getBannerHidden,
+        getBannerHiddenOnServer,
+    );
 
+    // Mirror the preference onto the DOM, which React does not own.
     useEffect(() => {
-        const stored = localStorage.getItem(STORAGE_KEY) === '1';
-        setHidden(stored);
-        document.body.classList.toggle('banner-hidden', stored);
+        document.body.classList.toggle('banner-hidden', hidden);
         // The preload class on <html> was set by an inline script before React
         // hydrated; hand control back to the body class now.
         document.documentElement.classList.remove('banner-hidden-preload');
@@ -22,30 +30,20 @@ export function NavbarToggle() {
         return () => {
             document.body.classList.remove('banner-hidden');
         };
-    }, []);
+    }, [hidden]);
 
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
             if ((e.ctrlKey || e.metaKey) && e.key === '\\') {
                 e.preventDefault();
-                setHidden(prev => {
-                    const next = !prev;
-                    localStorage.setItem(STORAGE_KEY, next ? '1' : '0');
-                    document.body.classList.toggle('banner-hidden', next);
-                    return next;
-                });
+                setBannerHidden(!getBannerHidden());
             }
         };
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
     }, []);
 
-    const toggle = () => {
-        const next = !hidden;
-        setHidden(next);
-        localStorage.setItem(STORAGE_KEY, next ? '1' : '0');
-        document.body.classList.toggle('banner-hidden', next);
-    };
+    const toggle = () => setBannerHidden(!hidden);
 
     return (
         <button
