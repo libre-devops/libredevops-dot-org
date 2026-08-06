@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import { useState } from 'react';
 
 interface Cheatsheet {
@@ -34,7 +35,7 @@ const AiIcon = (
 );
 
 const BicepIcon = (
-    <img
+    <Image
         src="/assets/bicep-logo.svg"
         alt="Bicep"
         width={28}
@@ -44,7 +45,7 @@ const BicepIcon = (
 );
 
 const DefenderIcon = (
-    <img
+    <Image
         src="/assets/defender-logo.svg"
         alt="Microsoft Defender"
         width={28}
@@ -65,7 +66,7 @@ const TerminalIcon = (
 
 function DevIcon({ name, alt, width = 28 }: { name: string; alt: string; width?: number }) {
     return (
-        <img
+        <Image
             src={`https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/${name}`}
             alt={alt}
             width={width}

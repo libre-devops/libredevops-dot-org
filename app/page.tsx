@@ -1,3 +1,5 @@
+import Link from 'next/link';
+
 import { HeroLogo } from '@/components/hero-logo';
 import { Terminal } from '@/components/terminal';
 import { StandardsBand } from '@/components/standards-band';
@@ -17,7 +19,7 @@ export default function HomePage() {
                         covering DevOps, platform engineering, and security.
                     </p>
                     <div className="hero-actions">
-                        <a href="/docs/cheatsheets" className="btn-primary">Browse Cheatsheets</a>
+                        <Link href="/docs/cheatsheets" className="btn-primary">Browse Cheatsheets</Link>
                         <a
                             href="https://security.libredevops.org"
                             className="btn-secondary"

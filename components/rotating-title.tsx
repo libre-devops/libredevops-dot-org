@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 
+import { useMounted, usePrefersReducedMotion } from '@/lib/hooks';
+
 const words = ['DevOps', 'Platform', 'Security', 'Software', 'AI'];
 
 type Phase = 'typing' | 'hold' | 'deleting';
@@ -10,19 +12,15 @@ export function RotatingTitle() {
     const ref = useRef<HTMLHeadingElement>(null);
     // SSR + first paint show the first word fully typed; the typewriter only
     // takes over after mount (and only when motion is allowed).
+    const mounted = useMounted();
+    const reducedMotion = usePrefersReducedMotion();
+    const animate = mounted && !reducedMotion;
+
     const [wordIdx, setWordIdx] = useState(0);
-    const [typed, setTyped] = useState(words[0]);
-    const [phase, setPhase] = useState<Phase>('hold');
-    const [animate, setAnimate] = useState(false);
+    const [typed, setTyped] = useState('');
+    const [phase, setPhase] = useState<Phase>('typing');
     const [visible, setVisible] = useState(true);
     const [caretOn, setCaretOn] = useState(true);
-
-    useEffect(() => {
-        if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-        setTyped('');
-        setPhase('typing');
-        setAnimate(true);
-    }, []);
 
     // Pause while the title is scrolled out of view.
     useEffect(() => {
@@ -77,7 +75,7 @@ export function RotatingTitle() {
     return (
         <h1 className="hero-title" ref={ref}>
             <span className="hero-title-rotator">
-                {typed}
+                {animate ? typed : words[0]}
                 {animate && (
                     <span
                         className="hero-title-caret"

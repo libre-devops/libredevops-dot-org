@@ -1,6 +1,8 @@
 import { importPage } from 'nextra/pages'
 import { getPageMap } from 'nextra/page-map'
-import { useMDXComponents } from 'nextra-theme-docs'
+// Aliased on import: this is a nextra factory, not a React hook. Under the
+// use* name react-hooks/rules-of-hooks rejects it inside an async component.
+import { useMDXComponents as getMDXComponents } from 'nextra-theme-docs'
 
 type PageMapItem = {
     route?: string
@@ -40,7 +42,7 @@ export default async function Page(props: {
     const params = await props.params
     const result = await importPage(['docs', ...params.mdxPath])
     const { default: MDXContent, toc, metadata, ...rest } = result
-    const { wrapper: Wrapper } = useMDXComponents()
+    const { wrapper: Wrapper } = getMDXComponents()
     return (
         <Wrapper toc={toc} metadata={metadata} {...rest}>
             <MDXContent {...props} params={params} />
