@@ -5,7 +5,7 @@ description: Standards for building Microsoft Copilot agents - the platform-inde
 
 # Copilot Agent Standards
 
-An opinionated standard for building agents on Microsoft's Copilot surfaces: what belongs in an agent's instructions, what belongs in its knowledge, how far it is allowed to act, how it is tested, and how its definition gets version controlled and shipped. "Copilot" names at least five unrelated products, so this document names them first, then separates the rules that hold everywhere from the per-platform detail that does not.
+An opinionated standard for building agents on Microsoft's Copilot surfaces: what belongs in an agent's instructions, what belongs in its knowledge, what data it may touch, how far it is allowed to act, how it is tested, and how its definition gets version controlled and shipped. "Copilot" names at least five unrelated products, so this document names them first, then separates the rules that hold everywhere from the per-platform detail that does not.
 
 > **Status: first edition, dated 24 August 2026. It needs updating.** Every surface described here changed materially in the year before that date and several are still prerelease. The **rules** are meant to outlive the platforms. The **limits, field names and portal paths** are a snapshot and will rot. Re-verify anything you are about to depend on against the linked reference and record the date you checked it, exactly as you would a provider version. See [Document status](#document-status) for the re-verification list.
 
@@ -154,15 +154,11 @@ Anything that emits code or artefacts needs an explicit contract, or it will inv
 
 ### A worked example
 
-Illustrations of instruction style are easy to agree with and hard to copy, so here is a complete
-one. This is the shipped `terraform-author` agent from
-[copilot-agents](https://github.com/libre-devops/copilot-agents), rendered exactly as it is pasted
-into Agent Builder, at **7,309 of 8,000 characters (91 percent)**.
+Illustrations of instruction style are easy to agree with and hard to copy, so here is a complete one. This is the shipped `terraform-author` agent from [copilot-agents](https://github.com/libre-devops/copilot-agents), rendered exactly as it is pasted into Agent Builder, at **7,309 of 8,000 characters (91 percent)**.
 
 #### The composition
 
-The agent definition names its fragments in order and the renderer concatenates them with a blank
-line between each, measuring the result:
+The agent definition names its fragments in order and the renderer concatenates them with a blank line between each, measuring the result:
 
 ```yaml
 # agents/terraform-author/agent.yaml
@@ -177,10 +173,7 @@ instructions:
   - shared/output-contract.md        #   816   shared, and last on purpose
 ```
 
-Five of the eight fragments are shared, so **3,038 of the 7,309 characters are authored once** and
-inherited by every agent in the collection. Fixing a house rule fixes all of them at the next
-render. Order is load bearing: the execution header has to be read before the rules it governs, and
-the output contract with its final check has to be the last thing in the context.
+Five of the eight fragments are shared, so **3,038 of the 7,309 characters are authored once** and inherited by every agent in the collection. Fixing a house rule fixes all of them at the next render. Order is load bearing: the execution header has to be read before the rules it governs, and the output contract with its final check has to be the last thing in the context.
 
 #### The rendered instruction set
 
@@ -315,30 +308,16 @@ Before answering, confirm: every cited fact has a source, every emitted argument
 
 #### What to notice
 
-- **The house rules are not in this file.** `EXECUTION RULES`, `HOUSE STYLE`, `GROUNDING AND
-  HONESTY`, `KNOWLEDGE PRECEDENCE` and `OUTPUT CONTRACT` are shared fragments. Only `PURPOSE`,
-  `THE STANDARD` and `WORKFLOW` are specific to Terraform.
-- **Every section is a capitalised heading.** Structure is the strongest signal a model gets about
-  which rules apply to what.
-- **`WORKFLOW` is numbered and nothing else is.** The rules under `THE STANDARD` are parallel and
-  carry no ordering, so they are bullets. Numbering them would invent a sequence.
-- **Step 2 spends a step on grounding.** "Confirm every resource type and argument exists in the
-  pinned provider version, and if a knowledge source returns nothing, say so" is the difference
-  between an agent that cites the provider and one that invents arguments that do not exist.
-- **Step 4 makes the agent say what it has not done.** It lists the gates and states plainly that it
-  has not run them. Combined with the disclaimer in the manifest, that is the honesty boundary.
-- **The rules are phrased positively where they can be.** "Label a single resource of a type
-  `this`" rather than a list of labels to avoid.
-- **`OUTPUT CONTRACT` ends with a final check**, which is the model's last instruction before it
-  answers, and it re-asserts the three properties that matter most: sourced facts, real arguments,
-  and house style.
-- **Nothing in here is a fact that could go in knowledge.** The naming construction is a rule; the
-  table of CAF abbreviations behind it is a fact, and it lives in an uploaded document.
+- **The house rules are not in this file.** `EXECUTION RULES`, `HOUSE STYLE`, `GROUNDING AND HONESTY`, `KNOWLEDGE PRECEDENCE` and `OUTPUT CONTRACT` are shared fragments. Only `PURPOSE`, `THE STANDARD` and `WORKFLOW` are specific to Terraform.
+- **Every section is a capitalised heading.** Structure is the strongest signal a model gets about which rules apply to what.
+- **`WORKFLOW` is numbered and nothing else is.** The rules under `THE STANDARD` are parallel and carry no ordering, so they are bullets. Numbering them would invent a sequence.
+- **Step 2 spends a step on grounding.** "Confirm every resource type and argument exists in the pinned provider version, and if a knowledge source returns nothing, say so" is the difference between an agent that cites the provider and one that invents arguments that do not exist.
+- **Step 4 makes the agent say what it has not done.** It lists the gates and states plainly that it has not run them. Combined with the disclaimer in the manifest, that is the honesty boundary.
+- **The rules are phrased positively where they can be.** "Label a single resource of a type `this`" rather than a list of labels to avoid.
+- **`OUTPUT CONTRACT` ends with a final check**, which is the model's last instruction before it answers, and it re-asserts the three properties that matter most: sourced facts, real arguments, and house style.
+- **Nothing in here is a fact that could go in knowledge.** The naming construction is a rule; the table of CAF abbreviations behind it is a fact, and it lives in an uploaded document.
 
-The rest of the definition is configuration rather than prose: four scoped web search sites, four
-uploaded knowledge documents, five conversation starters, a disclaimer, and
-`discourage_model_knowledge: false` with a comment explaining that an agent which cannot draw on its
-own knowledge of HCL cannot write HCL.
+The rest of the definition is configuration rather than prose: four scoped web search sites, four uploaded knowledge documents, five conversation starters, a disclaimer, and `discourage_model_knowledge: false` with a comment explaining that an agent which cannot draw on its own knowledge of HCL cannot write HCL.
 
 
 ---
@@ -404,7 +383,7 @@ Verified 24 August 2026. These are the ones that pass every offline check and th
 
 | Field or resource | Limit | Where it bites |
 |:--|:--|:--|
-| `name` | 100 characters in the manifest, **30 in Agent Builder** | an agent between the two packages fine and cannot be built in the form as named |
+| `name` | 100 characters in the manifest, **30 in Agent Builder** | a name between the two lengths packages and validates cleanly, then cannot be entered in Agent Builder as named |
 | `description` | 1,000 characters | keep it to a few sentences and say the agent works in Microsoft 365 Copilot |
 | `instructions` | 8,000 characters | see [Instructions](#instructions) |
 | Conversation starters | 12 maximum, **at least 3 recommended** | fewer than three and users do not know what to ask |
@@ -518,11 +497,98 @@ Every agent identity should have a **sponsor**: a named human accountable for it
 - **Expiry is the point.** When an assignment nears its end date the sponsor is notified and must either request an extension, which triggers a fresh approval cycle, or let it lapse. Standing access with no review is the thing this replaces.
 - **Conditional Access applies to agent identities**, and can be attached at the blueprint level so every identity created from it inherits the policy. Identity Protection contributes agent risk signals to those decisions.
 
+### Tenant controls come before agent design
+
+Per-agent hygiene is worth nothing if anyone in the tenant can publish anything. The controls live in the **Copilot Control System** in the Microsoft 365 admin centre, under **Copilot** then **Settings** then **Data access** then **Agents**, and they are the gate everything else in this document depends on:
+
+- **Who may access and install agents at all**: all users, no users, or named users and groups.
+- **Which publishers are allowed.** Agents built by Microsoft, by external publishers, and by your own organisation are three separate choices, not one switch.
+- **How agents may be shared and published**, which varies by the tool the agent was built in. Copilot Studio agents carry their own settings in the Power Platform admin centre as well, so a policy set in one console is not the whole picture.
+
+Use the **AI Admin** role for this rather than Global Admin, which carries far more than these tasks need. Global Reader covers the review case without edit rights.
+
+> **Rule:** Decide the publisher policy before the first agent is built. Turning external publishers off after people have adopted one is a withdrawal, not a control.
+
+### Agents you did not write
+
+The external-publisher setting is a supply chain decision wearing a different hat, and Microsoft is plain about where its own assurances stop:
+
+> Data processed by non-Microsoft services isn't subject to Microsoft agreements.
+>
+> [Agents admin guide for Microsoft 365](https://learn.microsoft.com/en-us/microsoft-365/copilot/agent-essentials/m365-agents-admin-guide)
+
+A third-party agent therefore needs what any other vendor processing your data needs: a review of what it reaches, where the processing happens, and under whose terms. Treat the Agent Store the way you treat a package registry, not the way you treat a Microsoft feature. The **block** action and the requested-agents queue in the admin centre are the enforcement points, and a request queue is only useful if a named human is on the other end of it.
+
+### When an agent misbehaves
+
+Write the answer down before you need it. The levers, roughly in order of how fast they act:
+
+| Lever | Effect | Where |
+|:--|:--|:--|
+| Unshare or unassign | removes it from the people who have it | the agent's share settings, or Integrated apps |
+| **Block** the agent | stops installation and use across the tenant | agent inventory, Microsoft 365 admin centre |
+| Disable the agent identity | cuts its access to everything at once | My Account, by its sponsor or owner, or Entra |
+| Tighten the DLP policy | stops sensitive content reaching it, without removing it | Purview, Microsoft 365 Copilot location |
+| Revoke the access package | removes the resource access it was granted | entitlement management |
+| Republish the previous version | reverts the behaviour itself | your repository, plus the artefact checksum you recorded |
+
+The last row only exists if you did the work in [Shipping agents as code](#shipping-agents-as-code). Without a checksummed previous artefact there is no rollback, only a rebuild from memory under pressure.
+
 ### Inventory and audit
 
 An agent registry in the Microsoft 365 admin centre gives a single list of the agents available in the organisation, with publisher, ownership and aggregated risk, and the management actions to install, publish, block, unblock, delete and reassign. Security Copilot agent administration is auditable through the Purview unified audit log, so creation, update and deletion are traceable.
 
 The practical minimum, whatever tooling you have: a list of every agent in the tenant, who sponsors it, what it can reach, and when that access was last reviewed.
+
+---
+
+## Data protection and compliance
+
+Everything above governs what an agent **is**. This governs what it may **touch**, and it is the part an enterprise review opens first. The controls are Purview's, they apply both to the grounding data and to the conversations, and none of them is on by default.
+
+### Grounding data
+
+- **Sensitivity labels travel with the content, and agents respect them.** Label the SharePoint and Dataverse content agents ground in. A conversation displays the most restrictive label among the references used, and a response only includes content the signed-in user is entitled to see.
+- **DLP can stop a labelled file being processed at all.** Create a DLP policy with **Microsoft 365 Copilot** as the location, condition it on the labels that matter, and set the action to restrict processing. Run it in simulation first and read the activity explorer: the blast radius is "answers quietly get worse", and you want to see which files before your users do.
+- **Oversharing is the real exposure.** An "anyone" link on an unlabelled document is a document an agent can surface to someone who would never have found it. An oversharing DLP policy for SharePoint and OneDrive detects those links for labelled and unlabelled content alike.
+- **Stale grounding is a compliance problem, not only an accuracy one.** Retention policies through Data Lifecycle Management remove content that should no longer be answerable at all.
+
+### Interactions
+
+- **Label inheritance applies to the conversation**, so protection follows the answer rather than stopping at the file.
+- **DLP for the Copilot location also governs interactions**, including keeping prompts that contain sensitive information out of external web queries.
+- **Insider Risk Management** ships a **Risky AI usage** policy template for detecting attempts to reach sensitive content or exfiltrate it through prompts.
+- **Communication Compliance** carries built-in classifiers for agent interactions, including jailbreak attempts.
+- **eDiscovery** preserves, collects and exports agent interactions, and retention policies cover Copilot interaction locations. Agent conversations are discoverable records like any other.
+
+Microsoft publishes this as a four-step deployment model: discover risks, protect grounding data, protect interactions, govern interactions. Follow it in that order, because step one is what tells you whether steps two to four are proportionate for your tenant.
+
+> **Rule:** An agent grounded in unlabelled, overshared content is a search engine for your worst-governed data. Fix the grounding data before you widen the agent.
+
+---
+
+## Licensing and cost
+
+Cost surprises come from grounding, not from agents. For declarative agents:
+
+| The agent uses | A Microsoft 365 Copilot licence holder | A Copilot Chat user without the add-on |
+|:--|:--|:--|
+| Instructions only | no charge | no charge |
+| Public website grounding | no charge | no charge |
+| Shared tenant data such as SharePoint or Copilot connectors | no charge | **usage-based billing, metered in Copilot Credits** |
+
+Declarative agents are hosted by Microsoft 365 Copilot, so there is no hosting cost. Custom engine agents invert both halves: no Copilot licence is needed to use one, but you host the orchestrator and the model, so Foundry, App Service and Bot Service costs are yours.
+
+Three consequences worth designing around:
+
+- **An agent grounded only in instructions and public sites costs nothing for anyone**, which is why that is the right default for anything you intend to share widely or open source.
+- **Adding one SharePoint knowledge source changes the cost model for every unlicensed user** of that agent. That is a decision to take deliberately, not a detail to discover on an invoice.
+- **Security Copilot meters separately, in compute units**, and its schedules are where the money goes. A poll interval left at a supplied default is a standing charge with no owner.
+
+Governance carries its own licensing: Entra ID Governance for agent identities needs **Microsoft 365 E7**, which includes Agent 365 and the Entra Suite, or a **Microsoft Agent 365** licence alongside at least Entra ID P1 or Microsoft 365 E3.
+
+> **Rule:** State the cost model in the agent's README, in the same paragraph as its knowledge sources. They are the same decision written twice.
+
 
 ---
 
@@ -594,15 +660,19 @@ The parts that matter:
 - 🚨 **A knowledge capability declared without a scope.** Several of them mean "the entire organisation" when the scoping array is omitted.
 - 🚨 **An agent that can act, with the prompt as the only control.** Prompts are advisory. Put a workflow that re-validates the action, the target and the approval between the model and the API.
 - 🚨 **Pointing scoped web search at an intranet or an authenticated site.** It retrieves nothing, reports nothing, and answers from training data instead.
+- 🚨 **Grounding an agent in content nobody has labelled or reviewed for oversharing.** The agent inherits every access mistake in the source and makes it findable by asking a question.
 - ⚠️ **Truncating instructions to fit.** The output contract is usually at the end, so truncation removes exactly the part that kept the agent honest.
 - ⚠️ **Dumping a document library in as knowledge.** Relevance beats quantity, and stale grounding is more convincing than no grounding.
 - ⚠️ **`discourage_model_knowledge: true` on an agent that has to write code.** The language itself is model knowledge. Use knowledge precedence instead.
 - ⚠️ **An app package version starting with 0.** Rejected at catalogue publish, and nothing earlier in the process tells you.
 - ⚠️ **Copy-pasted instruction blocks across agents.** They drift, and the weakest copy sets the floor. Compose from shared fragments.
+- ⚠️ **External publishers left enabled because nobody chose.** Third-party agent data handling sits outside Microsoft's agreements, so that toggle is a vendor decision, not a default.
 - ⚠️ **A schedule enabled by default.** Metered runtime with no named owner is a bill nobody chose.
+- ⚠️ **Adding a tenant knowledge source without re-reading the cost model.** One SharePoint source turns a free agent into a metered one for every unlicensed user of it.
 - 🔬 **Trusting schema validation as the gate.** It accepts manifests the platform rejects, and rejects nothing about behaviour.
 - 🔬 **Testing only in the authoring tool's test pane.** Behaviour differs across Copilot chat, Teams, Word and Outlook.
 - 🔬 **Treating the injection test as a one-off.** The model changes underneath you; that property is the first to move.
+- 🔬 **No written answer to "how do we turn it off".** Blocking, disabling the identity, revoking access and reverting the artefact are four different levers with four different latencies. Work that out calmly, once, in advance.
 - 🔬 **An agent with no sponsor.** It will outlive the person who built it, keep its access, and answer to nobody.
 
 ---
@@ -611,16 +681,20 @@ The parts that matter:
 
 A starting point for a first agent, in order.
 
-1. **Name the product.** Which Copilot, which authoring tool, and why.
-2. **Write the job in one sentence.** If it needs two, it is two agents.
-3. **Decide where the knowledge actually lives**, and pick the capability that can reach it. If it is not publicly indexed, web search is not an option.
-4. **Draft instructions as fragments**, with the shared house rules inherited rather than retyped.
-5. **Set the budget gate** at the platform's cap, warning at 95 percent, failing at 100.
-6. **Scope every capability explicitly.** Assume an omitted scope means everything.
-7. **Decide the autonomy rung**, and build the enforcement point outside the prompt if it is above L1.
-8. **Render, lint, and commit the output.** Gate drift in CI.
-9. **Write the test cases** before you build in a tenant: starters, out of scope, injection, knowledge hit, knowledge miss.
-10. **Register the agent**: sponsor, access, review cadence, cost model, and the rollback artefact.
+1. **Confirm the tenant policy allows it.** Who may create agents, which publishers are permitted, and how anything reaches an audience. If this is undecided, decide it before building.
+2. **Name the product.** Which Copilot, which authoring tool, and why.
+3. **Write the job in one sentence.** If it needs two, it is two agents.
+4. **Decide where the knowledge actually lives**, and pick the capability that can reach it. If it is not publicly indexed, web search is not an option.
+5. **Check that grounding data is labelled and not overshared**, and decide the DLP position, in simulation first.
+6. **Draft instructions as fragments**, with the shared house rules inherited rather than retyped.
+7. **Set the budget gate** at the platform's cap, warning at 95 percent, failing at 100.
+8. **Scope every capability explicitly.** Assume an omitted scope means everything.
+9. **Decide the autonomy rung**, and build the enforcement point outside the prompt if it is above L1.
+10. **Work out the cost model**, and write it beside the knowledge sources in the README.
+11. **Render, lint, and commit the output.** Gate drift in CI.
+12. **Write the test cases** before you build in a tenant: starters, out of scope, injection, knowledge hit, knowledge miss.
+13. **Register the agent**: sponsor, access, review cadence, cost model, and the rollback artefact.
+14. **Write down how to turn it off**, and who may do it.
 
 ---
 
@@ -638,6 +712,9 @@ Verified against the live documentation on 24 August 2026, with Microsoft's own 
 | [Security Copilot agent development overview](https://learn.microsoft.com/en-us/copilot/security/developer/custom-agent-overview) | 26 May 2026 | authoring routes, manifest convergence, publishing roles. Marked prerelease by Microsoft |
 | [Governing agent identities](https://learn.microsoft.com/en-us/entra/id-governance/agent-id-governance-overview) | 5 June 2026 | Entra Agent ID object model, sponsors, access packages, Conditional Access |
 | [GitHub Copilot repository custom instructions](https://docs.github.com/en/copilot/how-tos/configure-custom-instructions/add-repository-instructions) | checked 24 August 2026 | the three file types, `applyTo`, `excludeAgent`, `AGENTS.md` proximity precedence |
+| [Agents admin guide for Microsoft 365](https://learn.microsoft.com/en-us/microsoft-365/copilot/agent-essentials/m365-agents-admin-guide) | 7 April 2026 | Copilot Control System agent settings, admin roles, publisher choice, block and request queue |
+| [Secure and govern Copilot agents, steps 2 to 4](https://learn.microsoft.com/en-us/purview/deploymentmodels/depmod-sc-agents-deployment) | 31 March 2026 | sensitivity labels on grounding data, DLP for the Copilot location, oversharing policy, Insider Risk, Communication Compliance, eDiscovery, retention |
+| [Licensing and cost considerations](https://learn.microsoft.com/en-us/microsoft-365/copilot/extensibility/cost-considerations) | 18 June 2026 | what is zero-rated, what meters in Copilot Credits, declarative versus custom engine hosting |
 
 **Known gaps in this edition**, to be filled as the platforms settle:
 
@@ -646,6 +723,8 @@ Verified against the live documentation on 24 August 2026, with Microsoft's own 
 - The Microsoft 365 Copilot Retrieval API is a pointer here, not a section, and it deserves one for anyone grounding a custom application in tenant content.
 - No worked eval harness. The testing section describes cases to write; it does not yet ship a way to run them.
 - Copilot Studio's application lifecycle management story is summarised rather than standardised.
+- No worked Purview policy examples. The data protection section names the controls and the order to apply them; it does not yet give a policy you can copy.
+- Copilot Credits are named as the metering unit without rates, deliberately, because prices change faster than this document will.
 
 **When you update this document**, change the date in the status callout at the top, refresh the table above with the dates you actually checked, and record any place where a platform's documentation, its schema and its behaviour disagree, rather than papering over the seam.
 
@@ -678,12 +757,17 @@ Verified against the live documentation on 24 August 2026, with Microsoft's own 
 - [Adding repository custom instructions](https://docs.github.com/en/copilot/how-tos/configure-custom-instructions/add-repository-instructions)
 - [Custom instructions support by feature](https://docs.github.com/en/copilot/reference/custom-instructions-support)
 
-**Governance**
+**Governance, data protection and cost**
 
 - [Governing agent identities](https://learn.microsoft.com/en-us/entra/id-governance/agent-id-governance-overview)
 - [Microsoft Entra Agent ID](https://learn.microsoft.com/en-us/entra/agent-id/what-are-agent-identities)
 - [Agent registry in the Microsoft 365 admin centre](https://learn.microsoft.com/en-us/microsoft-365/admin/manage/agent-registry)
 - [Manage agents in Integrated apps](https://learn.microsoft.com/en-us/microsoft-365/admin/manage/manage-copilot-agents-integrated-apps)
+- [Agents admin guide for Microsoft 365](https://learn.microsoft.com/en-us/microsoft-365/copilot/agent-essentials/m365-agents-admin-guide) - the Copilot Control System settings and the admin roles that reach them
+- [Secure and govern Microsoft 365 Copilot agents](https://learn.microsoft.com/en-us/purview/deploymentmodels/depmod-sc-agents-deployment) - Purview's four-step deployment model
+- [DLP for Microsoft 365 Copilot](https://learn.microsoft.com/en-us/purview/dlp-microsoft365-copilot-location-learn-about) - restricting what an agent may process
+- [Purview data security and compliance for Microsoft 365 Copilot](https://learn.microsoft.com/en-us/purview/ai-m365-copilot)
+- [Licensing and cost considerations for Copilot extensibility](https://learn.microsoft.com/en-us/microsoft-365/copilot/extensibility/cost-considerations)
 
 **Libre DevOps**
 
