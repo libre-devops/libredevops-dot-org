@@ -865,7 +865,254 @@ For long-running operations (batch processing, large KQL result sets), use the [
 
 ## Terraform
 
+### The authoring model, decided first
+
+Before hosting model, before modules, decide **how the workflow definition itself is authored**. Two paths exist and they are not mix-and-match within one workflow.
+
+| | **Whole-definition (azapi)** | **Per-resource (azurerm)** |
+|:--|:--|:--|
+| The definition is | one JSON document, deployed verbatim in a single PUT | assembled from `azurerm_logic_app_trigger_*` and `azurerm_logic_app_action_*` resources |
+| Ordering comes from | `runAfter` inside the definition, and nothing else | `runAfter` **and** a second Terraform dependency graph across resources, kept in lockstep by hand |
+| A portal export | is the artefact, pasted in and tokenised | has to be taken apart into resources |
+| Drift review is | a JSON diff against a fresh export | archaeology across four resources per playbook |
+| Terraform-owned values arrive by | `templatefile` tokens and typed workflow parameters | HCL attributes on each resource |
+
+**The whole-definition path is the standard.** Logic Apps are authored in a designer by people who are not necessarily Terraform authors, and the per-resource split throws away the one artefact that designer produces. It also creates a second ordering graph that can disagree with `runAfter`, and a Consumption trigger PATCHed individually out of a live definition can hit `CannotDisableTriggerConcurrency`, which a whole-workflow PUT cannot.
+
+Use the per-resource path only where a workflow is genuinely built in HCL and never opened in the designer, or where an existing estate already uses it and converting is not worth the churn. Both are documented below; the per-resource sections are the alternative, not the default.
+
+> **Rule:** One workflow, one authoring model. Never split a definition so that some actions are resources and the rest are JSON. The two ordering graphs will disagree and the failure surfaces at run time, not at apply.
+
+---
+
+### Whole-definition workflows with azapi
+
+The module is [`terraform-azapi-logic-app-workflow`](https://github.com/libre-devops/terraform-azapi-logic-app-workflow). It deploys a Consumption workflow whole: one PUT carries the definition, the typed parameter values, the generated `$connections` parameter and the identity, so **the authored artefact is the deployed artefact**.
+
+> **Not yet on the Terraform Registry.** The module is released on GitHub (4.4.0) but `libre-devops/logic-app-workflow/azapi` does not resolve on `registry.terraform.io` today. Until it is published, source it by tag:
+>
+> ```hcl
+> source = "git::https://github.com/libre-devops/terraform-azapi-logic-app-workflow.git?ref=4.4.0"
+> ```
+>
+> Every example below shows the registry form, which is what to use the moment it is published.
+
+#### The round trip
+
+This is the whole method, and it is deliberately short:
+
+1. **Build it in the designer.** That is what the designer is good at, and what the people who own the playbook logic can actually use.
+2. **Open the code view and copy the whole thing.** Do not reshape it.
+3. **Paste it into `templates/<workflow-name>.json.tftpl`.**
+4. **Ctrl+F the values Terraform owns into `${tokens}`.** Nothing else changes.
+5. **Plan.** The guard rails below fail the plan rather than the apply.
+
+Any of the three shapes Azure hands you pastes straight in, because the module unwraps the outer two:
+
+| Copied from | Shape |
+|:--|:--|
+| Designer, Logic app code view | `{"definition": {...}, "parameters": {...}}` |
+| `az rest`, `az logic workflow show`, Export template | `{"properties": {"definition": {...}, ...}, "id": ..., "name": ...}` |
+| Another template in this shape | the bare definition, `{"$schema": ..., "triggers": ..., "actions": ...}` |
+
+A workflow definition has no top-level `definition` or `properties` key of its own, so the unwrap is unambiguous. Portal read-back fields such as `evaluatedRecurrence` on a Recurrence trigger survive the round trip and deploy as pasted, so there is nothing to hand-strip before committing.
+
+> **Rule:** The committed template must diff cleanly against a fresh portal export. That property is the entire point: it makes drift review a JSON diff, and it proves a refactor changed nothing by producing a byte-identical render.
+
+#### The template file and the token contract
+
+Layout is one template per workflow, named after it, beside the calling configuration:
+
+```
+.
+├── main.tf
+├── variables.tf
+└── templates/
+    ├── incident-ack.json.tftpl
+    └── sentinel-enrich-notify.json.tftpl
+```
+
+`.json.tftpl` is the extension: `.json` so editors and linters treat it as JSON, `.tftpl` so it is obviously a Terraform template and not a deployable artefact on its own.
+
+Inside, the file is the export verbatim except for the tokens:
+
+```json
+{
+    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {},
+    "triggers": {
+        "Recurrence_daily": {
+            "type": "Recurrence",
+            "recurrence": { "frequency": "Day", "interval": 1 }
+        }
+    },
+    "actions": {
+        "Compose_-_Say_the_greeting": {
+            "type": "Compose",
+            "inputs": "${greeting}",
+            "runAfter": {}
+        }
+    },
+    "outputs": {}
+}
+```
+
+```hcl
+definition = templatefile("${path.module}/templates/daily-greeting.json.tftpl", {
+  greeting = "hello from ${local.logic_name}"
+})
+```
+
+**Workflow Definition Language does not collide with Terraform's template syntax.** WDL interpolates with `@{...}` and calls functions as `@parameters('x')` or `@triggerBody()`, none of which Terraform touches. That is what makes pasting an export safe.
+
+Two characters do collide, and both have escapes:
+
+| In the definition | Write | Because |
+|:--|:--|:--|
+| a literal `${` | `$${` | `${` opens a Terraform interpolation |
+| a literal `%{` | `%%{` | `%{` opens a Terraform directive such as `%{ if ... }` |
+
+These turn up in Compose actions carrying shell, regex or another system's template text. If a plan fails with a template parse error inside a definition, this is almost always why.
+
+**What becomes a token, and what does not:**
+
+- **Tokenise** what Terraform genuinely owns and the designer cannot know: resource ids, subscription and tenant ids, workspace names, environment-specific endpoints, anything derived from a `local` or another module's output.
+- **Do not tokenise** anything the designer round-trips. Every token is a place the committed template stops matching a fresh export, so each one costs you a little of the diff property that justifies this path.
+- **Do not tokenise a value the workflow should expose at run time.** Use a typed workflow parameter instead (below). A token is substituted at plan time and vanishes; a parameter is visible in the portal, documented, and changeable without a redeploy of the definition.
+
+> **Rule:** Prefer a typed workflow parameter over a template token whenever the value is one an operator might reasonably want to see or change. Reserve tokens for values that are structurally Terraform's, such as ids.
+
+Note the contrast with the per-resource path: there, a definition fragment has to be re-wrapped as `jsonencode(merge(jsondecode(templatefile(...)), { runAfter = {} }))` to avoid double-nesting `actions.actions`. Here the module takes the rendered string and decodes it itself, so `templatefile(...)` goes straight into `definition` with nothing wrapped around it.
+
+#### The module call
+
+```hcl
+# terraform.tf
+terraform {
+  required_providers {
+    azapi = {
+      source  = "azure/azapi"
+      version = ">= 2.0.0, < 3.0.0"
+    }
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = ">= 4.0.0, < 5.0.0"
+    }
+  }
+}
+
+# main.tf
+module "playbooks" {
+  source  = "libre-devops/logic-app-workflow/azapi"
+  version = "~> 4.0"
+
+  resource_group_id = module.rg.ids["rg-ldo-uks-prd-001"]
+  location          = var.location
+  tags              = module.tags.tags
+
+  # One diagnostics default for the whole call, overridable per workflow.
+  diagnostics = {
+    log_analytics_workspace_id = module.law.workspace_ids["log-ldo-uks-prd-001"]
+  }
+
+  # Connections every workflow in the call inherits (opt out per workflow with
+  # use_shared_connections = false). Most playbook estates share the same few.
+  shared_connections = {
+    "azuresentinel" = {
+      connection_id         = azapi_resource.sentinel_connection.id
+      connection_name       = local.conn_name
+      managed_api_id        = data.azurerm_managed_api.sentinel.id
+      managed_identity_auth = true
+    }
+  }
+
+  workflows = {
+    "logic-ldo-uks-prd-001" = {
+      title = "Sentinel Incident - Enrich and notify Teams on High severity"
+
+      # The whole definition, rendered from the portal export.
+      definition = templatefile("${path.module}/templates/sentinel-enrich-notify.json.tftpl", {
+        workspace_id = module.law.workspace_ids["log-ldo-uks-prd-001"]
+      })
+
+      # VALUES only. The DECLARATIONS stay in the definition, where the portal put them.
+      parameters = {
+        severity_floor     = { type = "String", value = var.severity_floor }
+        notify_webhook_url = { type = "SecureString", value = var.notify_webhook_url }
+      }
+
+      callback_trigger_name = "manual"
+    }
+  }
+}
+```
+
+`title` is required and the module stamps `hidden-title` from it, so an untitled workflow cannot be deployed through this path either (see [Hidden Title tag](#hidden-title-tag)).
+
+#### Parameter values and precedence
+
+The split is the thing to internalise: **declarations live in the definition, values live in Terraform.** The portal exports declarations, so they arrive with the paste and stay put. The module supplies values and validates the two halves against each other at plan time.
+
+From 4.4.0 a pasted wrapper's own `parameters` block is adopted, because a portal export carries a value for every parameter its definition declares. That is what lets an unedited export deploy untouched. Precedence, lowest to highest:
+
+1. a `defaultValue` inside the definition
+2. whatever the pasted wrapper carried
+3. the `parameters` input on the module
+4. the generated `$connections`
+
+So naming a parameter in `parameters` always wins over what arrived with the paste.
+
+Two things are never adopted from a wrapper, each for cause:
+
+- **`$connections`**, because the wrapper's copy names the *source* environment's connection resources. The module generates the whole value from `connections` and `shared_connections`.
+- **`SecureString` and `SecureObject` values**, because a secret typed into the designer would otherwise land in a template file, the plan output and the state body. Secure values stay an explicit input.
+
+#### Connections on Consumption
+
+Consumption accepts **only V1** `Microsoft.Web/connections`, and V1 connections reject access policies. Managed identity auth is therefore two halves that must both be present:
+
+1. `parameterValueType = "Alternative"` on the connection resource itself.
+2. the `connectionProperties.authentication` block inside the `$connections` parameter value, which the module generates from `managed_identity_auth = true`.
+
+Create the connection with `azapi` and look the managed API id up rather than assembling it (see [API connections in Terraform (azapi)](#api-connections-in-terraform-azapi)). There is no access policy resource on Consumption at all; adding one fails with `InvalidApiConnectionAccessPolicy`, and using a V2 connection fails with `WorkflowInvalidApiConnectionV2`.
+
+#### Ordering: deploy tiers
+
+ARM validates a native `Workflow` dispatch action's target at PUT time, so a workflow that invokes a sibling must deploy after it or the apply fails with `NestedWorkflowNotFound`. Sibling references are constructed ARM ids, never this module's outputs, because a module output referenced from a definition in the same call is a dependency cycle.
+
+`deploy_tier` expresses the ordering inside one module call:
+
+| Tier | What sits there |
+|:--|:--|
+| `0` (default) | leaves: workflows nothing else dispatches to |
+| `1` | their dispatchers |
+| `2` | a dispatcher whose own target is a dispatcher, such as a router invoking a hooked handler |
+
+#### Secrets, state and plan hygiene
+
+- **Secure values ride the provider's write-only `sensitive_body`**, so they never appear in plan output or in the state's `body`. Rotation is detected through the provider's private-state hash.
+- **`response_export_values` defaults to a trimmed, stable set.** `["*"]` echoes the whole GET response including volatile fields such as `changedTime`, which turns every plan into a no-op update-in-place on every workflow. Widen it per workflow only when you need more of the response.
+
+#### The guard rails
+
+The module's split between hard failures and warnings is evidence-based: anything the platform **rejects** is a plan-time `validation`, and anything that **deploys cleanly then bites later** is a `check`.
+
+| Fails the plan | Only warns |
+|:--|:--|
+| a parameter declared with no value anywhere | a definition with no trigger |
+| a connection with no `$connections` declaration | a `$connections` declaration nothing is wired to |
+| a `callback_trigger_name` that does not exist | a connection the definition never references |
+| an open authentication policy with no `aud` claim | a trigger with SAS off and no policy |
+| | an empty module call |
+
+The first column matters because the alternative is discovering it at apply. A valueless parameter, for example, is rejected by the engine as `InvalidTemplate` with "the value for the workflow parameter ... is not provided", which is a slow way to learn something a plan can tell you.
+
+---
+
 ### Cookie-cutter vs custom Logic Apps
+
+> This section and the three that follow cover the **per-resource** authoring path and the Standard hosting app. For Consumption workflows the whole-definition path above is the standard; read on if you are hosting a Standard app, or maintaining an estate already built per resource.
 
 Before choosing whether to use a module or write raw resources, decide whether the Logic App is **cookie-cutter** or **custom**. This distinction determines the right Terraform approach.
 
@@ -885,7 +1132,8 @@ The v-next module split follows the hosting models:
 
 | Hosting model | Module | What it manages |
 |:--|:--|:--|
-| Consumption | [`libre-devops/logic-app-workflow/azurerm`](https://registry.terraform.io/modules/libre-devops/logic-app-workflow/azurerm) | The workflow shell: identity, typed parameters, `$connections` generation, diagnostics, access control, `hidden-title`. Triggers and actions stay raw (see below). |
+| Consumption, whole definition **(standard)** | [`terraform-azapi-logic-app-workflow`](https://github.com/libre-devops/terraform-azapi-logic-app-workflow) | The workflow entire: the definition deploys verbatim in one PUT alongside parameter values, generated `$connections`, identity and diagnostics. See [Whole-definition workflows with azapi](#whole-definition-workflows-with-azapi). |
+| Consumption, per resource | [`libre-devops/logic-app-workflow/azurerm`](https://registry.terraform.io/modules/libre-devops/logic-app-workflow/azurerm) | The workflow shell only: identity, typed parameters, `$connections` generation, diagnostics, access control, `hidden-title`. Triggers and actions stay raw (see below). |
 | Standard | [`libre-devops/logic-app-standard/azurerm`](https://registry.terraform.io/modules/libre-devops/logic-app-standard/azurerm) | The Functions-host app: plan, storage, site config, identity, VNet surface. Workflow definitions deploy as `workflow.json` files, not Terraform resources. |
 
 **A custom Logic App has any of the following:**
@@ -1063,6 +1311,8 @@ resource "azurerm_logic_app_standard" "this" {
 ```
 
 ### Workflow trigger standards (azurerm provider)
+
+> **Alternative path.** These standards apply when triggers are `azurerm_logic_app_trigger_*` resources. On the whole-definition path the trigger is part of the pasted definition and these rules describe its JSON rather than its HCL.
 
 Triggers are the entry point for Logic App workflows. They define how and when a workflow executes - whether by external HTTP request, scheduled timer, or incoming message/event. Define triggers as separate Terraform resources using `azurerm_logic_app_trigger_*`.
 
@@ -1383,6 +1633,8 @@ resource "azurerm_logic_app_action_custom" "parse_results" {
 ```
 
 ### Workflow action standards (azurerm provider)
+
+> **Alternative path.** These standards apply when actions are `azurerm_logic_app_action_*` resources. On the whole-definition path the actions arrive with the export and the JSON rules below still describe what good looks like inside it.
 
 Workflow actions are defined as separate Terraform resources using `azurerm_logic_app_action_*`. This approach provides explicit dependency management, clear action ordering, and testability. Actions execute sequentially based on `depends_on` (or conditionally via `runAfter` in the action body).
 
@@ -2211,6 +2463,8 @@ Logic Apps are often the automation that *responds* to incidents (Sentinel playb
 
 ## Workflow Definition Language (WDL) pitfalls
 
+> **The references.** WDL is defined by four documents, and nothing below replaces them: the [language overview](https://learn.microsoft.com/en-us/azure/logic-apps/logic-apps-workflow-definition-language), the [schema reference](https://learn.microsoft.com/en-us/azure/logic-apps/workflow-definition-language-schema), the [triggers and actions reference](https://learn.microsoft.com/en-us/azure/logic-apps/logic-apps-workflow-actions-triggers), and the [expression functions reference](https://learn.microsoft.com/en-us/azure/logic-apps/expression-functions-reference). The machine-readable form is the [2016-06-01 JSON schema](https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json), which is what a definition's `$schema` points at and what an editor validates against. **There is no YAML dialect of WDL**: a workflow definition is JSON, and any YAML in a Logic App repository is build tooling rather than the definition.
+
 The `@{...}` runtime expression layer is not the language `terraform validate` checks, and several of its
 built-in functions behave differently from their equivalents in an ordinary programming language. These
 are the ones that pass validation and then fail (or silently misbehave) at runtime. Every one was learned
@@ -2254,6 +2508,8 @@ building a real Sentinel SOAR suite in Terraform.
   episode and one open ticket per subject.
 
 ### templatefile and IaC traps
+
+> On the [whole-definition path](#the-template-file-and-the-token-contract) the first trap below does not arise: the module decodes the rendered string itself, so `templatefile(...)` is assigned straight to `definition` with no `jsonencode`/`jsondecode` wrapper. The traps here are the per-resource path's.
 
 - **A full-scope template must be the whole body, not the `actions` value** - when a
   `templates/<name>.json.tftpl` renders a complete scope object (`type`, `description`, `actions`), set it
@@ -2303,6 +2559,11 @@ double-nest before a ten-minute apply does.
 - [terraform-azurerm-logic-app-workflow](https://github.com/libre-devops/terraform-azurerm-logic-app-workflow) - the Consumption workflow shell module; its `examples/complete` is the runnable alert-storm playbook this standard describes (typed parameters, shared V1 Sentinel connection, try/catch with explicit retries, storm detection chain)
 - [terraform-azurerm-logic-app-standard](https://github.com/libre-devops/terraform-azurerm-logic-app-standard) - the Standard (single-tenant) app host module
 - [terraform-azurerm-monitor-action-group](https://github.com/libre-devops/terraform-azurerm-monitor-action-group) and [terraform-azurerm-monitor-alerts](https://github.com/libre-devops/terraform-azurerm-monitor-alerts) - the alerting estate that fans into playbooks
+- [Microsoft - Workflow Definition Language overview](https://learn.microsoft.com/en-us/azure/logic-apps/logic-apps-workflow-definition-language) - the language a definition is written in
+- [Microsoft - WDL schema reference](https://learn.microsoft.com/en-us/azure/logic-apps/workflow-definition-language-schema) - the structure: parameters, triggers, actions, outputs
+- [Microsoft - Triggers and actions reference](https://learn.microsoft.com/en-us/azure/logic-apps/logic-apps-workflow-actions-triggers) - every built-in trigger and action type and its inputs
+- [Microsoft - Expression functions reference](https://learn.microsoft.com/en-us/azure/logic-apps/expression-functions-reference) - the `@{...}` function library behind the pitfalls above
+- [WDL JSON schema, 2016-06-01](https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json) - the machine-readable schema a definition's `$schema` points at; point your editor at it to validate a `.json.tftpl` template as you write it
 - [Microsoft - Standard vs Consumption comparison](https://learn.microsoft.com/en-us/azure/logic-apps/single-tenant-overview-compare)
 - [Microsoft - Organizational templates](https://learn.microsoft.com/en-us/azure/logic-apps/create-workflows-from-templates?tabs=consumption) - create and share reusable workflow templates
 - [Azure/LogicAppsTemplates](https://github.com/Azure/LogicAppsTemplates) - official Microsoft repository with pre-built Logic Apps templates for common scenarios
