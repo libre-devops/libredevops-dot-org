@@ -51,6 +51,14 @@ const projects: Project[] = [
         docs: '/docs/documents/cicd-standards',
     },
     {
+        title: 'Copilot Agent Standards',
+        description:
+            'Standards for building agents across the Microsoft Copilot surfaces, which share no manifest format, limits, or distribution path. Covers instructions versus knowledge, grounding and prompt-injection handling, capability scoping, the autonomy ladder, identity and lifecycle governance, testing, and shipping agent definitions as reviewed code - with a complete worked instruction set and sections for Microsoft 365 Copilot, Security Copilot, and GitHub Copilot.',
+        tags: ['Copilot', 'Agents', 'Microsoft 365', 'Governance'],
+        repo: 'https://github.com/libre-devops/copilot-agents',
+        docs: '/docs/documents/copilot-agent-standards',
+    },
+    {
         title: 'Logging Standards',
         description:
             'Enterprise, language-agnostic standards for application logging. Covers structured JSON over stdout, canonical log levels with OpenTelemetry severity mapping, ISO-8601 UTC timestamps, trace correlation, secret and PII hygiene, and exporting to OpenTelemetry, Azure Monitor / Application Insights, and AWS CloudWatch - with reference implementations in PowerShell, Bash, Python, C#, Go, and TypeScript.',
