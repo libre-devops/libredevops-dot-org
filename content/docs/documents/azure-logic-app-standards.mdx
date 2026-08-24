@@ -1110,6 +1110,65 @@ The first column matters because the alternative is discovering it at apply. A v
 
 ---
 
+### Standard workflow content: the same contract, a different artefact
+
+Everything above deploys a **Consumption** workflow, where the definition is an ARM resource. On
+**Standard** it is not. There is no `Microsoft.Web/sites/workflows` type. A Standard workflow is a
+**file** in a package the Functions host loads:
+
+```
+MyStandardApp.zip
+├── incident-ack/
+│   └── workflow.json
+├── sentinel-enrich-notify/
+│   └── workflow.json
+├── connections.json
+└── host.json
+```
+
+Each `workflow.json` wraps the same Workflow Definition Language definition in two properties:
+
+```json
+{
+    "definition": {
+        "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+        "contentVersion": "1.0.0.0",
+        "triggers": { },
+        "actions": { }
+    },
+    "kind": "Stateful"
+}
+```
+
+**The `definition` block is identical to a Consumption definition.** Every WDL rule in this document
+applies to it unchanged, and the
+[annotated schema](https://github.com/libre-devops/terraform-azapi-logic-app-workflow/tree/main/schema)
+validates it, so the editor tooling is the same on both hosting models.
+
+> **Rule:** `kind` is `Stateful` unless you have **measured** that 5 minutes is always enough.
+> Stateless has a 5 minute execution ceiling and no run history, which makes an incident
+> unreconstructable. See [Hosting Model](#hosting-model-consumption-vs-standard).
+
+Three differences that are not cosmetic:
+
+| | Consumption | Standard |
+|:--|:--|:--|
+| The definition is | an ARM resource | a file in a package |
+| Parameter values come from | the ARM body's `parameters` | **app settings**, referenced as `@appsetting('name')` |
+| Connections | V1, access policies **rejected** | V2 in `connections.json`, access policies **required** |
+
+**`connections.json` is where Standard deployments fail.** Visual Studio Code writes managed API
+connections with a `Raw` scheme and an appsetting key. Azure expects
+`"authentication": {"type": "ManagedServiceIdentity"}`. Releasing the local shape unchanged is the
+single most common Standard deployment failure, and the error it produces does not say so.
+
+The `templatefile` token contract is unchanged: author in the designer, export, tokenise the values
+Terraform owns. [`terraform-azapi-logic-app-standard-workflows`](https://github.com/libre-devops/terraform-azapi-logic-app-standard-workflows)
+renders each `workflow.json`, builds the package and deploys it through the ARM ZipDeploy
+extension, so no publishing profile is needed and the package hash appears in the plan.
+
+---
+
 ### Cookie-cutter vs custom Logic Apps
 
 > This section and the three that follow cover the **per-resource** authoring path and the Standard hosting app. For Consumption workflows the whole-definition path above is the standard; read on if you are hosting a Standard app, or maintaining an estate already built per resource.
