@@ -2463,6 +2463,8 @@ Logic Apps are often the automation that *responds* to incidents (Sentinel playb
 
 ## Workflow Definition Language (WDL) pitfalls
 
+> **The references.** WDL is defined by four documents, and nothing below replaces them: the [language overview](https://learn.microsoft.com/en-us/azure/logic-apps/logic-apps-workflow-definition-language), the [schema reference](https://learn.microsoft.com/en-us/azure/logic-apps/workflow-definition-language-schema), the [triggers and actions reference](https://learn.microsoft.com/en-us/azure/logic-apps/logic-apps-workflow-actions-triggers), and the [expression functions reference](https://learn.microsoft.com/en-us/azure/logic-apps/expression-functions-reference). The machine-readable form is the [2016-06-01 JSON schema](https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json), which is what a definition's `$schema` points at and what an editor validates against. **There is no YAML dialect of WDL**: a workflow definition is JSON, and any YAML in a Logic App repository is build tooling rather than the definition.
+
 The `@{...}` runtime expression layer is not the language `terraform validate` checks, and several of its
 built-in functions behave differently from their equivalents in an ordinary programming language. These
 are the ones that pass validation and then fail (or silently misbehave) at runtime. Every one was learned
@@ -2557,6 +2559,11 @@ double-nest before a ten-minute apply does.
 - [terraform-azurerm-logic-app-workflow](https://github.com/libre-devops/terraform-azurerm-logic-app-workflow) - the Consumption workflow shell module; its `examples/complete` is the runnable alert-storm playbook this standard describes (typed parameters, shared V1 Sentinel connection, try/catch with explicit retries, storm detection chain)
 - [terraform-azurerm-logic-app-standard](https://github.com/libre-devops/terraform-azurerm-logic-app-standard) - the Standard (single-tenant) app host module
 - [terraform-azurerm-monitor-action-group](https://github.com/libre-devops/terraform-azurerm-monitor-action-group) and [terraform-azurerm-monitor-alerts](https://github.com/libre-devops/terraform-azurerm-monitor-alerts) - the alerting estate that fans into playbooks
+- [Microsoft - Workflow Definition Language overview](https://learn.microsoft.com/en-us/azure/logic-apps/logic-apps-workflow-definition-language) - the language a definition is written in
+- [Microsoft - WDL schema reference](https://learn.microsoft.com/en-us/azure/logic-apps/workflow-definition-language-schema) - the structure: parameters, triggers, actions, outputs
+- [Microsoft - Triggers and actions reference](https://learn.microsoft.com/en-us/azure/logic-apps/logic-apps-workflow-actions-triggers) - every built-in trigger and action type and its inputs
+- [Microsoft - Expression functions reference](https://learn.microsoft.com/en-us/azure/logic-apps/expression-functions-reference) - the `@{...}` function library behind the pitfalls above
+- [WDL JSON schema, 2016-06-01](https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json) - the machine-readable schema a definition's `$schema` points at; point your editor at it to validate a `.json.tftpl` template as you write it
 - [Microsoft - Standard vs Consumption comparison](https://learn.microsoft.com/en-us/azure/logic-apps/single-tenant-overview-compare)
 - [Microsoft - Organizational templates](https://learn.microsoft.com/en-us/azure/logic-apps/create-workflows-from-templates?tabs=consumption) - create and share reusable workflow templates
 - [Azure/LogicAppsTemplates](https://github.com/Azure/LogicAppsTemplates) - official Microsoft repository with pre-built Logic Apps templates for common scenarios
