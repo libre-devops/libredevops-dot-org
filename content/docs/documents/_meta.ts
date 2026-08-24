@@ -3,6 +3,7 @@ const documents = {
     'azure-naming-convention':   'Azure Naming Convention',
     'bash-standards':            'Bash Standards',
     'cicd-standards':            'CI/CD Standards',
+    'copilot-agent-standards':   'Copilot Agent Standards',
     'logging-standards':         'Logging Standards',
     'powershell-standards':      'PowerShell Standards',
     'python-standards':          'Python Standards',
