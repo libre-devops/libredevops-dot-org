@@ -19,6 +19,12 @@ updates:
       # linting cannot run. Drop this once the plugin supports eslint 10.
       - dependency-name: eslint
         update-types: [version-update:semver-major]
+      # nextra -> @shikijs/twoslash -> twoslash calls TypeScript's JS compiler
+      # API, which the native TS 7 port does not expose, so the build dies in
+      # the MDX loader. twoslash@0.3.9 (latest) pins its peer to
+      # ^5.5.0 || ^6.0.0. Drop this once twoslash supports 7.
+      - dependency-name: typescript
+        update-types: [version-update:semver-major]
     open-pull-requests-limit: 5
     labels:
       - dependencies
